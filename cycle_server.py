@@ -163,8 +163,11 @@ def reset_session_state():
         "solar_pct_per_km_last": [],
         "last_regen_checkpoint": 0,
         "regen_pct_per_km_last": []
-        
+
     })
+
+    # Seed the first checkpoint with the current positive_Wh
+    session_metrics["last_km_checkpoints"] = [session_metrics["positive_Wh"]]
 
     if hasattr(generate_fake_data, "distance"):
         del generate_fake_data.distance
@@ -196,10 +199,13 @@ session_metrics = {
     "regen_Wh": 0,
     "solar_Wh": 0,
     "distance_km": 0,
-    "last_km_checkpoints": [],
+    "last_km_checkpoints": [0],
     "distance_total": 0.0,  # for TEST_MODE only
     "Wh_per_km_last": [],
-    "net_Wh_per_km_last": []
+    "net_Wh_per_km_last": [],
+    "solar_pct_per_km_last": [],
+    "last_regen_checkpoint": 0,
+    "regen_pct_per_km_last": []
 }
 
 
@@ -376,53 +382,45 @@ def update_metrics(data, now=None):
     session_metrics["distance_km"] = distance
     prev_km = int(prev_distance)
     curr_km = int(distance)
-    MAX_HISTORY = 50
+    km_diff = curr_km - prev_km
 
-    # Reconstruct all km checkpoints between prev and curr
-    for km in range(prev_km + 1, curr_km + 1):
-        # Append the current positive_Wh for this new km
-        session_metrics["last_km_checkpoints"].append(session_metrics["positive_Wh"])
+    if km_diff > 0:
+        last_checkpoint = session_metrics["last_km_checkpoints"][-1] if session_metrics["last_km_checkpoints"] else 0
+        delta_total = session_metrics["positive_Wh"] - last_checkpoint if session_metrics["last_km_checkpoints"] else 0
+        delta_per_km = delta_total / km_diff
 
-        # Compute Wh/km using last two checkpoints
-        if len(session_metrics["last_km_checkpoints"]) >= 2:
-            prev_Wh = session_metrics["last_km_checkpoints"][-2]
-            delta_Wh = session_metrics["positive_Wh"] - prev_Wh
-        else:
-            delta_Wh = session_metrics["positive_Wh"]
-
-        session_metrics["Wh_per_km_last"].append(round(delta_Wh, 3))
-
-        # Compute net Wh/km
         km_distance = max(session_metrics["distance_km"], 1e-6)
-        solar_correction = session_metrics["solar_Wh"] / km_distance
-        regen_correction = session_metrics["regen_Wh"] / km_distance
-        net_Wh = delta_Wh - solar_correction - regen_correction
-        session_metrics["net_Wh_per_km_last"].append(round(net_Wh, 3))
+        avg_solar = session_metrics["solar_Wh"] / km_distance
+
+        regen_prev = session_metrics.get("last_regen_checkpoint", 0)
+        regen_total = session_metrics["regen_Wh"] - regen_prev
+        regen_per_km = regen_total / km_diff
+        session_metrics["last_regen_checkpoint"] = session_metrics["regen_Wh"]
+
+        for _ in range(km_diff):
+            last_checkpoint += delta_per_km
+            session_metrics["last_km_checkpoints"].append(last_checkpoint)
+
+            session_metrics["Wh_per_km_last"].append(round(delta_per_km, 3))
+
+            net_Wh = delta_per_km - avg_solar - regen_per_km
+            session_metrics["net_Wh_per_km_last"].append(round(net_Wh, 3))
+
+            if delta_per_km > 0:
+                percent_solar = min(100, max(0, 100 * avg_solar / delta_per_km))
+                percent_regen = min(100, max(0, 100 * regen_per_km / delta_per_km))
+            else:
+                percent_solar = 0
+                percent_regen = 0
+
+            session_metrics.setdefault("solar_pct_per_km_last", []).append(round(percent_solar, 1))
+            session_metrics.setdefault("regen_pct_per_km_last", []).append(round(percent_regen, 1))
 
         # Limit history to 60 km (for 50 km mode + headroom)
         session_metrics["last_km_checkpoints"] = session_metrics["last_km_checkpoints"][-60:]
         session_metrics["Wh_per_km_last"] = session_metrics["Wh_per_km_last"][-60:]
         session_metrics["net_Wh_per_km_last"] = session_metrics["net_Wh_per_km_last"][-60:]
-
-        # Solar %
-        if delta_Wh > 0:
-            avg_solar = session_metrics["solar_Wh"] / km_distance
-            percent_solar = min(100, max(0, 100 * avg_solar / (delta_Wh)))
-        else:
-            percent_solar = 0
-        session_metrics.setdefault("solar_pct_per_km_last", []).append(round(percent_solar, 1))
         session_metrics["solar_pct_per_km_last"] = session_metrics["solar_pct_per_km_last"][-60:]
-
-        # Regen %
-        regen_prev = session_metrics.get("last_regen_checkpoint", 0)
-        regen_delta = session_metrics["regen_Wh"] - regen_prev
-        session_metrics["last_regen_checkpoint"] = session_metrics["regen_Wh"]
-
-        if delta_Wh > 0:
-            percent_regen = min(100, max(0, 100 * regen_delta / delta_Wh))
-        else:
-            percent_regen = 0
-        session_metrics.setdefault("regen_pct_per_km_last", []).append(round(percent_regen, 1))
         session_metrics["regen_pct_per_km_last"] = session_metrics["regen_pct_per_km_last"][-60:]
 
 
