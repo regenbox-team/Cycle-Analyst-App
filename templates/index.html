@@ -85,7 +85,7 @@
     <!-- Solar History Graph -->
     <div class="box solar-graph-box">
     <div class="box-title">Human Power Graph</div>
-      <svg id="solar-history-graph" viewBox="0 0 300 200" preserveAspectRatio="xMidYMid meet"></svg>
+      <canvas id="solar-history-chart"></canvas>
     </div>
 
     <!-- Solar Meter -->
@@ -226,6 +226,9 @@
   </div>
 
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
 </html>
