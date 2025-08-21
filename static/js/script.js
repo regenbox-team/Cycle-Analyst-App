@@ -8,7 +8,7 @@ const END_ANGLE = 126;
 let isLongRange = false;
 
 const solarHistory = [];
-const maxSolarHistoryPoints = 1000;
+let solarChart;
 
 /* === AMP ARC CONFIG === */
 const AMP_MIN = -50;   // A
@@ -305,93 +305,78 @@ function updateTempBar(live, avg, max) {
 
 /* ====== CHARTS ====== */
 function updateSolarHistoryGraph(history) {
-  const svg = document.getElementById("solar-history-graph");
-  if (!svg) return;
+  const ctx = document.getElementById("solar-history-chart")?.getContext("2d");
+  if (!ctx) return;
 
-  svg.innerHTML = '';
-
-  const fullWidth = 300;
-  const fullHeight = 200;
-  const margin = { top: 4, right: 4, bottom: 14, left: 28 };
-  const width = fullWidth - margin.left - margin.right;
-  const height = fullHeight - margin.top - margin.bottom;
-
-  const n = history.length;
-  const maxVal = Math.max(...history.map(v => num(v, 0)), 1);
-
-  const stepX = width / (maxSolarHistoryPoints - 1);
-  const axisColor = "#888";
-
-  const yAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  yAxis.setAttribute("x1", margin.left);
-  yAxis.setAttribute("y1", margin.top);
-  yAxis.setAttribute("x2", margin.left);
-  yAxis.setAttribute("y2", fullHeight - margin.bottom);
-  yAxis.setAttribute("stroke", axisColor);
-  yAxis.setAttribute("stroke-width", "1");
-  svg.appendChild(yAxis);
-
-  for (let val = 0; val <= maxVal; val += 50) {
-    const y = fullHeight - margin.bottom - (val / maxVal) * height;
-
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", margin.left - 3);
-    tick.setAttribute("x2", margin.left);
-    tick.setAttribute("y1", y);
-    tick.setAttribute("y2", y);
-    tick.setAttribute("stroke", axisColor);
-    svg.appendChild(tick);
-
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", margin.left - 5);
-    label.setAttribute("y", y + 3);
-    label.setAttribute("text-anchor", "end");
-    label.setAttribute("font-size", "8");
-    label.setAttribute("fill", "#444");
-    label.textContent = val.toString();
-    svg.appendChild(label);
+  if (!solarChart) {
+    solarChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        datasets: [
+          {
+            label: "Human Power",
+            data: [],
+            borderColor: "orange",
+            backgroundColor: "rgba(255,165,0,0.2)",
+            fill: true,
+            pointRadius: 0,
+            tension: 0.1
+          },
+          {
+            label: "Average",
+            data: [],
+            borderColor: "blue",
+            borderDash: [5, 5],
+            fill: false,
+            pointRadius: 0,
+            tension: 0
+          }
+        ]
+      },
+      options: {
+        animation: false,
+        plugins: {
+          legend: { display: false },
+          zoom: {
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              mode: "x"
+            },
+            pan: { enabled: false }
+          }
+        },
+        scales: {
+          x: {
+            type: "time",
+            time: { unit: "second" }
+          },
+          y: {
+            beginAtZero: true
+          }
+        }
+      }
+    });
   }
 
-  const xAxisY = fullHeight - margin.bottom;
-  const xAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  xAxis.setAttribute("x1", margin.left);
-  xAxis.setAttribute("x2", fullWidth - margin.right);
-  xAxis.setAttribute("y1", xAxisY);
-  xAxis.setAttribute("y2", xAxisY);
-  xAxis.setAttribute("stroke", axisColor);
-  xAxis.setAttribute("stroke-width", "1");
-  svg.appendChild(xAxis);
+  const historyData = history.map(p => ({ x: p.t, y: p.v }));
+  solarChart.data.datasets[0].data = historyData;
 
-  for (let i = 0; i < maxSolarHistoryPoints; i += 20) {
-    const x = margin.left + i * stepX;
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", x);
-    tick.setAttribute("x2", x);
-    tick.setAttribute("y1", xAxisY);
-    tick.setAttribute("y2", xAxisY + 3);
-    tick.setAttribute("stroke", axisColor);
-    svg.appendChild(tick);
+  const avg = history.reduce((sum, p) => sum + p.v, 0) / history.length || 0;
+  if (history.length > 0) {
+    solarChart.data.datasets[1].data = [
+      { x: history[0].t, y: avg },
+      { x: history[history.length - 1].t, y: avg }
+    ];
+  } else {
+    solarChart.data.datasets[1].data = [];
   }
 
-  const path = history.map((val, i) => {
-    const v = num(val, 0);
-    const x = margin.left + i * stepX;
-    const y = fullHeight - margin.bottom - (v / maxVal) * height;
-    return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-  }).join(' ');
+  const now = Date.now();
+  solarChart.options.scales.x.min = now - 60000;
+  solarChart.options.scales.x.max = now;
 
-  const fillPath = `${path} L ${margin.left + Math.max(0, n - 1) * stepX} ${fullHeight - margin.bottom} L ${margin.left} ${fullHeight - margin.bottom} Z`;
-  const fill = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  fill.setAttribute("d", fillPath);
-  fill.setAttribute("fill", "orange");
-  svg.appendChild(fill);
-
-  const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  line.setAttribute("d", path);
-  line.setAttribute("stroke", "orange");
-  line.setAttribute("stroke-width", "2");
-  line.setAttribute("fill", "none");
-  svg.appendChild(line);
+  solarChart.update("none");
 }
 
 function updateWhPerKmChart(totalValues, netValues = [], liveTotal = 0, liveNet = 0, range = 10) {
@@ -768,10 +753,7 @@ async function fetchMetrics() {
       num(json.calculated_CA_values?.solar_power_max, 0)
     );
 
-    solarHistory.push(solarLive);
-    if (solarHistory.length > maxSolarHistoryPoints) {
-      solarHistory.shift();
-    }
+    solarHistory.push({ t: Date.now(), v: solarLive });
     updateSolarHistoryGraph(solarHistory);
 
     const powerLive = num(json.calculated_CA_values?.power_live, 0);

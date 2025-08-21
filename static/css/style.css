@@ -208,7 +208,7 @@ button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
 }
 
 /* Solar Graph */
-#solar-history-graph {
+#solar-history-chart {
   width: 100%;
   height: auto;
   max-width: 100%;
