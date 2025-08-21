@@ -155,8 +155,13 @@ def reset_session_state():
         "solar_Wh": 0,
         "calories_burned": 0,
         "distance_km": 0,
+        "distance_start": None,
         "last_km_checkpoints": [],
         "distance_total": 0.0,
+        "distance_offset": 0.0,
+        "last_raw_distance": None,
+        "ca_reset_detected": False,
+        "ca_reset_prompt": False,
         "ah_offset": 0.0,
         "Wh_per_km_last": [],
         "net_Wh_per_km_last": [],
@@ -199,8 +204,14 @@ session_metrics = {
     "regen_Wh": 0,
     "solar_Wh": 0,
     "distance_km": 0,
+    "distance_start": None,
     "last_km_checkpoints": [0],
     "distance_total": 0.0,  # for TEST_MODE only
+    "distance_offset": 0.0,
+    "last_raw_distance": None,
+    "ca_reset_detected": False,
+    "ca_reset_prompt": False,
+    "ah_offset": 0.0,
     "Wh_per_km_last": [],
     "net_Wh_per_km_last": [],
     "solar_pct_per_km_last": [],
@@ -335,6 +346,8 @@ def update_metrics(data, now=None):
     if now is None:
         now = time.time()
 
+    session_metrics["ca_reset_prompt"] = 53 <= v <= 54.6 and distance > 1
+
     if not hasattr(update_metrics, "last_time"):
         update_metrics.last_time = now
     dt = now - update_metrics.last_time
@@ -377,11 +390,19 @@ def update_metrics(data, now=None):
     session_metrics["calories_burned"] = session_metrics["solar_Wh"] * 1.433
 
 
-    # Distance tracking
+    # Distance tracking (offset to handle CA not reset)
+    if session_metrics.get("last_raw_distance") is not None and distance < session_metrics["last_raw_distance"] - 0.1:
+        session_metrics["ca_reset_detected"] = True
+        session_metrics["distance_offset"] = session_metrics.get("distance_km", 0)
+        session_metrics["distance_start"] = distance
+    if session_metrics.get("distance_start") is None:
+        session_metrics["distance_start"] = distance
+    session_metrics["last_raw_distance"] = distance
+    adjusted_distance = distance - session_metrics["distance_start"] + session_metrics.get("distance_offset", 0)
     prev_distance = session_metrics["distance_km"]
-    session_metrics["distance_km"] = distance
+    session_metrics["distance_km"] = max(adjusted_distance, 0)
     prev_km = int(prev_distance)
-    curr_km = int(distance)
+    curr_km = int(session_metrics["distance_km"])
     km_diff = curr_km - prev_km
 
     if km_diff > 0:
@@ -489,6 +510,8 @@ def get_metrics():
         "raw_CA_values": latest_raw_values,
         "session_id": session_id,
         "user": current_user,
+        "ca_reset_detected": session_metrics.get("ca_reset_detected", False),
+        "ca_reset_prompt": session_metrics.get("ca_reset_prompt", False),
         "calculated_CA_values": {
             "speed_avg": session_metrics["speed_sum"] / max(1, session_metrics["speed_count"]),
             "speed_max": session_metrics["speed_max"],
