@@ -1,0 +1,78 @@
+<!-- templates/edit_session.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Edit Session Logs</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    body { font-size: 0.55rem; background: var(--bg-main); color: var(--text-light); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.55rem; }
+    td, th { border-bottom: 1px solid #666; padding: 0.2rem; }
+    button { font-size: 0.55rem; padding: 0.2rem 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Edit Session</h1>
+
+    <label for="sessionSelect">Select Session:</label>
+  <select id="sessionSelect"></select>
+
+    <div class="card">
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Timestamp</th><th>Raw</th><th>Action</th></tr>
+    </thead>
+    <tbody id="logRows"></tbody>
+  </table>
+    </div>
+
+  <script>
+    async function loadSessions() {
+      const res = await fetch('/sessions');
+      const sessions = await res.json();
+      const sel = document.getElementById("sessionSelect");
+      sessions.forEach(s => {
+        const opt = document.createElement("option");
+        opt.value = s.session;
+        opt.textContent = s.session;
+        sel.appendChild(opt);
+      });
+    }
+
+    async function loadRows(sessionId) {
+      const res = await fetch(`/api/session_rows?session=${sessionId}`);
+      const rows = await res.json();
+      const tbody = document.getElementById("logRows");
+      tbody.innerHTML = "";
+      rows.forEach(row => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${row.id}</td><td>${row.timestamp}</td><td>${row.raw}</td><td><button onclick="deleteRow(${row.id})">Delete</button></td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function deleteRow(id) {
+      if (!confirm("Delete row " + id + "?")) return;
+      await fetch("/api/delete_row", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      const sessionId = document.getElementById("sessionSelect").value;
+      loadRows(sessionId);
+    }
+
+    document.getElementById("sessionSelect").addEventListener("change", e => {
+      loadRows(e.target.value);
+    });
+
+    loadSessions().then(() => {
+      const sel = document.getElementById("sessionSelect");
+      if (sel.options.length) {
+        sel.selectedIndex = 0;
+        loadRows(sel.value);
+      }
+    });
+  </script>
+</body>
+</html>

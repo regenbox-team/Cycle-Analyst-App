@@ -1,0 +1,48 @@
+<!-- summary.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Session Summary</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <h1>Session Summary</h1>
+
+  <div class="card">
+
+    <table>
+      <caption class="session-caption">
+        <strong>Session ID:</strong> {{ session_id }}
+      </caption>
+      <thead>
+        <tr>
+          {% for heading in table[0] %}
+            <th>{{ heading }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in table[1:] %}
+          {% if row[0].startswith("——") %}
+            <tr class="category-row">
+              <td colspan="{{ row|length }}" class="category-cell">{{ row[0] }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              {% for cell in row %}
+                <td>{{ cell }}</td>
+              {% endfor %}
+            </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  </div>
+
+  <a class="dashboard-button" href="/">&larr; New session</a>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Select Session</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+  <div class="section">
+    <h1>Select a Session</h1>
+
+    <div class="card">
+      <form action="/summary" method="get" class="form-group">
+        <label for="session">View Summary for Session:</label>
+        <select name="session" id="session">
+          {% for s in sessions %}
+            <option value="{{ s }}">{{ s }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">View Summary</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="form-group">
+        <label for="session-select">Delete Session(s):</label>
+        <select id="session-select" multiple></select>
+        <button id="delete-session-button">Delete</button>
+      </div>
+    </div>
+
+    <a class="dashboard-button" href="/dashboard">&larr; Back to Dashboard</a>
+  </div>
+  <script src="{{ url_for('static', filename='js/select_session.js') }}"></script>
+
+</body>
+</html>

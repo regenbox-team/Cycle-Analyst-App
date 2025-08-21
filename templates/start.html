@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cycle Analyst Start</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <h1>Cycle Analyst Dashboard</h1>
+
+
+
+  {% if session_active %}
+  <p>Session is currently active.</p>
+  <a href="/dashboard" class="start-button">Go to Session in Progress</a>
+{% else %}
+    <div class="start-options">
+    <form id="start-form" method="POST" action="/start_session">
+      <input type="hidden" name="user" value="JD" />
+      <button class="start-button" type="submit" id="start-btn" disabled>Start Session</button>
+    </form>
+
+    <button  class="start-button" onclick="openResumeModal()">Resume Session</button>
+
+
+    <div id="connection-status-wrapper">
+      <button id="connection-status" disabled>Checking connection...</button>
+      </div>
+
+
+    <form id="test-mode-form" style="margin-top: 1rem;">
+      <label for="test-mode-toggle" style="margin-right: 0.5rem;">Test Mode:</label>
+      <label class="toggle-switch">
+        <input type="checkbox" id="test-mode-toggle" />
+        <span class="slider"></span>
+      </label>
+      <span id="test-mode-status" style="margin-left: 1rem; font-size: 0.9rem;"></span>
+    </form>
+    </div>
+
+  <div id="resume-modal" class="modal">
+    <div class="modal-content">
+      <span class="close" onclick="closeResumeModal()">&times;</span>
+      <h4>Select a session to resume</h4>
+      <form method="POST" action="/resume_session">
+        <select name="session_id" required style="width: 100%; padding: 0.5rem; margin-top: 1rem;">
+          {% for s in recent_sessions %}
+            <option value="{{ s }}">{{ s }}</option>
+          {% endfor %}
+        </select>
+        <br><br>
+        <button class="dashboard-button" type="submit">Resume</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+
+
+
+
+
+
+
+  <a class="dashboard-button" href="/live_logs">🔍 View Live Logs</a>
+  <a class="dashboard-button" href="/select_session">View Session Summaries</a>
+  <a class="dashboard-button" href="/edit_session">Edit Logs</a>
+
+
+
+  <script src="{{ url_for('static', filename='js/start.js') }}"></script>
+</body>
+</html>

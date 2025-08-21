@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cycle Analyst</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+  <header class="title-header">
+    <div class="main-title">Cycle Analyst Dashboard</div>
+  </header>
+
+  <header class="main-header">
+  <div class="header-info">
+    <button id="switch-user-button">User: JD</button>
+    <button id="mode-button" class="flag-pill">—</button>
+    <button id="end-button">End Session</button>
+  </div>
+  </header>
+
+  <div class="grid-container">
+
+    <!-- Ah Remaining Bar -->
+    <div class="box bar-box"> 
+      <div class="box-title">Battery</div>
+        <div class="bar-content">
+          <div class="bar-track">
+            <div class="bar-fill" id="ah-bar"></div>
+          </div>
+        
+            <div class="bar-value" id="ah-bar-value">0 Ah</div>
+            <div class="bar-voltage" id="ah-voltage-value">0.0 V</div>
+          
+        </div>
+    </div>
+
+
+    <!-- Speedometer -->
+    <div class="box speed-box">
+      <div class="box-title">Speed</div>
+      <svg class="speedometer" viewBox="0 0 200 200">
+        <path id="speed-bg" fill="none" stroke="#ccc" stroke-width="18" stroke-linecap="round"/>
+        <path id="speed-arc" fill="none" stroke="orange" stroke-width="18" stroke-linecap="round"/>
+        <line id="max-speed-line" x1="100" y1="30" x2="100" y2="10" stroke="red" stroke-width="2" />
+        <line id="avg-speed-line" x1="100" y1="30" x2="100" y2="10" stroke="blue" stroke-width="2" />
+        <g id="speed-ticks"></g>
+        <text x="100" y="105" text-anchor="middle" fill="#000">
+          <tspan id="speed-number" class="tspan-number">0</tspan>
+          <tspan id="speed-unit" class="tspan-unit" dx="4">km/h</tspan>
+        </text>
+      </svg>
+    </div>
+
+    <!-- Power Meter -->
+    <div class="box power-box">
+      <div class="box-title">Power</div>
+      <svg class="power-meter" viewBox="0 0 200 200">
+        <path id="power-bg" fill="none" stroke="#ccc" stroke-width="18" stroke-linecap="round"/>
+        <path id="power-arc" fill="none" stroke="orange" stroke-width="18" stroke-linecap="round"/>
+
+        <path id="amp-arc" fill="none" stroke="#ff6600"  stroke-width="10" stroke-linecap="round" opacity="0.5"/>
+
+              
+              
+        <line id="avg-power-line" x1="100" y1="30" x2="100" y2="10" stroke="blue" stroke-width="2"/>
+        <line id="max-power-line" x1="100" y1="30" x2="100" y2="10" stroke="red" stroke-width="2"/>
+        <g id="power-ticks"></g>
+        <text x="100" y="105" text-anchor="middle" fill="#000">
+          <tspan id="power-number" class="tspan-number">0</tspan>
+          <tspan id="power-unit" class="tspan-unit" dx="4">W</tspan>
+        </text>
+        <text x="100" y="135" text-anchor="middle" fill="#000">
+          <tspan id="amp-number" class="tspan-number-s">0</tspan>
+          <tspan id="amp-unit" class="tspan-unit" dx="4">A</tspan>
+        </text>
+      </svg>
+ 
+      <svg id="temp-bar" class="temp-bar" viewBox="0 0 140 10" preserveAspectRatio="none"></svg>
+
+      
+    </div>
+
+    <!-- Solar History Graph -->
+    <div class="box solar-graph-box">
+    <div class="box-title">Human Power Graph</div>
+      <svg id="solar-history-graph" viewBox="0 0 300 200" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+
+    <!-- Solar Meter -->
+    <div class="box solar-box">
+    <div class="box-title">Human Power</div>
+      <svg class="solar-meter" viewBox="0 0 200 200">
+        <path id="solar-bg" fill="none" stroke="#ccc" stroke-width="18" stroke-linecap="round"/>
+        <path id="solar-arc" fill="none" stroke="orange" stroke-width="18" stroke-linecap="round"/>
+        <line id="avg-solar-line" x1="100" y1="30" x2="100" y2="15" stroke="blue" stroke-width="2"/>
+        <line id="max-solar-line" x1="100" y1="30" x2="100" y2="15" stroke="red" stroke-width="2"/>
+        <g id="solar-ticks"></g>
+        <text x="100" y="105" text-anchor="middle" fill="#000">
+          <tspan id="solar-number" class="tspan-number">0</tspan>
+          <tspan id="solar-unit" class="tspan-unit" dx="4">W</tspan>
+        </text>
+        <text x="100" y="135" text-anchor="middle">
+          <tspan id="solar-percent" class="tspan-number-s">0</tspan>
+          <tspan id="solar-percent" class="tspan-unit">%</tspan>
+        </text>        
+        <text x="100" y="155" text-anchor="middle" fill="#000">
+          <tspan id="solar-cumulative" class="tspan-number-s">0</tspan>
+          <tspan class="tspan-unit">Wh</tspan>
+        </text>
+        <text x="100" y="175" text-anchor="middle" fill="#000">
+          <tspan id="solar-calories" class="tspan-number-s">0</tspan>
+          <tspan class="tspan-unit">kcal</tspan>
+        </text>
+
+      </svg>
+    </div>
+
+
+    <div id="ah-popup" style="display: none; position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%);
+        background: #fff; padding: 1rem; border: 2px solid black; border-radius: 1rem; z-index: 1000; color: black;">
+      <label for="ah-input">Add Ah:</label>
+      <input id="ah-input" type="number" step="0.1" style="margin: 0.5rem;" />
+      <button onclick="submitAh()">OK</button>
+      <button onclick="hideAhPopup()">Cancel</button>
+    </div>
+
+    <!-- Wh/km Chart + Metrics -->
+    <div class="box chart-box">
+      <div class="box-title">Efficiency</div>
+      <div class="wh-chart-wrapper">
+        <div class="trip-metrics">
+          <div class="trip-metric">
+            <div class="metric-label">Distance</div>
+            <div class="metric-value" id="trip-distance">0.0</div>
+          </div>
+          <div class="trip-metric">
+            <div class="metric-label">Net Wh/km</div>
+            <div class="metric-value" id="trip-net-wh-per-km">0.0</div>
+          </div>
+          <div class="trip-metric">
+            <div class="metric-label">Total Wh/km</div>
+            <div class="metric-value" id="trip-wh-per-km">0.0</div>
+          </div>
+        </div>
+        <div class="trip-metrics">
+          <div class="trip-metric"></div>
+          <div class="trip-metric">
+            <div class="metric-label">Net Wh</div>
+            <div class="metric-value" id="trip-net-wh">0.0</div>
+          </div>
+          <div class="trip-metric">
+            <div class="metric-label">Total Wh</div>
+            <div class="metric-value" id="trip-total-wh">0.0</div>
+          </div>
+        </div>
+
+        <svg id="wh-per-km-chart" viewBox="0 0 400 150" preserveAspectRatio="xMidYMid meet"></svg>
+        <svg id="solar-pct-per-km-chart" viewBox="0 0 400 150" preserveAspectRatio="none" style="display: none;"></svg>
+        <svg id="regen-pct-per-km-chart" viewBox="0 0 400 150" preserveAspectRatio="none" style="display: none;"></svg>
+
+        <div class="barchart-buttons-wrapper">
+          <button id="btn-wh" class="dashboard-button active-chart">Wh/km</button>
+          <button id="btn-solar" class="dashboard-button">Solar%/km</button>
+          <button id="btn-regen" class="dashboard-button">Regen%/km</button>
+          <button id="toggle-range-button" class="dashboard-button">50km</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="box range-box">
+      <div class="box-title">Range</div>
+        <div class="trip-metrics" style="flex-direction: column; gap: 0.2rem; align-items: flex-start;">
+          <div class="trip-metric" style="display: flex; gap: 0.5rem; align-items: baseline;">
+            <span class="metric-label">Range (last km):</span>
+            <span class="metric-value" id="range-last">–</span>
+            <span class="metric-label">km</span>
+          </div>
+          <div class="trip-metric" style="display: flex; gap: 0.5rem; align-items: baseline;">
+            <span class="metric-label">Range (10 km avg):</span>
+            <span class="metric-value" id="range-10">–</span>
+            <span class="metric-label">km</span>
+          </div>
+          <div class="trip-metric" style="display: flex; gap: 0.5rem; align-items: baseline;">
+            <span class="metric-label">Range (session avg):</span>
+            <span class="metric-value" id="range-avg">–</span>
+            <span class="metric-label">km</span>
+          </div>
+        </div>
+
+    </div>
+
+    <div class="box reset-box">
+      <div id="flags-container">
+        <div id="primary-flag-row">
+          <div class="flag-pill" data-flag="1">Legal</div>
+          <div class="flag-pill" data-flag="2">Medium</div>
+          <div class="flag-pill" data-flag="3">Power</div>
+        </div>
+        <div id="other-flags-row">
+          <div class="flag-pill" data-flag="X">Throttle Fault</div>
+          <div class="flag-pill" data-flag="B">Brake</div>
+          <div class="flag-pill" data-flag="A">Amp Limit</div>
+          <div class="flag-pill" data-flag="W">Watt Limit</div>
+          <div class="flag-pill" data-flag="T">Temp Limit</div>
+          <div class="flag-pill" data-flag="V">Low Volts</div>
+          <div class="flag-pill" data-flag="S">Speed Limit</div>
+          <div class="flag-pill" data-flag="s">Low Speed</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="box reset-box">
+        <div id="session-id-display">Session ID: <span id="session-id">...</span></div>
+        <button class="dashboard-button" onclick="showAhPopup()">+ Add Ah</button>
+        <a class="dashboard-button" href="/select_session">View Session Summaries</a>
+    </div>
+  </div>
+
+
+  <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

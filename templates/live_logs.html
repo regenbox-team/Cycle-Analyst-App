@@ -1,0 +1,76 @@
+<!-- templates/live_logs.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Live Logs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .log-table {
+      width: 100%;
+      margin: 1rem auto;
+      background: var(--bg-box);
+      color: var(--text-dark);
+      border-collapse: collapse;
+    }
+    .log-table th, .log-table td {
+      padding: 0.5rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      font-family: monospace;
+      font-size: 0.4rem;
+    }
+    .log-table th {
+      background-color: #ddd;
+    }
+  </style>
+</head>
+<body>
+    <div class="card">
+  <table class="log-table">
+          <caption class="session-caption">
+        <strong>Live Data Logs</strong> 
+      </caption>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Timestamp</th>
+        <th>User</th>
+        <th>Session</th>
+        <th>Raw</th>
+      </tr>
+    </thead>
+    <tbody id="log-body">
+  </table>
+  </div>
+
+  <script>
+    async function loadLogs() {
+      try {
+        const res = await fetch('/logs');
+        const data = await res.json();
+        const tbody = document.getElementById("log-body");
+        tbody.innerHTML = "";
+
+        data.forEach(entry => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${entry.id}</td>
+            <td>${entry.timestamp}</td>
+            <td>${entry.user}</td>
+            <td>${entry.session}</td>
+            <td>${entry.raw}</td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (err) {
+        console.error("Failed to load logs:", err);
+      }
+    }
+
+    setInterval(loadLogs, 1000);
+    loadLogs();
+  </script>
+</body>
+</html>

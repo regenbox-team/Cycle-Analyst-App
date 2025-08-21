@@ -1,0 +1,892 @@
+/* ====== GAUGE GEOMETRY & GLOBALS ====== */
+const RADIUS = 90;
+const CENTER_X = 100;
+const CENTER_Y = 100;
+const START_ANGLE = -126;
+const END_ANGLE = 126;
+
+let isLongRange = false;
+
+const solarHistory = [];
+const maxSolarHistoryPoints = 1000;
+
+/* === AMP ARC CONFIG === */
+const AMP_MIN = -50;   // A
+const AMP_MAX = 100;   // A
+const AMP_ARC_RADIUS = RADIUS; // overlay same radius as power
+
+/* ====== UTILS ====== */
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+// Coerce anything to a finite number (else fallback)
+function num(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function polarToCartesian(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return {
+    x: cx + r * Math.cos(rad),
+    y: cy + r * Math.sin(rad)
+  };
+}
+
+function describeArc(cx, cy, r, startAngle, endAngle, sweep = 0) {
+  const start = polarToCartesian(cx, cy, r, endAngle);
+  const end = polarToCartesian(cx, cy, r, startAngle);
+  const largeArcFlag = Math.abs(endAngle - startAngle) <= 180 ? "0" : "1";
+  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArcFlag} ${sweep} ${end.x} ${end.y}`;
+}
+
+function setArcPath(id, value, min, max) {
+  const percent = clamp((num(value) - min) / (max - min), 0, 1);
+  const angle = START_ANGLE + percent * (END_ANGLE - START_ANGLE);
+  const path = describeArc(CENTER_X, CENTER_Y, RADIUS, START_ANGLE, angle, 0);
+  const arc = document.getElementById(id);
+  if (arc) arc.setAttribute("d", path);
+}
+
+function setPowerArcPath(id, value) {
+  const arc = document.getElementById(id);
+  if (!arc) return;
+
+  const v = num(value, 0);
+  const zeroAngle = -42;
+
+  if (v >= 0) {
+    const clamped = Math.min(v, 4000);
+    const percent = clamped / 4000;
+    const endAngle = zeroAngle + percent * (END_ANGLE - zeroAngle);
+    const path = describeArc(CENTER_X, CENTER_Y, RADIUS, zeroAngle, endAngle, 0); // clockwise
+    arc.setAttribute("d", path);
+  } else {
+    const clamped = Math.max(v, -2000);
+    const percent = clamped / -2000;
+    const endAngle = zeroAngle - percent * (zeroAngle - START_ANGLE);
+    const path = describeArc(CENTER_X, CENTER_Y, RADIUS, zeroAngle, endAngle, 1); // counter-clockwise
+    arc.setAttribute("d", path);
+  }
+}
+
+function setBackgroundArc(id) {
+  const path = describeArc(CENTER_X, CENTER_Y, RADIUS, START_ANGLE, END_ANGLE, 0);
+  const arc = document.getElementById(id);
+  if (arc) arc.setAttribute("d", path);
+}
+
+/* ====== TICKS ====== */
+function drawTicks(
+  containerId,
+  min,
+  max,
+  step,
+  majorStep,
+  radiusOuter,
+  radiusInnerMajor,
+  radiusInnerMinor,
+  startAngle = START_ANGLE,
+  endAngle = END_ANGLE,
+  labelRadiusOffset = -20
+) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  for (let val = min; val <= max; val += step) {
+    const percent = (val - min) / (max - min);
+    const angle = startAngle + percent * (endAngle - startAngle);
+    const isMajor = (val - min) % majorStep === 0;
+
+    const outer = polarToCartesian(CENTER_X, CENTER_Y, radiusOuter, angle);
+    const inner = polarToCartesian(
+      CENTER_X,
+      CENTER_Y,
+      isMajor ? radiusInnerMajor : radiusInnerMinor,
+      angle
+    );
+
+    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tick.setAttribute("x1", outer.x);
+    tick.setAttribute("y1", outer.y);
+    tick.setAttribute("x2", inner.x);
+    tick.setAttribute("y2", inner.y);
+    tick.setAttribute("stroke", "#999");
+    tick.setAttribute("stroke-width", isMajor ? "2" : "1");
+    container.appendChild(tick);
+
+    if (isMajor) {
+      const labelPos = polarToCartesian(
+        CENTER_X,
+        CENTER_Y,
+        radiusOuter + labelRadiusOffset,
+        angle
+      );
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", labelPos.x);
+      label.setAttribute("y", labelPos.y);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("font-size", "8");
+      label.setAttribute("fill", "#333");
+      label.textContent = val.toString();
+      container.appendChild(label);
+    }
+  }
+}
+
+/* ====== UI UPDATERS ====== */
+
+function updateHeaderMode() {
+  // Find active flag in dashboard
+  const activeFlag = document.querySelector('#primary-flag-row .flag-pill.active');
+  const modeButton = document.getElementById('mode-button');
+
+  if (activeFlag && modeButton) {
+    modeButton.textContent = activeFlag.textContent;
+    modeButton.setAttribute('data-flag', activeFlag.getAttribute('data-flag'));
+    // Copy style (color/bg) from active pill
+    modeButton.className = 'flag-pill active';
+    modeButton.dataset.flag = activeFlag.dataset.flag;
+  }
+}
+
+function rotateNeedle(id, value, min, max, labelText = null, labelId = null, color = "#000") {
+  const clamped = clamp(num(value, 0), min, max);
+  const angle = START_ANGLE + ((clamped - min) / (max - min)) * (END_ANGLE - START_ANGLE);
+  const line = document.getElementById(id);
+  if (line) line.setAttribute("transform", `rotate(${angle} ${CENTER_X} ${CENTER_Y})`);
+
+  if (labelText !== null && labelId !== null) {
+    let label = document.getElementById(labelId);
+    if (!label) {
+      label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("id", labelId);
+      label.setAttribute("font-size", "9");
+      label.setAttribute("font-weight", "bold");
+      label.setAttribute("fill", color);
+      label.setAttribute("text-anchor", "middle");
+      const container = line?.parentNode;
+      if (container) container.appendChild(label);
+    }
+    const pos = polarToCartesian(CENTER_X, CENTER_Y, RADIUS + 5, angle);
+    label.setAttribute("x", pos.x.toFixed(1));
+    label.setAttribute("y", pos.y.toFixed(1));
+    label.textContent = labelText;
+  }
+}
+
+function updateSpeedometer(speed, avg, max) {
+  const s = clamp(num(speed, 0), 0, 50);
+  setArcPath("speed-arc", s, 0, 50);
+  rotateNeedle("avg-speed-line", num(avg, 0), 0, 50, num(avg, 0).toFixed(0), "avg-speed-label", "blue");
+  rotateNeedle("max-speed-line", num(max, 0), 0, 50, num(max, 0).toFixed(0), "max-speed-label", "red");
+  document.getElementById("speed-number").textContent = s.toFixed(0);
+  document.getElementById("speed-unit").textContent = "km/h";
+}
+
+function updatePowerMeter(live, avg, max, amps) {
+  const l = clamp(num(live, 0), -2000, 4000);
+  setPowerArcPath("power-arc", l);
+  rotateNeedle("avg-power-line", num(avg, 0), -2000, 4000, num(avg, 0).toFixed(0), "avg-power-label", "blue");
+  rotateNeedle("max-power-line", num(max, 0), -2000, 4000, num(max, 0).toFixed(0), "max-power-label", "red");
+  document.getElementById("power-number").textContent = l.toFixed(0);
+  document.getElementById("power-unit").textContent = "W";
+
+  document.getElementById("amp-number").textContent = num(amps, 0).toFixed(1);
+  document.getElementById("amp-unit").textContent = "A";
+}
+
+// Amp arc centered at 0 A (mirror the power split)
+function updateAmpArc(amps) {
+  const a = clamp(num(amps, 0), AMP_MIN, AMP_MAX);
+  const zeroAngle = -42;
+  let d;
+
+  if (a >= 0) {
+    // 0..AMP_MAX → zeroAngle..END_ANGLE (clockwise)
+    const t = AMP_MAX === 0 ? 0 : a / AMP_MAX;
+    const endAngle = zeroAngle + t * (END_ANGLE - zeroAngle);
+    d = describeArc(CENTER_X, CENTER_Y, AMP_ARC_RADIUS, zeroAngle, endAngle, 0);
+  } else {
+    // 0..AMP_MIN → zeroAngle..START_ANGLE (counter‑clockwise)
+    const t = AMP_MIN === 0 ? 0 : Math.abs(a) / Math.abs(AMP_MIN);
+    const endAngle = zeroAngle - t * (zeroAngle - START_ANGLE);
+    d = describeArc(CENTER_X, CENTER_Y, AMP_ARC_RADIUS, zeroAngle, endAngle, 1);
+  }
+
+  const el = document.getElementById("amp-arc");
+  if (el) el.setAttribute("d", d);
+}
+
+function updateSolarMeter(live, avg, max) {
+  const clampedLive = Math.max(0, num(live, 0));
+  const clampedAvg = Math.max(0, num(avg, 0));
+  const clampedMax = Math.max(0, num(max, 0));
+
+  setArcPath("solar-arc", clampedLive, 0, 300);
+  rotateNeedle("avg-solar-line", clampedAvg, 0, 300, clampedAvg.toFixed(0), "avg-solar-label", "blue");
+  rotateNeedle("max-solar-line", clampedMax, 0, 300, clampedMax.toFixed(0), "max-solar-label", "red");
+  document.getElementById("solar-number").textContent = clampedLive.toFixed(0);
+  document.getElementById("solar-unit").textContent = "W";
+}
+
+function updateTempBar(live, avg, max) {
+  const svg = document.getElementById("temp-bar");
+  if (!svg) return;
+  svg.innerHTML = "";
+
+  const width = 120;
+  const height = 10;
+  const maxTemp = 120;
+
+  live = num(live, 0);
+  avg  = num(avg, 0);
+  max  = num(max, 0);
+
+  const track = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  track.setAttribute("x", 0);
+  track.setAttribute("y", 3);
+  track.setAttribute("width", width);
+  track.setAttribute("height", 4);
+  track.setAttribute("fill", "#ccc");
+  svg.appendChild(track);
+
+  const liveWidth = Math.min(width, (live / maxTemp) * width);
+  const fill = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  fill.setAttribute("x", 0);
+  fill.setAttribute("y", 3);
+  fill.setAttribute("width", liveWidth);
+  fill.setAttribute("height", 4);
+  fill.setAttribute("fill", "orange");
+  svg.appendChild(fill);
+
+  const avgX = (avg / maxTemp) * width;
+  const avgLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  avgLine.setAttribute("x1", avgX);
+  avgLine.setAttribute("x2", avgX);
+  avgLine.setAttribute("y1", 1);
+  avgLine.setAttribute("y2", 9);
+  avgLine.setAttribute("stroke", "blue");
+  avgLine.setAttribute("stroke-width", 1);
+  svg.appendChild(avgLine);
+
+  const maxX = (max / maxTemp) * width;
+  const maxLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  maxLine.setAttribute("x1", maxX);
+  maxLine.setAttribute("x2", maxX);
+  maxLine.setAttribute("y1", 1);
+  maxLine.setAttribute("y2", 9);
+  maxLine.setAttribute("stroke", "red");
+  maxLine.setAttribute("stroke-width", 1);
+  svg.appendChild(maxLine);
+
+  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  label.setAttribute("x", width + 4);
+  label.setAttribute("y", height / 2 + 2);
+  label.setAttribute("fill", "#222");
+  label.setAttribute("font-size", "7");
+  label.setAttribute("font-weight", "bold");
+  label.textContent = `${Math.round(live)}°C`;
+  svg.appendChild(label);
+
+  for (let t = 0; t <= maxTemp; t += 10) {
+    const x = (t / maxTemp) * width;
+    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tick.setAttribute("x1", x);
+    tick.setAttribute("x2", x);
+    tick.setAttribute("y1", 0);
+    tick.setAttribute("y2", 10);
+    tick.setAttribute("stroke", "#888");
+    tick.setAttribute("stroke-width", 0.3);
+    svg.appendChild(tick);
+  }
+}
+
+/* ====== CHARTS ====== */
+function updateSolarHistoryGraph(history) {
+  const svg = document.getElementById("solar-history-graph");
+  if (!svg) return;
+
+  svg.innerHTML = '';
+
+  const fullWidth = 300;
+  const fullHeight = 200;
+  const margin = { top: 4, right: 4, bottom: 14, left: 28 };
+  const width = fullWidth - margin.left - margin.right;
+  const height = fullHeight - margin.top - margin.bottom;
+
+  const n = history.length;
+  const maxVal = Math.max(...history.map(v => num(v, 0)), 1);
+
+  const stepX = width / (maxSolarHistoryPoints - 1);
+  const axisColor = "#888";
+
+  const yAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  yAxis.setAttribute("x1", margin.left);
+  yAxis.setAttribute("y1", margin.top);
+  yAxis.setAttribute("x2", margin.left);
+  yAxis.setAttribute("y2", fullHeight - margin.bottom);
+  yAxis.setAttribute("stroke", axisColor);
+  yAxis.setAttribute("stroke-width", "1");
+  svg.appendChild(yAxis);
+
+  for (let val = 0; val <= maxVal; val += 50) {
+    const y = fullHeight - margin.bottom - (val / maxVal) * height;
+
+    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tick.setAttribute("x1", margin.left - 3);
+    tick.setAttribute("x2", margin.left);
+    tick.setAttribute("y1", y);
+    tick.setAttribute("y2", y);
+    tick.setAttribute("stroke", axisColor);
+    svg.appendChild(tick);
+
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", margin.left - 5);
+    label.setAttribute("y", y + 3);
+    label.setAttribute("text-anchor", "end");
+    label.setAttribute("font-size", "8");
+    label.setAttribute("fill", "#444");
+    label.textContent = val.toString();
+    svg.appendChild(label);
+  }
+
+  const xAxisY = fullHeight - margin.bottom;
+  const xAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  xAxis.setAttribute("x1", margin.left);
+  xAxis.setAttribute("x2", fullWidth - margin.right);
+  xAxis.setAttribute("y1", xAxisY);
+  xAxis.setAttribute("y2", xAxisY);
+  xAxis.setAttribute("stroke", axisColor);
+  xAxis.setAttribute("stroke-width", "1");
+  svg.appendChild(xAxis);
+
+  for (let i = 0; i < maxSolarHistoryPoints; i += 20) {
+    const x = margin.left + i * stepX;
+    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tick.setAttribute("x1", x);
+    tick.setAttribute("x2", x);
+    tick.setAttribute("y1", xAxisY);
+    tick.setAttribute("y2", xAxisY + 3);
+    tick.setAttribute("stroke", axisColor);
+    svg.appendChild(tick);
+  }
+
+  const path = history.map((val, i) => {
+    const v = num(val, 0);
+    const x = margin.left + i * stepX;
+    const y = fullHeight - margin.bottom - (v / maxVal) * height;
+    return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(' ');
+
+  const fillPath = `${path} L ${margin.left + Math.max(0, n - 1) * stepX} ${fullHeight - margin.bottom} L ${margin.left} ${fullHeight - margin.bottom} Z`;
+  const fill = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  fill.setAttribute("d", fillPath);
+  fill.setAttribute("fill", "orange");
+  svg.appendChild(fill);
+
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  line.setAttribute("d", path);
+  line.setAttribute("stroke", "orange");
+  line.setAttribute("stroke-width", "2");
+  line.setAttribute("fill", "none");
+  svg.appendChild(line);
+}
+
+function updateWhPerKmChart(totalValues, netValues = [], liveTotal = 0, liveNet = 0, range = 10) {
+  const chart = document.getElementById("wh-per-km-chart");
+  if (!chart) return;
+
+  chart.innerHTML = '';
+
+  const width = 400;
+  const chartHeight = 150;
+  const barHeight = 120;
+  const labelOffset = 20;
+  const totalBars = range + 1; // history + live
+  const gapRatio = 0.3;
+  const marginLeft = 32;
+  const barAreaWidth = width - marginLeft;
+  const barWidth = barAreaWidth / (totalBars + (totalBars - 1) * gapRatio);
+  const spacing = barWidth * gapRatio;
+
+  const totalVals = (Array.isArray(totalValues) ? totalValues : []).map(v => num(v, 0));
+  const netVals   = (Array.isArray(netValues)   ? netValues   : []).map(v => num(v, 0));
+  liveTotal = num(liveTotal, 0);
+  liveNet   = num(liveNet, 0);
+
+  const count = Math.min(range, totalVals.length);
+  const paddedTotal = new Array(range - count).fill(undefined).concat([...totalVals].slice(-count));
+
+  const countNet = Math.min(range, netVals.length);
+  const paddedNet = new Array(range - countNet).fill(undefined).concat([...netVals].slice(-countNet));
+
+  const values = [...paddedTotal, liveTotal];
+  const netFull = [...paddedNet, liveNet];
+
+  const maxAbsVal = Math.max(
+    ...values.map(v => Math.abs(v ?? 0)),
+    ...netFull.map(v => Math.abs(v ?? 0)),
+    1
+  );
+  const maxDisplayWh = Math.max(1, Math.ceil(maxAbsVal / 10) * 10);
+
+  const zeroY = chartHeight - labelOffset - barHeight * 0.35;
+
+  for (let t = -maxDisplayWh; t <= maxDisplayWh; t += 10) {
+    const y = zeroY - (t / maxDisplayWh) * (barHeight * 0.65);
+
+    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tick.setAttribute("x1", marginLeft);
+    tick.setAttribute("x2", width);
+    tick.setAttribute("y1", y);
+    tick.setAttribute("y2", y);
+    tick.setAttribute("stroke", "#888");
+    tick.setAttribute("stroke-width", "0.5");
+    chart.appendChild(tick);
+
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", marginLeft - 8);
+    label.setAttribute("y", y + 3);
+    label.setAttribute("text-anchor", "end");
+    label.setAttribute("font-size", "8");
+    label.setAttribute("fill", "#333");
+    label.textContent = t.toString();
+    chart.appendChild(label);
+  }
+
+  for (let i = 0; i < totalBars; i++) {
+    const total = values[i];
+    const net = netFull[i];
+
+    const x = marginLeft + i * (barWidth + spacing);
+
+    if (total === undefined) continue;
+
+    const totalSafe = num(total, 0);
+    const netSafe   = num(net, 0);
+
+    const totalH = (Math.abs(totalSafe) / maxDisplayWh) * (barHeight * 0.65);
+    const netH   = (Math.abs(netSafe)   / maxDisplayWh) * (barHeight * 0.65);
+
+    const totalY = totalSafe >= 0 ? zeroY - totalH : zeroY;
+    const netY   = netSafe   >= 0 ? zeroY - netH   : zeroY;
+
+    const totalRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    totalRect.setAttribute("x", x);
+    totalRect.setAttribute("y", totalY);
+    totalRect.setAttribute("width", barWidth);
+    totalRect.setAttribute("height", totalH);
+    totalRect.setAttribute("rx", 2);
+    totalRect.setAttribute("ry", 2);
+    totalRect.setAttribute("fill", "orange");
+    chart.appendChild(totalRect);
+
+    if (net !== undefined) {
+      const netRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      netRect.setAttribute("x", x + barWidth * 0.15);
+      netRect.setAttribute("y", netY);
+      netRect.setAttribute("width", barWidth * 0.7);
+      netRect.setAttribute("height", netH);
+      netRect.setAttribute("rx", 1);
+      netRect.setAttribute("ry", 1);
+      netRect.setAttribute("fill", "#ff6600");
+      chart.appendChild(netRect);
+    }
+
+    if (range === 10) {
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", x + barWidth / 2);
+      label.setAttribute("y", chartHeight - 6);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("font-size", "8");
+      label.setAttribute("font-weight", "bold");
+      label.setAttribute("fill", "black");
+      label.textContent = totalSafe.toFixed(1);
+      chart.appendChild(label);
+    }
+  }
+}
+
+function updateSolarPctChart(pctValues, livePct = 0, range = 10) {
+  const chart = document.getElementById("solar-pct-per-km-chart");
+  if (!chart) return;
+
+  chart.innerHTML = '';
+
+  const width = 400;
+  const height = 150;
+  const marginLeft = 32;
+  const barHeight = 120;
+  const labelOffset = 20;
+  const totalBars = range + 1;
+  const gapRatio = 0.3;
+  const barWidth = (width - marginLeft) / (totalBars + (totalBars - 1) * gapRatio);
+  const spacing = barWidth * gapRatio;
+
+  const vals = (Array.isArray(pctValues) ? pctValues : []).map(v => num(v, 0));
+  livePct = num(livePct, 0);
+
+  const count = Math.min(range, vals.length);
+  const padded = new Array(range - count).fill(undefined).concat([...vals].slice(-count));
+  const values = [...padded, livePct];
+
+  const maxVal = Math.max(...values.map(v => v ?? 0), 1);
+  const maxDisplay = Math.max(1, Math.ceil(maxVal / 10) * 10);
+
+  const zeroY = height - labelOffset;
+
+  for (let t = 0; t <= maxDisplay; t += 10) {
+    const y = zeroY - (t / maxDisplay) * barHeight;
+
+    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tick.setAttribute("x1", marginLeft);
+    tick.setAttribute("x2", width);
+    tick.setAttribute("y1", y);
+    tick.setAttribute("y2", y);
+    tick.setAttribute("stroke", "#888");
+    tick.setAttribute("stroke-width", "0.5");
+    chart.appendChild(tick);
+
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", marginLeft - 6);
+    label.setAttribute("y", y + 3);
+    label.setAttribute("text-anchor", "end");
+    label.setAttribute("font-size", "8");
+    label.setAttribute("fill", "#333");
+    label.textContent = `${t}`;
+    chart.appendChild(label);
+  }
+
+  for (let i = 0; i < totalBars; i++) {
+    const val = values[i];
+    if (val === undefined) continue;
+
+    const v = num(val, 0);
+    const x = marginLeft + i * (barWidth + spacing);
+    const h = (v / maxDisplay) * barHeight;
+    const y = zeroY - h;
+
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", x);
+    rect.setAttribute("y", y);
+    rect.setAttribute("width", barWidth);
+    rect.setAttribute("height", h);
+    rect.setAttribute("rx", 2);
+    rect.setAttribute("ry", 2);
+    rect.setAttribute("fill", i === totalBars - 1 ? "orange" : "#888");
+    chart.appendChild(rect);
+
+    if (range === 10) {
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", x + barWidth / 2);
+      label.setAttribute("y", height - 6);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("font-size", "8");
+      label.setAttribute("font-weight", "bold");
+      label.setAttribute("fill", "black");
+      label.textContent = v.toFixed(1);
+      chart.appendChild(label);
+    }
+  }
+}
+
+function updateRegenPctChart(pctValues, livePct = 0, range = 10) {
+  const chart = document.getElementById("regen-pct-per-km-chart");
+  if (!chart) return;
+
+  chart.innerHTML = '';
+
+  const width = 400;
+  const height = 150;
+  const marginLeft = 32;
+  const barHeight = 120;
+  const labelOffset = 20;
+  const totalBars = range + 1;
+  const gapRatio = 0.3;
+  const barWidth = (width - marginLeft) / (totalBars + (totalBars - 1) * gapRatio);
+  const spacing = barWidth * gapRatio;
+
+  const vals = (Array.isArray(pctValues) ? pctValues : []).map(v => num(v, 0));
+  livePct = Math.max(0, num(livePct, 0));
+
+  const count = Math.min(range, vals.length);
+  const padded = new Array(range - count).fill(undefined).concat([...vals].slice(-count));
+  const values = [...padded, livePct].map(v => num(v, 0));
+
+  const maxVal = Math.max(...values, 1);
+  const maxDisplay = Math.max(1, Math.ceil(maxVal / 10) * 10);
+  const zeroY = height - labelOffset;
+
+  for (let t = 0; t <= maxDisplay; t += 10) {
+    const y = zeroY - (t / maxDisplay) * barHeight;
+    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tick.setAttribute("x1", marginLeft);
+    tick.setAttribute("x2", width);
+    tick.setAttribute("y1", y);
+    tick.setAttribute("y2", y);
+    tick.setAttribute("stroke", "#888");
+    tick.setAttribute("stroke-width", "0.5");
+    chart.appendChild(tick);
+
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", marginLeft - 6);
+    label.setAttribute("y", y + 3);
+    label.setAttribute("text-anchor", "end");
+    label.setAttribute("font-size", "8");
+    label.setAttribute("fill", "#333");
+    label.textContent = `${t}`;
+    chart.appendChild(label);
+  }
+
+  for (let i = 0; i < totalBars; i++) {
+    const v = values[i];
+    if (v === undefined) continue;
+
+    const x = marginLeft + i * (barWidth + spacing);
+    const h = (v / maxDisplay) * barHeight;
+    const y = zeroY - h;
+
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", x);
+    rect.setAttribute("y", y);
+    rect.setAttribute("width", barWidth);
+    rect.setAttribute("height", h);
+    rect.setAttribute("rx", 2);
+    rect.setAttribute("ry", 2);
+    rect.setAttribute("fill", i === totalBars - 1 ? "#0099cc" : "#888");
+    chart.appendChild(rect);
+
+    if (range === 10) {
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", x + barWidth / 2);
+      label.setAttribute("y", height - 6);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("font-size", "8");
+      label.setAttribute("font-weight", "bold");
+      label.setAttribute("fill", "black");
+      label.textContent = v.toFixed(1);
+      chart.appendChild(label);
+    }
+  }
+}
+
+/* ====== FLAGS & MISC ====== */
+
+
+function updateFlagsDisplay(flagString) {
+  const allPills = document.querySelectorAll("#flags-container .flag-pill");
+  const activeSet = new Set((flagString ? String(flagString) : "").split(""));
+  allPills.forEach(pill => {
+    const code = pill.getAttribute("data-flag");
+    pill.classList.toggle("active", activeSet.has(code));
+  });
+}
+
+function showAhPopup() {
+  document.getElementById("ah-popup").style.display = "block";
+}
+function hideAhPopup() {
+  document.getElementById("ah-popup").style.display = "none";
+}
+async function submitAh() {
+  const val = num(document.getElementById("ah-input").value, NaN);
+  if (Number.isNaN(val)) return;
+  await fetch("/add_ah", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ added_ah: val })
+  });
+  hideAhPopup();
+}
+
+async function resetSession() {
+  try {
+    await fetch('/reset', { method: 'POST' });
+    console.log("Session reset.");
+  } catch (err) {
+    console.error("Reset failed:", err);
+  }
+}
+
+/* ====== BACKGROUND ARCS & TICKS INIT ====== */
+["speed-bg", "power-bg", "solar-bg"].forEach(setBackgroundArc);
+drawTicks("speed-ticks", 0, 50, 1, 5, 80, 70, 75);
+drawTicks("power-ticks", -2000, 4000, 100, 500, 80, 70, 75);
+drawTicks("solar-ticks", 0, 300, 5, 50, 80, 70, 75);
+
+/* ====== FETCH + RENDER LOOP ====== */
+async function fetchMetrics() {
+  try {
+    const res = await fetch('/metrics');
+    const json = await res.json();
+
+    // Speed
+    updateSpeedometer(
+      num(json.raw_CA_values?.[3], 0),
+      num(json.calculated_CA_values?.speed_avg, 0),
+      num(json.calculated_CA_values?.speed_max, 0)
+    );
+
+    // Power + Amps
+    const amps = num(json.raw_CA_values?.[2], 0);
+    updatePowerMeter(
+      num(json.calculated_CA_values?.power_live, 0),
+      num(json.calculated_CA_values?.power_avg, 0),
+      num(json.calculated_CA_values?.power_max, 0),
+      amps
+    );
+    updateAmpArc(amps);
+
+    // Temperature
+    updateTempBar(
+      num(json.raw_CA_values?.[5], 0),
+      num(json.calculated_CA_values?.temp_avg, 0),
+      num(json.calculated_CA_values?.temp_max, 0)
+    );
+
+    // Solar (human) power
+    let solarLive = Math.max(0, num(json.calculated_CA_values?.solar_power_live, 0));
+    updateSolarMeter(
+      solarLive,
+      num(json.calculated_CA_values?.solar_power_avg, 0),
+      num(json.calculated_CA_values?.solar_power_max, 0)
+    );
+
+    solarHistory.push(solarLive);
+    if (solarHistory.length > maxSolarHistoryPoints) {
+      solarHistory.shift();
+    }
+    updateSolarHistoryGraph(solarHistory);
+
+    const powerLive = num(json.calculated_CA_values?.power_live, 0);
+    const solarPercent = powerLive > 0 ? (100 * solarLive / powerLive) : 0;
+    document.getElementById("solar-percent").textContent = `${solarPercent.toFixed(1)}`;
+
+    // Battery / Ah
+    const rawAh = num(json.raw_CA_values?.[0], 0);
+    const ahOffset = num(json.calculated_CA_values?.ah_offset, 0);
+    const ahConsumed = rawAh + ahOffset;
+    document.getElementById('ah-bar').style.width = `${(1 - ahConsumed / 64) * 100}%`;
+    document.getElementById('ah-bar-value').innerText = `${ahConsumed.toFixed(1)} Ah`;
+
+    const voltage = num(json.raw_CA_values?.[1], 0);
+    document.getElementById('ah-voltage-value').innerText = `${voltage.toFixed(1)} V`;
+
+    // Solar cumulative & kcal
+    const solarWh = num(json.calculated_CA_values?.solar_Wh, 0);
+    document.getElementById("solar-cumulative").textContent = solarWh.toFixed(1);
+    const calories = num(json.calculated_CA_values?.calories_burned, 0);
+    document.getElementById("solar-calories").textContent = calories.toFixed(0);
+
+    // Trip metrics
+    const distKm = num(json.calculated_CA_values?.distance_km, 0);
+    document.getElementById("trip-distance").innerText = distKm.toFixed(2) + " km";
+    document.getElementById("trip-net-wh-per-km").innerText =
+      num(json.calculated_CA_values?.net_Wh_per_km, 0).toFixed(1);
+    const Wh_pos = num(json.calculated_CA_values?.Wh_pos, 0);
+    document.getElementById("trip-wh-per-km").innerText =
+      (Wh_pos / Math.max(1e-6, distKm || 1)).toFixed(1);
+    document.getElementById("trip-net-wh").innerText =
+      num(json.calculated_CA_values?.net_Wh, 0).toFixed(1);
+    document.getElementById("trip-total-wh").innerText = Wh_pos.toFixed(1);
+
+    // Range block
+    const autonomy = json.calculated_CA_values?.autonomy ?? {};
+    const rangeLast = num(autonomy.range_last_km, 0);
+    document.getElementById("range-last").textContent = rangeLast > 0 ? rangeLast.toFixed(1) : "–";
+    const range10 = num(autonomy.range_10km_avg, 0);
+    document.getElementById("range-10").textContent = range10 > 0 ? range10.toFixed(1) : "–";
+    const rangeAvg = num(autonomy.range_session_avg, 0);
+    document.getElementById("range-avg").textContent = rangeAvg > 0 ? rangeAvg.toFixed(1) : "–";
+
+    // Charts (10 or 50)
+    const range = isLongRange ? 50 : 10;
+    updateWhPerKmChart(
+      json.calculated_CA_values?.Wh_per_km_last ?? [],
+      json.calculated_CA_values?.net_Wh_per_km_last ?? [],
+      num(json.calculated_CA_values?.live_Wh_per_km, 0),
+      num(json.calculated_CA_values?.live_net_Wh_per_km, 0),
+      range
+    );
+    updateSolarPctChart(
+      json.calculated_CA_values?.solar_pct_per_km_last ?? [],
+      solarPercent,
+      range
+    );
+    updateRegenPctChart(
+      json.calculated_CA_values?.regen_pct_per_km_last ?? [],
+      num(json.calculated_CA_values?.["%_regen"], 0),
+      range
+    );
+
+    // Flags, user, session
+    const flags = json.raw_CA_values?.[14] ?? "";
+    updateFlagsDisplay(flags);
+    updateHeaderMode();
+
+    document.getElementById("switch-user-button").textContent = "User: " + (json.user ?? "JD");
+    document.getElementById("session-id").textContent = json.session_id ?? "-";
+
+  } catch (err) {
+    console.error('Error fetching metrics:', err);
+  }
+}
+
+/* ====== EVENT LISTENERS ====== */
+document.getElementById("switch-user-button").addEventListener("click", async () => {
+  try {
+    const res = await fetch("/switch_user", { method: "POST" });
+    const data = await res.json();
+    document.getElementById("switch-user-button").textContent = "User: " + data.user;
+  } catch (err) {
+    console.error("Failed to switch user:", err);
+  }
+});
+
+document.getElementById("toggle-range-button").addEventListener("click", () => {
+  isLongRange = !isLongRange;
+  document.getElementById("toggle-range-button").textContent = isLongRange ? "10km" : "50km";
+});
+
+document.getElementById("end-button").addEventListener("click", async () => {
+  try {
+    const res = await fetch('/end_session', { method: 'POST' });
+    if (res.redirected) {
+      window.location.href = res.url;
+    }
+  } catch (err) {
+    console.error("Failed to end session:", err);
+  }
+});
+
+window.addEventListener("DOMContentLoaded", () => {
+  // Chart picker buttons
+  const chartButtons = {
+    "btn-wh": "wh-per-km-chart",
+    "btn-solar": "solar-pct-per-km-chart",
+    "btn-regen": "regen-pct-per-km-chart"
+  };
+
+  Object.keys(chartButtons).forEach(buttonId => {
+    const btn = document.getElementById(buttonId);
+    const chartId = chartButtons[buttonId];
+    const chartEl = document.getElementById(chartId);
+
+    if (btn && chartEl) {
+      btn.addEventListener("click", () => {
+        Object.entries(chartButtons).forEach(([b, c]) => {
+          document.getElementById(c).style.display = "none";
+          document.getElementById(b).classList.remove("active-chart");
+        });
+
+        chartEl.style.display = "";
+        btn.classList.add("active-chart");
+      });
+    }
+  });
+
+  fetchMetrics();
+  setInterval(fetchMetrics, 100);
+});
