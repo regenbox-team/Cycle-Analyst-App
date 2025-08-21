@@ -126,6 +126,13 @@
       <button onclick="hideAhPopup()">Cancel</button>
     </div>
 
+    <div id="ca-reset-popup" style="display: none; position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%);
+        background: #fff; padding: 1rem; border: 2px solid black; border-radius: 1rem; z-index: 1000; color: black;">
+      <div style="margin-bottom: 0.5rem;">Reset Cycle Analyst for new charge?</div>
+      <button onclick="resetSession(); hideCaResetPopup();" style="margin-right: 0.5rem;">Reset</button>
+      <button onclick="hideCaResetPopup()">Dismiss</button>
+    </div>
+
     <!-- Wh/km Chart + Metrics -->
     <div class="box chart-box">
       <div class="box-title">Efficiency</div>

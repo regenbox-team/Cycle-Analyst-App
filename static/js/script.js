@@ -701,6 +701,14 @@ async function submitAh() {
   hideAhPopup();
 }
 
+function showCaResetPopup() {
+  document.getElementById("ca-reset-popup").style.display = "block";
+}
+
+function hideCaResetPopup() {
+  document.getElementById("ca-reset-popup").style.display = "none";
+}
+
 async function resetSession() {
   try {
     await fetch('/reset', { method: 'POST' });
@@ -721,6 +729,12 @@ async function fetchMetrics() {
   try {
     const res = await fetch('/metrics');
     const json = await res.json();
+
+    if (json.ca_reset_prompt) {
+      showCaResetPopup();
+    } else {
+      hideCaResetPopup();
+    }
 
     // Speed
     updateSpeedometer(
