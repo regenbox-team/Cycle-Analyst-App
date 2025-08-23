@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DB Viewer</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #chart-container { position: relative; height: 100%; }
+    canvas { width: 100% !important; height: 100% !important; }
+    #controls { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(255,255,255,0.8); padding: 5px; border-radius: 4px; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.3/build/global/luxon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+</head>
+<body>
+  <div id="chart-container">
+    <div id="controls">
+      <select id="sessionSelect"></select>
+      <select id="metricSelect" multiple size="5">
+        {% for m in metrics %}
+        <option value="{{m}}" {% if loop.first %}selected{% endif %}>{{m}}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <script>
+    const sessionSelect = document.getElementById('sessionSelect');
+    const metricSelect = document.getElementById('metricSelect');
+    const ctx = document.getElementById('chart').getContext('2d');
+    let chart;
+
+    const COLORS = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#ffff33','#a65628','#f781bf','#999999'];
+
+    async function loadSessions() {
+      const res = await fetch('/sessions');
+      const sessions = await res.json();
+      sessionSelect.innerHTML = sessions.map(s => `<option value="${s}">${s}</option>`).join('');
+    }
+
+    async function updateChart() {
+      const selected = Array.from(metricSelect.selectedOptions).map(o => o.value);
+      if (!selected.length) return;
+      const session = sessionSelect.value;
+      const res = await fetch(`/data?session=${encodeURIComponent(session)}&metrics=${selected.join(',')}`);
+      const data = await res.json();
+      const labels = data.labels.map(ts => Date.parse(ts));
+      const datasets = selected.map((name, idx) => ({
+        label: name,
+        data: labels.map((t,i) => ({x: t, y: data.series[name][i]})),
+        borderColor: COLORS[idx % COLORS.length],
+        fill: false,
+        yAxisID: name,
+        tension: 0.1,
+        pointRadius: 0
+      }));
+      const scales = { x: { type: 'time', time: { tooltipFormat: 'HH:mm:ss' } } };
+      selected.forEach((name, idx) => {
+        const mm = data.minmax[name];
+        scales[name] = {
+          type: 'linear',
+          position: idx % 2 ? 'right' : 'left',
+          min: mm[0],
+          max: mm[1]
+        };
+      });
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales,
+          plugins: {
+            zoom: {
+              zoom: {
+                wheel: { enabled: true },
+                pinch: { enabled: true },
+                mode: 'x'
+              },
+              pan: { enabled: true, mode: 'x' }
+            }
+          }
+        }
+      });
+    }
+
+    loadSessions().then(() => updateChart());
+    sessionSelect.addEventListener('change', updateChart);
+    metricSelect.addEventListener('change', updateChart);
+  </script>
+</body>
+</html>
