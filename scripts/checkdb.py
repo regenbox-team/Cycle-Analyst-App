@@ -135,7 +135,11 @@ def print_csv(results: List[dict], out):
 
 def main():
     p = argparse.ArgumentParser(description='Summarize sessions with ACTIVE recording duration (ignoring long gaps).')
-    p.add_argument('db', nargs='?', default='ride_data.db', help='Path to DB (default: ride_data.db)')
+    try:
+        from app.config import DB_FILE as DEFAULT_DB
+    except Exception:
+        DEFAULT_DB = 'var/ride_data.db'
+    p.add_argument('db', nargs='?', default=DEFAULT_DB, help='Path to DB (default: var/ride_data.db)')
     p.add_argument('--compare', help='Optional: second DB to check sessions/row counts against')
     p.add_argument('--csv', action='store_true', help='Output CSV instead of a table')
     p.add_argument('--max-gap', type=float, default=None,

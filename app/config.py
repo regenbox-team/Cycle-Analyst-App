@@ -33,11 +33,11 @@ VEHICLE_CONFIGS = {
         "test_mode": True,
     },
     "acticycle_live": {
-        "serial_port": "exec:python3 can_bridge.py --dbc Act2.5_database_can_A_V1.5.dbc live --channel can0",
+        "serial_port": "exec:python3 scripts/can_bridge.py --dbc Act2.5_database_can_A_V1.5.dbc live --channel can0",
         "test_mode": False,
     },
     "acticycle_test": {
-        "serial_port": "exec:python3 can_bridge.py --dbc Act2.5_database_can_A_V1.5.dbc csv --csv can_log.csv",
+        "serial_port": "exec:python3 scripts/can_bridge.py --dbc Act2.5_database_can_A_V1.5.dbc csv --csv can_log.csv",
         "test_mode": False,
     },
 }

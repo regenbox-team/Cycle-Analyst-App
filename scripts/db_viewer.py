@@ -1,8 +1,7 @@
 import sqlite3
 import re
 from flask import Flask, render_template, request, jsonify
-
-DB_FILE = "ride_data.db"
+from app.config import DB_FILE
 
 # Mapping of metric names to their index in parsed log lines
 METRICS = [

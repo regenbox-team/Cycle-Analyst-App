@@ -2,9 +2,9 @@ from flask import Flask, request, render_template_string, redirect
 import sqlite3
 from datetime import datetime
 import os
+from app.config import DB_FILE
 
 app = Flask(__name__)
-DB_FILE = "ride_data.db"
 
 # Ensure user_changes table exists
 def init_db():

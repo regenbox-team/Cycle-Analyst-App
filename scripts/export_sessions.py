@@ -1,8 +1,7 @@
 import sqlite3
 import csv
 import os
-
-DB_FILE = "ride_data.db"
+from app.config import DB_FILE
 OUTPUT_DIR = "sessions_csv"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
