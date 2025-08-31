@@ -7,7 +7,7 @@ import serial
 import sqlite3
 from datetime import datetime
 
-from .config import BAUDRATE, DB_FILE
+from .config import BAUDRATE, get_db_file
 from .modes import is_test_mode
 from .metrics import update_metrics
 from . import state
@@ -159,7 +159,7 @@ def read_serial():
             raw_line = " ".join(map(str, data))
             timestamp = datetime.utcnow().isoformat()
             try:
-                with sqlite3.connect(DB_FILE) as conn:
+                with sqlite3.connect(get_db_file()) as conn:
                     conn.execute(
                         "INSERT INTO logs (timestamp, session, raw, user) VALUES (?, ?, ?, ?)",
                         (timestamp, state.session_id, raw_line, state.current_user)

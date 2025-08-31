@@ -1,7 +1,7 @@
 import sqlite3
 import re
 from flask import Flask, render_template, request, jsonify
-from app.config import DB_FILE
+from app.config import get_db_file
 
 # Mapping of metric names to their index in parsed log lines
 METRICS = [
@@ -32,7 +32,7 @@ def index():
 def sessions():
     """Return available session IDs from the database."""
     try:
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
             rows = conn.execute(
                 "SELECT DISTINCT session FROM logs ORDER BY session"
             ).fetchall()
@@ -58,7 +58,7 @@ def data():
     series = {m: [] for m in metrics}
     labels = []
     try:
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
             for ts, raw in conn.execute(query, params):
                 parsed = parse_line(raw)
                 if not parsed:

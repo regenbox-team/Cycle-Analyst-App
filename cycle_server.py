@@ -1,7 +1,7 @@
 from flask import Flask
 import time
 
-from app.config import DB_FILE
+from app.config import get_db_file
 from app.db import init_db
 from app import state
 from app.metrics import update_metrics, reset_session_state, restore_session_metrics
@@ -45,8 +45,10 @@ def create_app(start_reader: bool = False) -> Flask:
 
     # Migrate legacy files, then init DB and restore metrics snapshot
     migrate_legacy_files()
+    # Initialize DB for current mode and restore metrics snapshot from that DB
     init_db()
-    restore_session_metrics(state.session_id, DB_FILE, parse_line)
+    db_path = get_db_file()
+    restore_session_metrics(state.session_id, db_path, parse_line)
 
     # Optional background reader thread
     # Always ensure reader runs when test mode is enabled, even under WSGI.

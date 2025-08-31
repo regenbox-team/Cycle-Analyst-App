@@ -1,8 +1,8 @@
 from __future__ import annotations
 import sqlite3
-from flask import render_template, jsonify, redirect
+from flask import render_template, jsonify, redirect, request
 
-from app.config import DB_FILE
+from app.config import get_db_file
 from app import state
 from app.metrics import update_metrics  # re-export compatibility
 
@@ -81,7 +81,7 @@ def metrics():
 
 def logs():
     try:
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
             rows = conn.execute("SELECT * FROM logs ORDER BY id DESC LIMIT 10").fetchall()
         logs = [{"id": row[0], "timestamp": row[1], "session": row[2], "raw": row[3], "user": row[4]} for row in rows]
         return jsonify(logs)
@@ -90,7 +90,7 @@ def logs():
 
 
 def list_sessions():
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         rows = conn.execute(
             """
             SELECT session, SUM(LENGTH(raw)) as size_bytes
@@ -136,4 +136,3 @@ def register(app):
     app.add_url_rule("/", view_func=root)
     app.add_url_rule("/dashboard", view_func=dashboard)
     app.add_url_rule("/live_logs", view_func=live_logs_page)
-

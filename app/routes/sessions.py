@@ -4,14 +4,14 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import render_template, jsonify, request, redirect
 
-from app.config import DB_FILE, SESSION_METRICS_DIR
+from app.config import get_db_file, SESSION_METRICS_DIR
 from app import state
 from app.reader import parse_line
 from app.metrics import reset_session_state, restore_session_metrics
 
 
 def start_page():
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         rows = conn.execute("SELECT DISTINCT session FROM logs ORDER BY session DESC LIMIT 5").fetchall()
     recent_sessions = [row[0] for row in rows]
     return render_template("start.html", session_active=state.session_active, recent_sessions=recent_sessions)
@@ -41,7 +41,7 @@ def resume_session():
 
     state.save_session_id(sid)
     state.session_id = sid
-    restore_session_metrics(state.session_id, DB_FILE, parse_line)
+    restore_session_metrics(state.session_id, get_db_file(), parse_line)
     state.session_start_time = datetime.now().timestamp()
     state.session_active = True
     state.save_session_active(True)
@@ -60,7 +60,7 @@ def delete_session():
     if not session_to_delete:
         return jsonify({"error": "No session specified"}), 400
 
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file()) as conn:
         conn.execute("DELETE FROM logs WHERE session = ?", (session_to_delete,))
         conn.commit()
 
@@ -76,7 +76,7 @@ def delete_session():
 
 
 def select_session():
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         sessions = conn.execute("SELECT DISTINCT session FROM logs ORDER BY session DESC").fetchall()
     return render_template("select_session.html", sessions=[s[0] for s in sessions])
 
@@ -90,7 +90,7 @@ def session_rows():
     if not session_id:
         return jsonify({"error": "Missing session ID"}), 400
 
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         rows = conn.execute(
             "SELECT id, timestamp, raw FROM logs WHERE session = ? ORDER BY id LIMIT 200",
             (session_id,)
@@ -103,7 +103,7 @@ def delete_row():
     row_id = request.json.get("id")
     if row_id is None:
         return jsonify({"error": "Missing row ID"}), 400
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         conn.execute("DELETE FROM logs WHERE id = ?", (row_id,))
         conn.commit()
     return jsonify({"status": "deleted", "id": row_id})
@@ -117,7 +117,7 @@ def summary():
     import datetime
     from collections import defaultdict
 
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         rows = conn.execute(
             "SELECT user, timestamp, raw FROM logs WHERE session = ? ORDER BY id",
             (session_id,)

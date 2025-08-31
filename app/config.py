@@ -41,3 +41,25 @@ VEHICLE_CONFIGS = {
         "test_mode": False,
     },
 }
+
+# --- DB per mode helpers ---
+def db_filename_for_mode(mode: str) -> str:
+    # Keep names simple and explicit per vehicle mode
+    safe = mode.replace('/', '_')
+    return os.path.join(BASE_DIR, f"ride_data_{safe}.db")
+
+
+def get_db_file(mode: str | None = None) -> str:
+    """Return DB path for the given mode, or current vehicle mode if None.
+    Falls back to legacy DB_FILE if mode resolution fails.
+    """
+    try:
+        if mode is None:
+            # Lazy import to avoid cycles
+            from app import modes as _m
+            mode = getattr(_m, 'vehicle_mode', None)
+        if mode:
+            return db_filename_for_mode(mode)
+    except Exception:
+        pass
+    return DB_FILE

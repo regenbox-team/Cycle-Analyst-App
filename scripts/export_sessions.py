@@ -1,12 +1,12 @@
 import sqlite3
 import csv
 import os
-from app.config import DB_FILE
+from app.config import get_db_file
 OUTPUT_DIR = "sessions_csv"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-conn = sqlite3.connect(DB_FILE)
+conn = sqlite3.connect(get_db_file())
 cur = conn.cursor()
 
 # Get all unique session IDs

@@ -3,6 +3,7 @@ from flask import jsonify, request
 from app.modes import apply_vehicle_mode, VEHICLE_CONFIGS, is_test_mode, test_mode_lock, save_test_mode
 from app import modes, state
 from app.reader import read_serial
+from app.db import init_db
 
 
 def set_vehicle_mode():
@@ -10,6 +11,10 @@ def set_vehicle_mode():
     if mode not in VEHICLE_CONFIGS:
         return jsonify({"error": "invalid mode"}), 400
     apply_vehicle_mode(mode)
+    try:
+        init_db(mode)
+    except Exception:
+        pass
     # If switching to a non-test mode, clear any simulated values immediately
     try:
         cfg = VEHICLE_CONFIGS.get(mode, {})

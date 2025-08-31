@@ -1,9 +1,10 @@
 import sqlite3
-from .config import DB_FILE
+from .config import get_db_file
 
 
-def init_db():
-    with sqlite3.connect(DB_FILE) as conn:
+def init_db(mode: str | None = None):
+    db_path = get_db_file(mode)
+    with sqlite3.connect(db_path) as conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -14,4 +15,3 @@ def init_db():
             )
         ''')
         conn.commit()
-

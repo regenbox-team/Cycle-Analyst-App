@@ -2,13 +2,13 @@ from flask import Flask, request, render_template_string, redirect
 import sqlite3
 from datetime import datetime
 import os
-from app.config import DB_FILE
+from app.config import get_db_file
 
 app = Flask(__name__)
 
 # Ensure user_changes table exists
 def init_db():
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file()) as conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_changes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,13 +21,13 @@ def init_db():
 
 # Utility to get available sessions
 def get_sessions():
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file()) as conn:
         rows = conn.execute("SELECT DISTINCT session FROM logs ORDER BY session DESC").fetchall()
     return [row[0] for row in rows]
 
 # Infer user segments from logs
 def detect_user_segments(session_id):
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file()) as conn:
         rows = conn.execute("""
             SELECT timestamp, user FROM logs
             WHERE session = ?
@@ -52,7 +52,7 @@ def detect_user_segments(session_id):
 
 # Merge overrides if any
 def get_all_user_segments(session_id):
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file()) as conn:
         overrides = conn.execute("""
             SELECT timestamp, user FROM user_changes
             WHERE session = ?
@@ -100,7 +100,7 @@ def add_user_change():
     timestamp = request.form["timestamp"]
     user = request.form["user"]
 
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file()) as conn:
         conn.execute("""
             INSERT INTO user_changes (session, timestamp, user)
             VALUES (?, ?, ?)
@@ -115,7 +115,7 @@ def update_user_change():
     timestamp = request.form["timestamp"]
     new_user = request.form["user"]
 
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file()) as conn:
         conn.execute("""
             UPDATE user_changes SET user = ?
             WHERE session = ? AND timestamp = ?
@@ -129,7 +129,7 @@ def delete_user_change():
     session = request.form["session"]
     timestamp = request.form["timestamp"]
 
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(get_db_file()) as conn:
         conn.execute("""
             DELETE FROM user_changes
             WHERE session = ? AND timestamp = ?
