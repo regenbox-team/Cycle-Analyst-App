@@ -8,12 +8,9 @@ import sqlite3
 from datetime import datetime
 
 from .config import BAUDRATE, DB_FILE
-from .modes import is_test_mode, SERIAL_PORT
+from .modes import is_test_mode
 from .metrics import update_metrics
-from .state import (
-    latest_raw_values, session_active, session_metrics,
-    save_session_metrics_to_file, session_id, current_user
-)
+from . import state
 
 
 def parse_line(line: str):
@@ -30,7 +27,7 @@ def parse_line(line: str):
 
 def generate_fake_data():
     if not hasattr(generate_fake_data, "distance"):
-        generate_fake_data.distance = session_metrics.get("distance_total", 0.0)
+        generate_fake_data.distance = state.session_metrics.get("distance_total", 0.0)
     if not hasattr(generate_fake_data, "ah"):
         generate_fake_data.ah = 0.0
     if not hasattr(generate_fake_data, "amps"):
@@ -67,7 +64,6 @@ def generate_fake_data():
 
 
 def read_serial():
-    global latest_raw_values
     last_db_write_time = time.time()
     last_data_time = time.time()
     serial_port_opened = False
@@ -78,7 +74,15 @@ def read_serial():
     while True:
         time.sleep(0.1)
 
+        # Clear stale values regardless of source errors
+        now_ts = time.time()
+        if now_ts - last_data_time > 3:
+            if state.latest_raw_values is not None:
+                state.latest_raw_values = None
+
         # Reopen if port changed
+        from . import modes as _modes
+        SERIAL_PORT = _modes.SERIAL_PORT
         if SERIAL_PORT != last_port:
             if ser:
                 try:
@@ -97,7 +101,7 @@ def read_serial():
 
         if is_test_mode():
             data = generate_fake_data()
-            latest_raw_values = data
+            state.latest_raw_values = data
             last_data_time = time.time()
         else:
             try:
@@ -132,16 +136,18 @@ def read_serial():
                 if not data or len(data) != 15:
                     continue
 
-                latest_raw_values = data
+                state.latest_raw_values = data
                 last_data_time = time.time()
             except Exception:
-                time.sleep(1)
+                # brief backoff on source error
+                time.sleep(0.3)
                 serial_port_opened = False
                 proc = None
                 ser = None
+                # don't continue immediately; allow stale-clear check next loop
                 continue
 
-        if not session_active:
+        if not state.session_active:
             continue
 
         now = time.time()
@@ -149,18 +155,16 @@ def read_serial():
 
         if now - last_db_write_time >= 1:
             last_db_write_time = now
-            save_session_metrics_to_file()
+            state.save_session_metrics_to_file()
             raw_line = " ".join(map(str, data))
             timestamp = datetime.utcnow().isoformat()
             try:
                 with sqlite3.connect(DB_FILE) as conn:
                     conn.execute(
                         "INSERT INTO logs (timestamp, session, raw, user) VALUES (?, ?, ?, ?)",
-                        (timestamp, session_id, raw_line, current_user)
+                        (timestamp, state.session_id, raw_line, state.current_user)
                     )
             except Exception:
                 pass
 
-        if time.time() - last_data_time > 3:
-            if latest_raw_values is not None:
-                latest_raw_values = None
+        # stale clear already handled at loop start

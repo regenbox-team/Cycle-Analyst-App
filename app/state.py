@@ -12,6 +12,7 @@ session_start_time: float = time.time()
 latest_raw_values = None
 current_user: str = "JD"
 session_active: bool = False
+reader_started: bool = False
 
 # Core session metrics store
 session_metrics = {
@@ -111,4 +112,3 @@ def save_session_metrics_to_file() -> None:
                 json.dump(session_metrics, f)
     except Exception:
         pass
-
