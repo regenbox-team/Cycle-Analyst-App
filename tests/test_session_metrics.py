@@ -1,6 +1,9 @@
 import types
 import sys
 import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Stub out Flask and serial modules for testing without external deps
 flask_stub = types.ModuleType("flask")
