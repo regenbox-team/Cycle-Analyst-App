@@ -9,64 +9,60 @@
 <body>
   <h1>Cycle Analyst Dashboard</h1>
 
+  <div class="section" style="padding-top:0;">
+    <div class="card" style="max-width:720px;">
+      <div class="form-group" style="width:100%;">
+        <div style="display:flex; gap:0.6rem; align-items:center; justify-content:center; flex-wrap:wrap; width:100%;">
+          <label for="mode-select">Vehicle:</label>
+          <select id="mode-select">
+            <option value="supercycle_live">Supercycle Live</option>
+            <option value="supercycle_test">Supercycle Test Mode</option>
+            <option value="acticycle_live">Acticycle Live</option>
+            <option value="acticycle_test">Acticycle Test Mode</option>
+          </select>
 
+          <div id="connection-status-wrapper">
+            <button id="connection-status" disabled>Checking connection...</button>
+          </div>
+        </div>
 
-  {% if session_active %}
-  <p>Session is currently active.</p>
-  <a href="/dashboard" class="start-button">Go to Session in Progress</a>
-{% else %}
-    <div class="start-options">
-    <form id="start-form" method="POST" action="/start_session">
-      <input type="hidden" name="user" value="JD" />
-      <button class="start-button" type="submit" id="start-btn" disabled>Start Session</button>
-    </form>
+        {% if session_active %}
+          <div style="text-align:center; width:100%;">
+            <p>Session is currently active.</p>
+            <a href="/dashboard" class="start-button">Go to Session in Progress</a>
+          </div>
+        {% else %}
+          <form id="start-form" method="POST" action="/start_session" style="width:100%; display:flex; flex-direction:column; align-items:center; gap:0.6rem;">
+            <div style="display:flex; gap:0.8rem; align-items:center; flex-wrap:wrap;">
+              <span style="color:#222;">User:</span>
+              <label><input type="radio" name="user" value="JD" checked> JD</label>
+              <label><input type="radio" name="user" value="LL"> LL</label>
+            </div>
+            <button class="start-button" type="submit" id="start-btn" disabled>Start Session</button>
+          </form>
 
-    <button  class="start-button" onclick="openResumeModal()">Resume Session</button>
-
-
-    <div id="connection-status-wrapper">
-      <button id="connection-status" disabled>Checking connection...</button>
+          <div style="display:flex; gap:0.6rem; justify-content:center; flex-wrap:wrap; width:100%;">
+            <button class="start-button" type="button" onclick="openResumeModal()">Resume Session</button>
+            <a id="link-live-logs" class="dashboard-button" href="/live_logs">🔍 View Live Logs</a>
+            <a id="link-select-session" class="dashboard-button" href="/select_session">View Session Summaries</a>
+            <a id="link-edit-session" class="dashboard-button" href="/edit_session">Edit Logs</a>
+          </div>
+        {% endif %}
+      </div>
     </div>
-
-    <div id="mode-select-wrapper" style="margin-top: 1rem;">
-      <label for="mode-select" style="margin-right: 0.5rem;">Vehicle:</label>
-      <select id="mode-select">
-        <option value="supercycle_live">Supercycle Live</option>
-        <option value="supercycle_test">Supercycle Test Mode</option>
-        <option value="acticycle_live">Acticycle Live</option>
-        <option value="acticycle_test">Acticycle Test Mode</option>
-      </select>
-    </div>
-    </div>
+  </div>
 
   <div id="resume-modal" class="modal">
     <div class="modal-content">
       <span class="close" onclick="closeResumeModal()">&times;</span>
       <h4>Select a session to resume</h4>
       <form method="POST" action="/resume_session">
-        <select name="session_id" required style="width: 100%; padding: 0.5rem; margin-top: 1rem;">
-          {% for s in recent_sessions %}
-            <option value="{{ s }}">{{ s }}</option>
-          {% endfor %}
-        </select>
+        <select id="resume-session-select" name="session_id" required style="width: 100%; padding: 0.5rem; margin-top: 1rem;"></select>
         <br><br>
         <button class="dashboard-button" type="submit">Resume</button>
       </form>
     </div>
   </div>
-{% endif %}
-
-
-
-
-
-
-
-  <a class="dashboard-button" href="/live_logs">🔍 View Live Logs</a>
-  <a class="dashboard-button" href="/select_session">View Session Summaries</a>
-  <a class="dashboard-button" href="/edit_session">Edit Logs</a>
-
-
 
   <script src="{{ url_for('static', filename='js/start.js') }}"></script>
 </body>

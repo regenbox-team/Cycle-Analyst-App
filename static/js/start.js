@@ -35,7 +35,10 @@ async function fetchVehicleMode() {
   try {
     const res = await fetch("/get_vehicle_mode");
     const data = await res.json();
-    document.getElementById("mode-select").value = data.mode;
+    const sel = document.getElementById("mode-select");
+    sel.value = data.mode;
+    updateLinksForMode(data.mode);
+    updateResumeOptions(data.mode);
   } catch (err) {
     console.error("Failed to fetch vehicle mode", err);
   }
@@ -49,6 +52,8 @@ document.getElementById("mode-select").addEventListener("change", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode })
     });
+    updateLinksForMode(mode);
+    await updateResumeOptions(mode);
     checkConnection();
   } catch (err) {
     console.error("Failed to set vehicle mode", err);
@@ -73,3 +78,31 @@ window.addEventListener("DOMContentLoaded", () => {
   checkConnection();
   setInterval(checkConnection, 1000);
 });
+
+function updateLinksForMode(mode) {
+  const qs = `?mode=${encodeURIComponent(mode)}`;
+  const sel = document.getElementById("link-select-session");
+  const edit = document.getElementById("link-edit-session");
+  const logs = document.getElementById("link-live-logs");
+  if (sel) sel.href = "/select_session" + qs;
+  if (edit) edit.href = "/edit_session" + qs;
+  if (logs) logs.href = "/live_logs"; // logs page may not need mode
+}
+
+async function updateResumeOptions(mode) {
+  try {
+    const res = await fetch(`/sessions?mode=${encodeURIComponent(mode)}`, { cache: "no-store" });
+    const sessions = await res.json();
+    const sel = document.getElementById("resume-session-select");
+    if (!sel) return;
+    sel.innerHTML = "";
+    (sessions || []).forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.session || s; // supports both object or plain string
+      opt.textContent = s.session || s;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    console.error('Failed fetching sessions for resume', e);
+  }
+}
