@@ -31,31 +31,27 @@ async function checkConnection() {
   }
 }
 
-async function fetchTestMode() {
+async function fetchVehicleMode() {
   try {
-    const res = await fetch("/get_test_mode");
+    const res = await fetch("/get_vehicle_mode");
     const data = await res.json();
-    const toggle = document.getElementById("test-mode-toggle");
-    toggle.checked = data.test_mode;
-    document.getElementById("test-mode-status").textContent = data.test_mode ? "ON" : "OFF";
+    document.getElementById("mode-select").value = data.mode;
   } catch (err) {
-    console.error("Failed to fetch test mode", err);
+    console.error("Failed to fetch vehicle mode", err);
   }
 }
 
-document.getElementById("test-mode-toggle").addEventListener("change", async (e) => {
-  const enabled = e.target.checked;
+document.getElementById("mode-select").addEventListener("change", async (e) => {
+  const mode = e.target.value;
   try {
-    const res = await fetch("/set_test_mode", {
+    await fetch("/set_vehicle_mode", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled })
+      body: JSON.stringify({ mode })
     });
-    const data = await res.json();
-    document.getElementById("test-mode-status").textContent = data.test_mode ? "ON" : "OFF";
+    checkConnection();
   } catch (err) {
-    console.error("Failed to set test mode", err);
-    alert("Error updating test mode.");
+    console.error("Failed to set vehicle mode", err);
   }
 });
 
@@ -73,7 +69,7 @@ window.onclick = function(event) {
 };
 
 window.addEventListener("DOMContentLoaded", () => {
-  fetchTestMode();
+  fetchVehicleMode();
   checkConnection();
   setInterval(checkConnection, 1000);
 });

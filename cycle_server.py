@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import json
 from collections import defaultdict
 import re
+import shlex, subprocess
 
 
 
@@ -39,6 +40,52 @@ def is_test_mode():
     with test_mode_lock:
         return test_mode_flag
 
+VEHICLE_MODE_FILE = "vehicle_mode.txt"
+
+VEHICLE_CONFIGS = {
+    "supercycle_live": {
+        "serial_port": "/dev/ttyUSB0",
+        "test_mode": False,
+    },
+    "supercycle_test": {
+        "serial_port": "/dev/ttyUSB0",
+        "test_mode": True,
+    },
+    "acticycle_live": {
+        "serial_port": "exec:python3 can_bridge.py --dbc Act2.5_database_can_A_V1.5.dbc live --channel can0",
+        "test_mode": False,
+    },
+    "acticycle_test": {
+        "serial_port": "exec:python3 can_bridge.py --dbc Act2.5_database_can_A_V1.5.dbc csv --csv can_log.csv",
+        "test_mode": False,
+    },
+}
+
+def load_vehicle_mode():
+    if os.path.exists(VEHICLE_MODE_FILE):
+        with open(VEHICLE_MODE_FILE, "r") as f:
+            mode = f.read().strip()
+            if mode in VEHICLE_CONFIGS:
+                return mode
+    return "supercycle_live"
+
+def save_vehicle_mode(mode):
+    with open(VEHICLE_MODE_FILE, "w") as f:
+        f.write(mode)
+
+def apply_vehicle_mode(mode):
+    global SERIAL_PORT, vehicle_mode, test_mode_flag
+    vehicle_mode = mode if mode in VEHICLE_CONFIGS else "supercycle_live"
+    cfg = VEHICLE_CONFIGS[vehicle_mode]
+    SERIAL_PORT = cfg["serial_port"]
+    with test_mode_lock:
+        test_mode_flag = cfg.get("test_mode", False)
+    save_test_mode(test_mode_flag)
+    save_vehicle_mode(vehicle_mode)
+
+vehicle_mode = load_vehicle_mode()
+apply_vehicle_mode(vehicle_mode)
+
 SESSION_FILE = "current_session.txt"
 SESSION_STATE_FILE = "session_state.txt"
 SESSION_METRICS_DIR = "session_metrics"
@@ -46,7 +93,6 @@ os.makedirs(SESSION_METRICS_DIR, exist_ok=True)
 DB_FILE = "ride_data.db"
 USER_FILE = "current_user.txt"
 ah_offset = 0.0
-TEST_MODE = load_test_mode()
 
 
 
@@ -267,12 +313,32 @@ def read_serial():
     last_db_write_time = time.time()
     last_data_time = time.time()
     serial_port_opened = False
+    ser = None
+    proc = None
+    last_port = None
 
     while True:
         time.sleep(0.1)
 
+        # Reconfigure if SERIAL_PORT changed
+        if SERIAL_PORT != last_port:
+            if ser:
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+                ser = None
+            if proc:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                proc = None
+            serial_port_opened = False
+            last_port = SERIAL_PORT
+
         if is_test_mode():
-            # --- TEST MODE ---
+            # --- SUPER CYCLE TEST MODE ---
             if not hasattr(read_serial, "warned") or not read_serial.warned:
                 print("[TEST MODE] Simulating 10Hz data...")
                 read_serial.warned = True
@@ -282,30 +348,49 @@ def read_serial():
             last_data_time = time.time()
 
         else:
-            # --- REAL SERIAL MODE ---
             try:
-                if not hasattr(read_serial, "ser") or not serial_port_opened:
-                    print(f"[INFO] Opening serial port {SERIAL_PORT}...")
-                    read_serial.ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=1)
-                    serial_port_opened = True
-                    print("[INFO] Serial port opened.")
+                if isinstance(SERIAL_PORT, str) and SERIAL_PORT.startswith("exec:"):
+                    if proc is None or proc.poll() is not None:
+                        cmd = SERIAL_PORT[len("exec:"):].strip()
+                        proc = subprocess.Popen(
+                            shlex.split(cmd),
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL,
+                            text=True,
+                            bufsize=1,
+                        )
+                    line = proc.stdout.readline() if proc.stdout else ""
+                    if line == "" and proc.poll() is not None:
+                        proc = None
+                        continue
+                else:
+                    if ser is None or not serial_port_opened:
+                        print(f"[INFO] Opening serial port {SERIAL_PORT}...")
+                        ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=1)
+                        serial_port_opened = True
+                        print("[INFO] Serial port opened.")
+                    raw = ser.readline()
+                    try:
+                        line = raw.decode(errors="ignore")
+                    except Exception:
+                        line = str(raw)
 
-                line = read_serial.ser.readline().decode(errors='ignore').strip()
                 if not line:
                     continue
 
-                data = parse_line(line)
+                data = parse_line(line.strip())
                 if not data or len(data) != 15:
-                    print(f"[WARN] Invalid line received or bad parse: '{line}'")
                     continue
 
                 latest_raw_values = data
                 last_data_time = time.time()
 
-            except serial.SerialException as e:
-                print(f"[ERROR] Serial port error: {e}")
+            except Exception as e:
+                print(f"[ERROR] Serial source error: {e}")
                 time.sleep(1)
                 serial_port_opened = False
+                proc = None
+                ser = None
                 continue
 
         # Skip metric updates/logging if no session
@@ -945,6 +1030,20 @@ def summary():
 @app.route("/live_logs")
 def live_logs_page():
     return render_template("live_logs.html")
+
+
+@app.route("/set_vehicle_mode", methods=["POST"])
+def set_vehicle_mode():
+    mode = request.json.get("mode")
+    if mode not in VEHICLE_CONFIGS:
+        return jsonify({"error": "invalid mode"}), 400
+    apply_vehicle_mode(mode)
+    return jsonify({"mode": mode})
+
+
+@app.route("/get_vehicle_mode")
+def get_vehicle_mode():
+    return jsonify({"mode": vehicle_mode})
 
 
 @app.route("/set_test_mode", methods=["POST"])

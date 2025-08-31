@@ -26,17 +26,17 @@
 
     <div id="connection-status-wrapper">
       <button id="connection-status" disabled>Checking connection...</button>
-      </div>
+    </div>
 
-
-    <form id="test-mode-form" style="margin-top: 1rem;">
-      <label for="test-mode-toggle" style="margin-right: 0.5rem;">Test Mode:</label>
-      <label class="toggle-switch">
-        <input type="checkbox" id="test-mode-toggle" />
-        <span class="slider"></span>
-      </label>
-      <span id="test-mode-status" style="margin-left: 1rem; font-size: 0.9rem;"></span>
-    </form>
+    <div id="mode-select-wrapper" style="margin-top: 1rem;">
+      <label for="mode-select" style="margin-right: 0.5rem;">Vehicle:</label>
+      <select id="mode-select">
+        <option value="supercycle_live">Supercycle Live</option>
+        <option value="supercycle_test">Supercycle Test Mode</option>
+        <option value="acticycle_live">Acticycle Live</option>
+        <option value="acticycle_test">Acticycle Test Mode</option>
+      </select>
+    </div>
     </div>
 
   <div id="resume-modal" class="modal">
