@@ -18,6 +18,8 @@ MAP = {
     "speed":    {"id": 0x610,  "ext": False, "msg": "DISPLAY_Moteur_statut_controleur",    "sig": "Vehicle_speed"},
     "distance": {"id": 0x620,  "ext": False, "msg": "DISPLAY_Odo_trip_controleur",         "sig": "Trip"},
     "mot_temp": {"id": 0x1014, "ext": True,  "msg": "MIC_id20_Status4",                    "sig": "Status_MotorTemp"},
+    # Cockpit (human/pedalling power) → we will map to solar_A (as A = W / V)
+    "ped_power": {"id": 0x158, "ext": False, "msg": "Display_Riding_Power",            "sig": "displayPedallingPower"},
 }
 
 FIELDS = ["ah", "voltage", "current", "speed", "distance", "temp", "cyclist_rpm",
@@ -25,7 +27,24 @@ FIELDS = ["ah", "voltage", "current", "speed", "distance", "temp", "cyclist_rpm"
           "solar_Ah", "solar_A", "flags"]
 
 def load_db(dbc_path):
-    return cantools.database.load_file(dbc_path)
+    """
+    Load one or more DBC files. Supports comma-separated list in --dbc option
+    to combine databases (e.g., Act + Cockpit).
+    """
+    paths = [p.strip() for p in str(dbc_path).split(",") if p and p.strip()]
+    if len(paths) == 1:
+        return cantools.database.load_file(paths[0])
+
+    # Merge multiple DBCs into a single database
+    db = cantools.database.Database()
+    for p in paths:
+        sub = cantools.database.load_file(p)
+        # extend messages/nodes/buses if present
+        db.messages.extend(getattr(sub, "messages", []))
+        db.nodes.extend(getattr(sub, "nodes", []))
+        if hasattr(sub, "buses"):
+            db.buses = getattr(db, "buses", []) + list(getattr(sub, "buses", []))
+    return db
 
 def fmt_line(vals):
     """
@@ -152,6 +171,10 @@ def live_mode(args):
                                     last_vals["distance"]= val; last_seen["distance"]= now
                                 elif field == "mot_temp":
                                     last_vals["temp"]    = val; last_seen["temp"]    = now
+                                elif field == "ped_power":
+                                    # Convert pedalling power (W) into an equivalent current (A) at pack voltage
+                                    v = float(last_vals.get("voltage", 0.0) or 0.0)
+                                    last_vals["solar_A"] = (val / v) if v >= 5.0 else 0.0
                 except Exception:
                     pass
 
@@ -188,7 +211,7 @@ def live_mode(args):
                 "speed": pub_speed,
                 "distance": pub_distance,
                 "temp": pub_temp,
-                "solar_A": 0.0
+                "solar_A": last_vals.get("solar_A", 0.0)
             })
             print(line, flush=True)
 
@@ -246,6 +269,10 @@ def csv_mode(args):
                             last_vals["distance"] = float(decoded[sig])
                         elif field == "mot_temp":
                             last_vals["temp"] = float(decoded[sig])
+                        elif field == "ped_power":
+                            p = float(decoded[sig])
+                            v = float(last_vals.get("voltage", 0.0) or 0.0)
+                            last_vals["solar_A"] = (p / v) if v >= 5.0 else 0.0
 
             # integrate Ah using CSV epoch timing if present
             try:
@@ -268,7 +295,7 @@ def csv_mode(args):
                 "speed": last_vals.get("speed", 0.0),
                 "distance": last_vals.get("distance", 0.0),
                 "temp": last_vals.get("temp", 0.0),
-                "solar_A": 0.0
+                "solar_A": last_vals.get("solar_A", 0.0)
             })
             print(line)
 
@@ -288,4 +315,3 @@ if __name__ == "__main__":
         live_mode(args)
     else:
         csv_mode(args)
-
