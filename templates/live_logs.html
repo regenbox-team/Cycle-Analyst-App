@@ -6,71 +6,88 @@
   <title>Live Logs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-  <style>
-    .log-table {
-      width: 100%;
-      margin: 1rem auto;
-      background: var(--bg-box);
-      color: var(--text-dark);
-      border-collapse: collapse;
-    }
-    .log-table th, .log-table td {
-      padding: 0.5rem;
-      border-bottom: 1px solid var(--border);
-      text-align: left;
-      font-family: monospace;
-      font-size: 0.4rem;
-    }
-    .log-table th {
-      background-color: #ddd;
-    }
-  </style>
 </head>
 <body>
-    <div class="card">
-  <table class="log-table">
-          <caption class="session-caption">
-        <strong>Live Data Logs</strong> 
-      </caption>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Timestamp</th>
-        <th>User</th>
-        <th>Session</th>
-        <th>Raw</th>
-      </tr>
-    </thead>
-    <tbody id="log-body">
-  </table>
+  <h1>Live logs</h1>
+
+  <div class="section section-compact">
+    <div class="card card-wide">
+      <div class="section-title">Live Metrics (/metrics)</div>
+      <div class="two-col">
+        <div>
+          <div class="subtitle muted">Raw Cycle Analyst</div>
+          <div id="raw-list" class="kv"></div>
+        </div>
+        <div>
+          <div class="subtitle muted">Calculated Metrics</div>
+          <div id="calc-list" class="kv"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="card card-wide">
+      <div class="section-title">Decoded Acticycle (from DBC)</div>
+      <div id="acticycle-list" class="kv"></div>
+    </div>
   </div>
 
   <script>
-    async function loadLogs() {
-      try {
-        const res = await fetch('/logs');
-        const data = await res.json();
-        const tbody = document.getElementById("log-body");
-        tbody.innerHTML = "";
+    const rawLabels = [
+      'Ah used',
+      'Voltage (V)',
+      'Current (A)',
+      'Speed (km/h)',
+      'Distance (km)',
+      'Motor Temp (C)',
+      'Cyclist RPM',
+      'unused8',
+      'unused9',
+      'unused10',
+      'unused11',
+      'unused12',
+      'Solar Ah',
+      'Solar A (pedal current)',
+      'Flags',
+    ];
 
-        data.forEach(entry => {
-          const row = document.createElement("tr");
-          row.innerHTML = `
-            <td>${entry.id}</td>
-            <td>${entry.timestamp}</td>
-            <td>${entry.user}</td>
-            <td>${entry.session}</td>
-            <td>${entry.raw}</td>
-          `;
-          tbody.appendChild(row);
-        });
-      } catch (err) {
-        console.error("Failed to load logs:", err);
+    function renderKV(el, obj) {
+      el.innerHTML = '';
+      if (!obj) { el.innerHTML = '<div class="muted">No data</div>'; return; }
+      for (const [k, v] of Object.entries(obj)) {
+        const kEl = document.createElement('div');
+        kEl.className = 'kv-key';
+        kEl.textContent = k;
+        const vEl = document.createElement('div');
+        vEl.className = 'kv-value';
+        vEl.textContent = (typeof v === 'number') ? (Number.isInteger(v) ? v : v.toFixed(3)) : (v ?? '');
+        el.appendChild(kEl);
+        el.appendChild(vEl);
       }
     }
 
-    setInterval(loadLogs, 1000);
-    loadLogs();
+    function toRawMap(list) {
+      if (!Array.isArray(list) || list.length < 15) return null;
+      const out = {};
+      for (let i = 0; i < 15; i++) out[`${i+1}. ${rawLabels[i]}`] = list[i];
+      return out;
+    }
+
+    async function loadMetrics() {
+      try {
+        const res = await fetch('/metrics');
+        const data = await res.json();
+        renderKV(document.getElementById('raw-list'), toRawMap(data.raw_CA_values));
+        renderKV(document.getElementById('calc-list'), data.calculated_CA_values);
+        renderKV(document.getElementById('acticycle-list'), data.decoded_acticycle);
+      } catch (err) {
+        console.error('Failed to load /metrics:', err);
+      }
+    }
+
+    setInterval(loadMetrics, 1000);
+    loadMetrics();
   </script>
 </body>
 </html>

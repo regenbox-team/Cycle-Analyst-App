@@ -34,6 +34,19 @@ def _get_metrics_payload():
         "user": state.current_user,
         "ca_reset_detected": sm.get("ca_reset_detected", False),
         "ca_reset_prompt": sm.get("ca_reset_prompt", False),
+        "decoded_acticycle": (
+            {
+                "voltage_V": state.latest_raw_values[1],
+                "current_A": state.latest_raw_values[2],
+                "speed_kph": state.latest_raw_values[3],
+                "distance_km": state.latest_raw_values[4],
+                "motor_temp_C": state.latest_raw_values[5],
+                "pedal_current_A": state.latest_raw_values[13],
+                "pedal_power_W": state.latest_raw_values[1] * state.latest_raw_values[13] if state.latest_raw_values else 0,
+            }
+            if state.latest_raw_values
+            else None
+        ),
         "calculated_CA_values": {
             "speed_avg": sm["speed_sum"] / max(1, sm["speed_count"]),
             "speed_max": sm["speed_max"],
