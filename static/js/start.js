@@ -31,21 +31,46 @@ async function checkConnection() {
   }
 }
 
-async function fetchVehicleMode() {
-  try {
-    const res = await fetch("/get_vehicle_mode");
-    const data = await res.json();
-    const sel = document.getElementById("mode-select");
-    sel.value = data.mode;
-    updateLinksForMode(data.mode);
-    updateResumeOptions(data.mode);
-  } catch (err) {
-    console.error("Failed to fetch vehicle mode", err);
-  }
+// ===== Vehicle carousel wiring =====
+const VEHICLE_ORDER = [
+  "supercycle_live",
+  "supercycle_test",
+  "acticycle_live",
+  "acticycle_test",
+];
+
+const carouselState = {
+  items: [],
+  track: null,
+  currentIndex: 0,
+  dragging: false,
+  startX: 0,
+};
+
+function wrapIndex(n, len) {
+  return (n % len + len) % len;
 }
 
-document.getElementById("mode-select").addEventListener("change", async (e) => {
-  const mode = e.target.value;
+function applyCarouselClasses() {
+  const n = carouselState.items.length;
+  if (!n) return;
+  const current = wrapIndex(carouselState.currentIndex, n);
+  carouselState.items.forEach((el, i) => {
+    el.classList.remove("center", "near-left", "near-right", "far");
+    const diff = i - current;
+    if (diff === 0) {
+      el.classList.add("center");
+    } else if (diff === -1 || diff === n - 1) {
+      el.classList.add("near-left");
+    } else if (diff === 1 || diff === -(n - 1)) {
+      el.classList.add("near-right");
+    } else {
+      el.classList.add("far");
+    }
+  });
+}
+
+async function setVehicleMode(mode) {
   try {
     await fetch("/set_vehicle_mode", {
       method: "POST",
@@ -58,7 +83,88 @@ document.getElementById("mode-select").addEventListener("change", async (e) => {
   } catch (err) {
     console.error("Failed to set vehicle mode", err);
   }
-});
+}
+
+function selectCarouselIndex(idx, triggerUpdate = true) {
+  const n = carouselState.items.length;
+  if (!n) return;
+  carouselState.currentIndex = wrapIndex(idx, n);
+  applyCarouselClasses();
+  if (triggerUpdate) {
+    const el = carouselState.items[carouselState.currentIndex];
+    const mode = el?.dataset?.mode;
+    if (mode) setVehicleMode(mode);
+  }
+}
+
+function initCarousel() {
+  const track = document.querySelector("#vehicle-carousel .carousel-track");
+  if (!track) return;
+  carouselState.track = track;
+  carouselState.items = Array.from(track.querySelectorAll('.carousel-item'));
+
+  // Click to focus center
+  carouselState.items.forEach((el, i) => {
+    el.addEventListener('click', () => selectCarouselIndex(i, true));
+  });
+
+  // Nav buttons
+  const prevBtn = document.querySelector('#vehicle-carousel .carousel-nav.prev');
+  const nextBtn = document.querySelector('#vehicle-carousel .carousel-nav.next');
+  if (prevBtn) prevBtn.addEventListener('click', () => selectCarouselIndex(carouselState.currentIndex - 1, true));
+  if (nextBtn) nextBtn.addEventListener('click', () => selectCarouselIndex(carouselState.currentIndex + 1, true));
+
+  // Basic swipe support (pointer events)
+  track.addEventListener('pointerdown', (e) => {
+    carouselState.dragging = true;
+    carouselState.startX = e.clientX;
+    if (carouselState.track) carouselState.track.classList.add('dragging');
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!carouselState.dragging || !carouselState.track) return;
+    const dx = e.clientX - carouselState.startX;
+    // Apply a damped translation for a subtle follow effect
+    const eased = Math.max(Math.min(dx, 160), -160);
+    carouselState.track.style.transform = `translateX(${eased}px)`;
+  });
+  window.addEventListener('pointerup', (e) => {
+    if (!carouselState.dragging) return;
+    const dx = e.clientX - carouselState.startX;
+    carouselState.dragging = false;
+    if (carouselState.track) carouselState.track.classList.remove('dragging');
+    const threshold = 40;
+    if (dx > threshold) {
+      selectCarouselIndex(carouselState.currentIndex - 1, true);
+    } else if (dx < -threshold) {
+      selectCarouselIndex(carouselState.currentIndex + 1, true);
+    }
+    // Animate back to center
+    if (carouselState.track) carouselState.track.style.transform = 'translateX(0px)';
+  });
+
+  applyCarouselClasses();
+}
+
+async function fetchVehicleMode() {
+  try {
+    const res = await fetch("/get_vehicle_mode");
+    const data = await res.json();
+    const mode = data.mode;
+    updateLinksForMode(mode);
+    updateResumeOptions(mode);
+
+    // Position carousel to current mode
+    const idx = carouselState.items.findIndex(el => el.dataset.mode === mode);
+    if (idx >= 0) {
+      selectCarouselIndex(idx, false);
+    } else {
+      // fallback to first
+      selectCarouselIndex(0, false);
+    }
+  } catch (err) {
+    console.error("Failed to fetch vehicle mode", err);
+  }
+}
 
 function openResumeModal() {
   document.getElementById("resume-modal").style.display = "block";
@@ -74,6 +180,7 @@ window.onclick = function(event) {
 };
 
 window.addEventListener("DOMContentLoaded", () => {
+  initCarousel();
   fetchVehicleMode();
   checkConnection();
   setInterval(checkConnection, 1000);

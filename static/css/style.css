@@ -499,7 +499,7 @@ th, td {
 }
 
 .form-group {
-  display: flex;
+  text-align: center;
   flex-direction: column;
   gap: 1rem;
   align-items: flex-start;
@@ -652,3 +652,130 @@ th, td {
   font-weight: bold;
   cursor: pointer;
 }
+
+/* ===== Vehicle Carousel + Cards ===== */
+.card-dark {
+  background: #111;
+  border-color: #555555;
+  color: #ddd;
+}
+
+#vehicle-card {
+  padding: 0;           /* allow image to reach edges */
+  overflow: hidden;     /* clip to rounded corners */
+}
+
+/* legacy header (no longer used) removed */
+
+.carousel {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+  padding: 0; /* full-bleed image within card */
+}
+
+.carousel-track {
+  position: relative;
+  width: 100%;
+  transition: transform 220ms ease;
+}
+
+.carousel-item {
+  width: 100%;
+  display: none; /* only center visible */
+  cursor: pointer;
+  transition: transform 220ms ease, opacity 220ms ease, filter 220ms ease;
+}
+.carousel-item.center {
+  display: block;         /* center defines container height */
+  position: relative;
+  z-index: 3;
+}
+
+/* Show smaller previews on each side */
+.carousel-item.near-left,
+.carousel-item.near-right {
+  display: block;
+  position: absolute;
+  top: 50%;
+  width: 56%;            /* smaller side previews */
+  transform: translateY(-70%) scale(0.78);
+  opacity: 0.35;
+  filter: grayscale(35%) brightness(85%);
+  z-index: 2;
+  pointer-events: auto;
+}
+.carousel-item.near-left { left: -10%; }
+.carousel-item.near-right { right: -10%; }
+.carousel-item.far { display: none; }
+
+/* Gradient overlays on side previews to dim toward center */
+.carousel-item.near-left::after,
+.carousel-item.near-right::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  pointer-events: none;
+}
+.carousel-item.near-left::after {
+  background: linear-gradient(to right,
+    rgba(0,0,0,0) 0%,
+    rgb(17 17 17) 90%,
+    rgb(17 17 17) 100%
+  );
+}
+.carousel-item.near-right::after {
+  background: linear-gradient(to left,
+    rgba(0,0,0,0) 0%,
+    rgb(17 17 17) 90%,
+    rgb(17 17 17) 100%
+  );
+}
+
+  .carousel-item img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 12px;
+}
+
+.carousel-item .caption {
+  text-align: center;
+  margin-top: 0.35rem;
+  font-weight: bold;
+  font-size: 0.95rem;
+  color: #ddd;
+}
+.carousel-item:not(.center) .caption { display: none; }
+
+@media (max-width: 520px) {
+  .carousel { padding: 0; }
+  .carousel-item.near-left,
+  .carousel-item.near-right {
+    width: 50%;
+    transform: translateY(-50%) scale(0.7);
+    filter: grayscale(40%) brightness(80%);
+  }
+}
+/* While dragging, remove track transition for direct finger control */
+.carousel-track.dragging { transition: none; }
+.vehicle-title {
+  text-align: center;
+  padding: 0.5rem 0.75rem;
+  color: #eee;
+  font-weight: bold;
+  background: linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.0));
+  pointer-events: none;
+}
+
+.vehicle-card-footer {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 0.6rem 0.75rem 0.8rem;
+}
+
+#vehicle-card #connection-status { cursor: default; }
