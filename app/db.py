@@ -40,19 +40,4 @@ def init_db(mode: str | None = None):
             )
         ''')
         _ensure_log_gps_columns(conn)
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS gps_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT,
-                session TEXT,
-                lat REAL,
-                lon REAL,
-                alt REAL,
-                speed_kph REAL,
-                track_deg REAL,
-                fix INTEGER,
-                sats INTEGER,
-                hdop REAL
-            )
-        ''')
         conn.commit()
