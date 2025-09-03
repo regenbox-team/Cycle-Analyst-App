@@ -17,33 +17,34 @@ session_metrics = state.session_metrics
 def create_app(start_reader: bool = False) -> Flask:
     app = Flask(__name__)
 
-    # Register routes (blueprints or fallback for tests)
+    # Register routes (each in isolation so one failure won't block others)
     from app.routes import core as routes_core, sessions as routes_sessions, admin as routes_admin, modes as routes_modes, gps as routes_gps, tiles as routes_tiles, tracks as routes_tracks
-    if hasattr(app, "register_blueprint"):
+
+    def _register_group(module):
         try:
-            app.register_blueprint(routes_core.create_blueprint())
-            app.register_blueprint(routes_sessions.create_blueprint())
-            app.register_blueprint(routes_admin.create_blueprint())
-            app.register_blueprint(routes_modes.create_blueprint())
-            app.register_blueprint(routes_gps.create_blueprint())
-            app.register_blueprint(routes_tiles.create_blueprint())
-            app.register_blueprint(routes_tracks.create_blueprint())
+            if hasattr(app, "register_blueprint") and hasattr(module, "create_blueprint"):
+                app.register_blueprint(module.create_blueprint())
+                return
         except Exception:
-            routes_core.register(app)
-            routes_sessions.register(app)
-            routes_admin.register(app)
-            routes_modes.register(app)
-            routes_gps.register(app)
-            routes_tiles.register(app)
-            routes_tracks.register(app)
-    else:
-        routes_core.register(app)
-        routes_sessions.register(app)
-        routes_admin.register(app)
-        routes_modes.register(app)
-        routes_gps.register(app)
-        routes_tiles.register(app)
-        routes_tracks.register(app)
+            # Fall back to direct registration
+            pass
+        try:
+            if hasattr(module, "register"):
+                module.register(app)
+        except Exception:
+            # Silently continue; other groups should still register
+            pass
+
+    for mod in (
+        routes_core,
+        routes_sessions,
+        routes_admin,
+        routes_modes,
+        routes_gps,
+        routes_tiles,
+        routes_tracks,
+    ):
+        _register_group(mod)
 
     # Initialize basic state
     state.session_id = state.session_id or state.load_session_id()
