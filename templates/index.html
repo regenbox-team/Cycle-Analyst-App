@@ -180,8 +180,8 @@
     <!-- Live Map (PMTiles) -->
     <div class="box map-box">
       <div class="box-title">Map</div>
-      <div style="position:absolute; top:0.4rem; right:0.6rem; z-index:2; display:flex; gap:0.3rem; align-items:center;">
-        <label for="basemap-select" style="color:#ccc; font-size:0.85rem;">Base:</label>
+      <!-- Top controls: basemap + toggles -->
+      <div class="map-controls-top" style="display:flex; gap:0.4rem; align-items:center; justify-content:flex-end; margin-bottom:0.4rem;">
         <select id="basemap-select" class="dashboard-button" style="padding: 0.2rem 0.4rem;">
           <option value="auto">Auto</option>
           <option value="vector_dark">Vector Dark</option>
@@ -190,11 +190,17 @@
         </select>
         <button id="map-follow-toggle" class="dashboard-button" title="Toggle follow">Follow: Off</button>
         <button id="map-heading-toggle" class="dashboard-button" title="Heading: North locked">N</button>
+      </div>
+
+      <div id="live-map" data-use-offline-tiles="true"></div>
+
+      <!-- Bottom controls: GPX actions -->
+      <div class="map-controls-bottom" style="display:flex; gap:0.4rem; align-items:center; justify-content:flex-end; margin-top:0.4rem;">
         <input type="file" id="gpx-file-input" accept=".gpx" style="display:none" />
         <button id="gpx-upload-btn" class="dashboard-button" title="Upload GPX">Upload GPX</button>
         <button id="gpx-erase-btn" class="dashboard-button" title="Erase track">Erase track</button>
       </div>
-      <div id="live-map" data-use-offline-tiles="true"></div>
+
       <div id="gpx-message" style="position:absolute; bottom:0.4rem; left:0.6rem; z-index:2; color:#ccc; background:rgba(0,0,0,0.4); padding:0.2rem 0.4rem; border-radius:0.3rem; display:none;"></div>
     </div>
 

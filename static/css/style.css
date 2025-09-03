@@ -171,6 +171,43 @@ button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
   overflow: hidden;
 }
 
+/* Map box layout: stack top controls, map, bottom controls */
+.map-box {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.map-controls-top,
+.map-controls-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.map-controls-top { margin-bottom: 0.4rem; }
+.map-controls-bottom { margin-top: 0.4rem; }
+
+.map-controls-top label {
+  color: var(--text-light);
+  font-size: 0.85rem;
+}
+
+.map-controls-top select#basemap-select {
+  min-width: 9rem;
+}
+
+/* Responsive tweaks for smaller screens */
+@media (max-width: 680px) {
+  #live-map { aspect-ratio: 3 / 3; }
+  .map-controls-top,
+  .map-controls-bottom {
+    justify-content: center;
+  }
+}
+
 /* MapLibre canvas should fill container */
 .mapboxgl-canvas, .maplibregl-canvas {
   width: 100% !important;
