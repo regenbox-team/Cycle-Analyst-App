@@ -10,6 +10,17 @@
   const pmtilesPath = '/tiles/basemap.pmtiles';
   const BASEMAPS = { AUTO: 'auto', VECTOR_DARK: 'vector_dark', VECTOR_LIGHT: 'vector_light', RASTER_OSM: 'raster_osm' };
   const OFFLINE_PM_TILES_DEFAULT = false; // set to true if you always ship offline tiles
+  const FONT_STACK = 'Courier New'; // change to your font name
+
+  async function glyphsAvailable() {
+    try {
+      const url = `/static/vendor/fonts/${encodeURIComponent(FONT_STACK)}/0-255.pbf`;
+      const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+      return r.ok;
+    } catch (e) {
+      return false;
+    }
+  }
 
   async function ensurePmtiles() {
     if (typeof pmtiles !== 'undefined') return;
@@ -40,10 +51,10 @@
     setFollowButton();
   }
 
-  function createMinimalDarkStyle(pmtilesUrl) {
+  function createMinimalDarkStyle(pmtilesUrl, includeLabels) {
     return {
       version: 8,
-      glyphs: '/static/vendor/fonts/{fontstack}/{range}.pbf',
+      ...(includeLabels ? { glyphs: '/static/vendor/fonts/{fontstack}/{range}.pbf' } : {}),
       sources: {
         basemap: {
           type: 'vector',
@@ -70,10 +81,11 @@
         // Buildings (Protomaps layer name is 'buildings')
         { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'buildings', paint: { 'fill-color': '#161616', 'fill-opacity': 0.45 } },
 
-        // Labels (requires local glyphs)
-        { id: 'water-labels', type: 'symbol', source: 'basemap', 'source-layer': 'water', layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 14], 'text-max-width': 8, 'symbol-placement': 'point' }, paint: { 'text-color': '#7fb0ff', 'text-halo-color': '#0a0b0f', 'text-halo-width': 1 } },
-        { id: 'road-labels', type: 'symbol', source: 'basemap', 'source-layer': 'roads', layout: { 'symbol-placement': 'line', 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': ['match', ['get', 'class'], 'motorway', 12, 'trunk', 12, 'primary', 11, 'secondary', 10, 'tertiary', 10, 'residential', 9, 9] }, paint: { 'text-color': '#a0a3aa', 'text-halo-color': '#0a0b0f', 'text-halo-width': 1 } },
-        { id: 'place-labels', type: 'symbol', source: 'basemap', 'source-layer': 'places', layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': ['match', ['get', 'class'], 'city', 16, 'town', 14, 'village', 12, 'hamlet', 11, 12] }, paint: { 'text-color': '#e0e3e9', 'text-halo-color': '#0a0b0f', 'text-halo-width': 1.2 } },
+        ...(includeLabels ? [
+          { id: 'water-labels', type: 'symbol', source: 'basemap', 'source-layer': 'water', layout: { 'text-field': ['get', 'name'], 'text-font': [FONT_STACK], 'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 14], 'text-max-width': 8, 'symbol-placement': 'point' }, paint: { 'text-color': '#7fb0ff', 'text-halo-color': '#0a0b0f', 'text-halo-width': 1 } },
+          { id: 'road-labels', type: 'symbol', source: 'basemap', 'source-layer': 'roads', layout: { 'symbol-placement': 'line', 'text-field': ['get', 'name'], 'text-font': [FONT_STACK], 'text-size': ['match', ['get', 'class'], 'motorway', 12, 'trunk', 12, 'primary', 11, 'secondary', 10, 'tertiary', 10, 'residential', 9, 9] }, paint: { 'text-color': '#a0a3aa', 'text-halo-color': '#0a0b0f', 'text-halo-width': 1 } },
+          { id: 'place-labels', type: 'symbol', source: 'basemap', 'source-layer': 'places', layout: { 'text-field': ['get', 'name'], 'text-font': [FONT_STACK], 'text-size': ['match', ['get', 'class'], 'city', 16, 'town', 14, 'village', 12, 'hamlet', 11, 12] }, paint: { 'text-color': '#e0e3e9', 'text-halo-color': '#0a0b0f', 'text-halo-width': 1.2 } },
+        ] : []),
 
         // Live track & position
         { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#ff7a00', 'line-width': 3, 'line-opacity': 0.9 } },
@@ -82,10 +94,10 @@
     };
   }
 
-  function createMinimalLightStyle(pmtilesUrl) {
+  function createMinimalLightStyle(pmtilesUrl, includeLabels) {
     return {
       version: 8,
-      glyphs: '/static/vendor/fonts/{fontstack}/{range}.pbf',
+      ...(includeLabels ? { glyphs: '/static/vendor/fonts/{fontstack}/{range}.pbf' } : {}),
       sources: {
         basemap: {
           type: 'vector',
@@ -112,10 +124,11 @@
         // Buildings (Protomaps layer name is 'buildings')
         { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'buildings', paint: { 'fill-color': '#d7dee6', 'fill-opacity': 0.7 } },
 
-        // Labels (requires local glyphs)
-        { id: 'water-labels', type: 'symbol', source: 'basemap', 'source-layer': 'water', layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 14], 'text-max-width': 8, 'symbol-placement': 'point' }, paint: { 'text-color': '#2a5885', 'text-halo-color': '#f4f7fb', 'text-halo-width': 1 } },
-        { id: 'road-labels', type: 'symbol', source: 'basemap', 'source-layer': 'roads', layout: { 'symbol-placement': 'line', 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': ['match', ['get', 'class'], 'motorway', 12, 'trunk', 12, 'primary', 11, 'secondary', 10, 'tertiary', 10, 'residential', 9, 9] }, paint: { 'text-color': '#5f6871', 'text-halo-color': '#ffffff', 'text-halo-width': 1 } },
-        { id: 'place-labels', type: 'symbol', source: 'basemap', 'source-layer': 'places', layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': ['match', ['get', 'class'], 'city', 16, 'town', 14, 'village', 12, 'hamlet', 11, 12] }, paint: { 'text-color': '#30363d', 'text-halo-color': '#ffffff', 'text-halo-width': 1.2 } },
+        ...(includeLabels ? [
+          { id: 'water-labels', type: 'symbol', source: 'basemap', 'source-layer': 'water', layout: { 'text-field': ['get', 'name'], 'text-font': [FONT_STACK], 'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 14], 'text-max-width': 8, 'symbol-placement': 'point' }, paint: { 'text-color': '#2a5885', 'text-halo-color': '#f4f7fb', 'text-halo-width': 1 } },
+          { id: 'road-labels', type: 'symbol', source: 'basemap', 'source-layer': 'roads', layout: { 'symbol-placement': 'line', 'text-field': ['get', 'name'], 'text-font': [FONT_STACK], 'text-size': ['match', ['get', 'class'], 'motorway', 12, 'trunk', 12, 'primary', 11, 'secondary', 10, 'tertiary', 10, 'residential', 9, 9] }, paint: { 'text-color': '#5f6871', 'text-halo-color': '#ffffff', 'text-halo-width': 1 } },
+          { id: 'place-labels', type: 'symbol', source: 'basemap', 'source-layer': 'places', layout: { 'text-field': ['get', 'name'], 'text-font': [FONT_STACK], 'text-size': ['match', ['get', 'class'], 'city', 16, 'town', 14, 'village', 12, 'hamlet', 11, 12] }, paint: { 'text-color': '#30363d', 'text-halo-color': '#ffffff', 'text-halo-width': 1.2 } },
+        ] : []),
 
         // Live track & position
         { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#ff7a00', 'line-width': 3, 'line-opacity': 0.9 } },
@@ -182,18 +195,19 @@
 
   async function chooseStyle(choice) {
     const useOffline = wantOfflineTiles();
+    const includeLabels = await glyphsAvailable();
     if (choice === BASEMAPS.RASTER_OSM) {
       return createRasterFallbackStyle();
     }
     if (choice === BASEMAPS.VECTOR_DARK || choice === BASEMAPS.VECTOR_LIGHT) {
       if (useOffline && await pmtilesExists(pmtilesPath)) {
-        return choice === BASEMAPS.VECTOR_DARK ? createMinimalDarkStyle(pmtilesPath) : createMinimalLightStyle(pmtilesPath);
+        return choice === BASEMAPS.VECTOR_DARK ? createMinimalDarkStyle(pmtilesPath, includeLabels) : createMinimalLightStyle(pmtilesPath, includeLabels);
       }
       return createRasterFallbackStyle();
     }
     // AUTO: prefer offline vector dark if available, else raster
     if (useOffline && await pmtilesExists(pmtilesPath)) {
-      return createMinimalDarkStyle(pmtilesPath);
+      return createMinimalDarkStyle(pmtilesPath, includeLabels);
     }
     return createRasterFallbackStyle();
   }
