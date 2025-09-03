@@ -26,6 +26,10 @@ BAUDRATE = 9600
 GPS_SERIAL_PORT_DEFAULT = os.getenv("APP_GPS_PORT", "/dev/ttyACM0")
 GPS_BAUDRATE = int(os.getenv("APP_GPS_BAUDRATE", "9600"))
 
+# --- PMTiles (offline basemap) ---
+# Path to a .pmtiles file on disk, e.g., western-europe.pmtiles under /home/pi/Documents
+PMTILES_PATH = os.getenv("APP_PMTILES_PATH", "/home/jeandard/Documents/western-europe.pmtiles")
+
 # --- Test/Vehicle modes ---
 test_mode_lock = Lock()
 

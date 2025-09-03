@@ -7,7 +7,7 @@
   let posSource = null;
   let trackSource = null;
   let lastLon = null, lastLat = null;
-  const pmtilesPath = '/static/tiles/basemap.pmtiles';
+  const pmtilesPath = '/tiles/basemap.pmtiles';
   const BASEMAPS = { AUTO: 'auto', VECTOR_DARK: 'vector_dark', VECTOR_LIGHT: 'vector_light', RASTER_OSM: 'raster_osm' };
   const OFFLINE_PM_TILES_DEFAULT = false; // set to true if you always ship offline tiles
 
@@ -46,13 +46,10 @@
       },
       layers: [
         { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
-        // Landcover/landuse base
-        { id: 'landcover', type: 'fill', source: 'basemap', 'source-layer': 'landcover', paint: { 'fill-color': '#0f1116', 'fill-opacity': 0.35 } },
-        { id: 'landuse', type: 'fill', source: 'basemap', 'source-layer': 'landuse', paint: { 'fill-color': '#0f1116', 'fill-opacity': 0.25 } },
         // Water
         { id: 'water', type: 'fill', source: 'basemap', 'source-layer': 'water', paint: { 'fill-color': '#0b1a2a', 'fill-opacity': 0.9 } },
-        // Roads (transportation in OpenMapTiles)
-        { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'transportation', paint: { 'line-color': '#2a2a2a', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.2, 12, 1.1, 14, 1.8] } },
+        // Roads (Protomaps)
+        { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'roads', paint: { 'line-color': '#2a2a2a', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.2, 12, 1.1, 14, 1.8] } },
         // Buildings
         { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'building', paint: { 'fill-color': '#161616', 'fill-opacity': 0.45 } },
 
@@ -76,13 +73,10 @@
       },
       layers: [
         { id: 'bg', type: 'background', paint: { 'background-color': '#f4f7fb' } },
-        // Landcover/landuse base
-        { id: 'landcover', type: 'fill', source: 'basemap', 'source-layer': 'landcover', paint: { 'fill-color': '#eaeef3', 'fill-opacity': 0.6 } },
-        { id: 'landuse', type: 'fill', source: 'basemap', 'source-layer': 'landuse', paint: { 'fill-color': '#eaeef3', 'fill-opacity': 0.45 } },
         // Water
         { id: 'water', type: 'fill', source: 'basemap', 'source-layer': 'water', paint: { 'fill-color': '#cfe8ff', 'fill-opacity': 1.0 } },
-        // Roads
-        { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'transportation', paint: { 'line-color': '#9aa4ad', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.2, 12, 1.1, 14, 1.8] } },
+        // Roads (Protomaps)
+        { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'roads', paint: { 'line-color': '#9aa4ad', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.2, 12, 1.1, 14, 1.8] } },
         // Buildings
         { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'building', paint: { 'fill-color': '#d7dee6', 'fill-opacity': 0.7 } },
 
