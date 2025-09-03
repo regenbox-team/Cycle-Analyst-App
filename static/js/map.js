@@ -10,7 +10,7 @@
   const pmtilesPath = '/tiles/basemap.pmtiles';
   const BASEMAPS = { AUTO: 'auto', VECTOR_DARK: 'vector_dark', VECTOR_LIGHT: 'vector_light', RASTER_OSM: 'raster_osm' };
   const OFFLINE_PM_TILES_DEFAULT = false; // set to true if you always ship offline tiles
-  const FONT_STACK = 'Courier New'; // change to your font name
+  const FONT_STACK = 'Inter Regular'; // change to your font name
 
   async function glyphsAvailable() {
     try {
