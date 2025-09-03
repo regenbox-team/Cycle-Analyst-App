@@ -6,6 +6,8 @@
   const MAX_POINTS = 5000;
   let posSource = null;
   let trackSource = null;
+  let routeSource = null;
+  let routeCoords = null; // cached route coordinates [[lon,lat],...]
   let lastLon = null, lastLat = null;
   const MIN_SPEED_KPH = 3; // do not update heading below this speed
   const HEADING_MODES = { NORTH: 'north', FREE: 'free', TRAJECTORY: 'trajectory' };
@@ -415,11 +417,16 @@
   function rebindSourcesAndRefresh() {
     posSource = map.getSource('pos');
     trackSource = map.getSource('track');
+    routeSource = map.getSource('route');
     if (posSource && isFinite(lastLon) && isFinite(lastLat)) {
       posSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [lastLon, lastLat] } });
     }
     if (trackSource && coords.length) {
       trackSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords.slice() } }] });
+    }
+    if (routeSource && routeCoords && routeCoords.length) {
+      routeSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: routeCoords.slice() } }] });
+      ensureRouteLayer();
     }
   }
 
@@ -462,6 +469,9 @@
     map.on('load', () => {
       posSource = map.getSource('pos');
       trackSource = map.getSource('track');
+      routeSource = map.getSource('route');
+      // Attempt loading persisted GPX route, if any
+      loadRouteFromServer();
     });
 
     // Follow toggle button
@@ -557,4 +567,121 @@
   }
 
   window.addEventListener('DOMContentLoaded', initMap);
+
+  // ===== GPX handling and UI (dashboard) =====
+  function parseGpxToCoords(xmlText) {
+    try {
+      const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+      const trkpts = Array.from(doc.getElementsByTagName('trkpt'));
+      let points = trkpts.map(p => [Number(p.getAttribute('lon')), Number(p.getAttribute('lat'))]).filter(a => isFinite(a[0]) && isFinite(a[1]));
+      if (!points.length) {
+        const rtepts = Array.from(doc.getElementsByTagName('rtept'));
+        points = rtepts.map(p => [Number(p.getAttribute('lon')), Number(p.getAttribute('lat'))]).filter(a => isFinite(a[0]) && isFinite(a[1]));
+      }
+      return points;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function ensureRouteSource() {
+    if (!map) return null;
+    let src = map.getSource('route');
+    if (!src) {
+      map.addSource('route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      src = map.getSource('route');
+    }
+    routeSource = src;
+    return src;
+  }
+
+  function ensureRouteLayer() {
+    if (!map) return;
+    if (!map.getLayer('route-line')) {
+      map.addLayer({
+        id: 'route-line', type: 'line', source: 'route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': 'orange', 'line-opacity': 0.4, 'line-width': 3 }
+      });
+    }
+  }
+
+  async function loadRouteFromServer() {
+    try {
+      const st = await fetch('/gpx/status', { cache: 'no-store' });
+      const info = await st.json();
+      if (!info || !info.exists) {
+        // no route
+        return;
+      }
+      const res = await fetch('/gpx/track', { cache: 'no-store' });
+      if (!res.ok) return;
+      const text = await res.text();
+      const pts = parseGpxToCoords(text);
+      if (!pts.length) return;
+      routeCoords = pts;
+      ensureRouteSource();
+      routeSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: routeCoords.slice() } }] });
+      ensureRouteLayer();
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  async function uploadGpxFile(file) {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/gpx/upload', { method: 'POST', body: form });
+    let msg = 'Upload failed'; let ok=false; let data=null;
+    try { data = await res.json(); } catch {}
+    if (res.ok && data && data.status === 'ok') { ok = true; msg = data.message || 'file successfully uploaded and read'; }
+    showGpxMessage(msg, ok);
+    if (ok) await loadRouteFromServer();
+  }
+
+  async function eraseRoute() {
+    try {
+      const res = await fetch('/gpx/erase', { method: 'POST' });
+      const ok = res.ok;
+      showGpxMessage(ok ? 'Track erased' : 'Erase failed', ok);
+      if (ok) {
+        routeCoords = null;
+        if (map) {
+          if (map.getLayer('route-line')) map.removeLayer('route-line');
+          if (map.getSource('route')) map.removeSource('route');
+        }
+      }
+    } catch (e) {
+      showGpxMessage('Erase error', false);
+    }
+  }
+
+  function showGpxMessage(text, ok=true) {
+    const el = document.getElementById('gpx-message');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = ok ? '#ccc' : '#f88';
+    el.style.display = '';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+  }
+
+  // Expose reload for other scripts if needed
+  window.reloadRouteOverlay = loadRouteFromServer;
+  window.clearRouteOverlay = eraseRoute;
+
+  // Wire dashboard buttons if present
+  window.addEventListener('DOMContentLoaded', () => {
+    const upBtn = document.getElementById('gpx-upload-btn');
+    const erBtn = document.getElementById('gpx-erase-btn');
+    const input = document.getElementById('gpx-file-input');
+    if (upBtn && input) {
+      upBtn.addEventListener('click', () => input.click());
+      input.addEventListener('change', () => {
+        const f = input.files && input.files[0];
+        if (f) uploadGpxFile(f);
+        input.value = '';
+      });
+    }
+    if (erBtn) erBtn.addEventListener('click', eraseRoute);
+  });
 })();

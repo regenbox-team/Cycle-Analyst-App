@@ -190,8 +190,12 @@
         </select>
         <button id="map-follow-toggle" class="dashboard-button" title="Toggle follow">Follow: Off</button>
         <button id="map-heading-toggle" class="dashboard-button" title="Heading: North locked">N</button>
+        <input type="file" id="gpx-file-input" accept=".gpx" style="display:none" />
+        <button id="gpx-upload-btn" class="dashboard-button" title="Upload GPX">Upload GPX</button>
+        <button id="gpx-erase-btn" class="dashboard-button" title="Erase track">Erase track</button>
       </div>
       <div id="live-map" data-use-offline-tiles="true"></div>
+      <div id="gpx-message" style="position:absolute; bottom:0.4rem; left:0.6rem; z-index:2; color:#ccc; background:rgba(0,0,0,0.4); padding:0.2rem 0.4rem; border-radius:0.3rem; display:none;"></div>
     </div>
 
     <div class="box range-box">

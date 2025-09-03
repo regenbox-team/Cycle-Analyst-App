@@ -13,6 +13,9 @@ SESSION_METRICS_DIR = os.path.join(BASE_DIR, "session_metrics")
 DB_FILE = os.path.join(BASE_DIR, "ride_data.db")
 USER_FILE = os.path.join(BASE_DIR, "current_user.txt")
 
+# GPX route file path (persist during session, cleared on end)
+GPX_ROUTE_FILE = os.path.join(BASE_DIR, "route.gpx")
+
 # Ensure directories exist
 os.makedirs(SESSION_METRICS_DIR, exist_ok=True)
 

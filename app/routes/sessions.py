@@ -51,6 +51,14 @@ def resume_session():
 def end_session():
     state.session_active = False
     state.save_session_active(False)
+    # Erase any uploaded GPX track at end of session
+    try:
+        import os
+        from app.config import GPX_ROUTE_FILE
+        if os.path.exists(GPX_ROUTE_FILE):
+            os.remove(GPX_ROUTE_FILE)
+    except Exception:
+        pass
     return redirect(f"/summary?session={state.session_id}")
 
 
