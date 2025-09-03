@@ -6,6 +6,9 @@
   const MAX_POINTS = 5000;
   let posSource = null;
   let trackSource = null;
+  let lastLon = null, lastLat = null;
+  const pmtilesPath = '/static/tiles/basemap.pmtiles';
+  const BASEMAPS = { AUTO: 'auto', VECTOR_DARK: 'vector_dark', VECTOR_LIGHT: 'vector_light', RASTER_OSM: 'raster_osm' };
   const OFFLINE_PM_TILES_DEFAULT = false; // set to true if you always ship offline tiles
 
   async function ensurePmtiles() {
@@ -60,6 +63,36 @@
     };
   }
 
+  function createMinimalLightStyle(pmtilesUrl) {
+    return {
+      version: 8,
+      sources: {
+        basemap: {
+          type: 'vector',
+          url: `pmtiles://${pmtilesUrl}`
+        },
+        track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+        pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
+      },
+      layers: [
+        { id: 'bg', type: 'background', paint: { 'background-color': '#f4f7fb' } },
+        // Landcover/landuse base
+        { id: 'landcover', type: 'fill', source: 'basemap', 'source-layer': 'landcover', paint: { 'fill-color': '#eaeef3', 'fill-opacity': 0.6 } },
+        { id: 'landuse', type: 'fill', source: 'basemap', 'source-layer': 'landuse', paint: { 'fill-color': '#eaeef3', 'fill-opacity': 0.45 } },
+        // Water
+        { id: 'water', type: 'fill', source: 'basemap', 'source-layer': 'water', paint: { 'fill-color': '#cfe8ff', 'fill-opacity': 1.0 } },
+        // Roads
+        { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'transportation', paint: { 'line-color': '#9aa4ad', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.2, 12, 1.1, 14, 1.8] } },
+        // Buildings
+        { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'building', paint: { 'fill-color': '#d7dee6', 'fill-opacity': 0.7 } },
+
+        // Live track & position
+        { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#d33', 'line-width': 3, 'line-opacity': 0.9 } },
+        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#0077cc', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+      ]
+    };
+  }
+
   function createRasterFallbackStyle() {
     return {
       version: 8,
@@ -110,6 +143,47 @@
     return OFFLINE_PM_TILES_DEFAULT;
   }
 
+  function getBasemapChoice() {
+    const v = localStorage.getItem('basemap');
+    if (v === BASEMAPS.VECTOR_DARK || v === BASEMAPS.VECTOR_LIGHT || v === BASEMAPS.RASTER_OSM || v === BASEMAPS.AUTO) return v;
+    return BASEMAPS.AUTO;
+  }
+
+  async function chooseStyle(choice) {
+    const useOffline = wantOfflineTiles();
+    if (choice === BASEMAPS.RASTER_OSM) {
+      return createRasterFallbackStyle();
+    }
+    if (choice === BASEMAPS.VECTOR_DARK || choice === BASEMAPS.VECTOR_LIGHT) {
+      if (useOffline && await pmtilesExists(pmtilesPath)) {
+        return choice === BASEMAPS.VECTOR_DARK ? createMinimalDarkStyle(pmtilesPath) : createMinimalLightStyle(pmtilesPath);
+      }
+      return createRasterFallbackStyle();
+    }
+    // AUTO: prefer offline vector dark if available, else raster
+    if (useOffline && await pmtilesExists(pmtilesPath)) {
+      return createMinimalDarkStyle(pmtilesPath);
+    }
+    return createRasterFallbackStyle();
+  }
+
+  function rebindSourcesAndRefresh() {
+    posSource = map.getSource('pos');
+    trackSource = map.getSource('track');
+    if (posSource && isFinite(lastLon) && isFinite(lastLat)) {
+      posSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [lastLon, lastLat] } });
+    }
+    if (trackSource && coords.length) {
+      trackSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords.slice() } }] });
+    }
+  }
+
+  async function switchBasemap(choice) {
+    const style = await chooseStyle(choice);
+    map.setStyle(style);
+    map.once('styledata', rebindSourcesAndRefresh);
+  }
+
   async function initMap() {
     const container = document.getElementById('live-map');
     if (!container) return;
@@ -126,14 +200,8 @@
     const protocol = new pmtiles.Protocol();
     maplibregl.addProtocol('pmtiles', protocol.tile);
 
-    const pmtilesPath = '/static/tiles/basemap.pmtiles';
-    let style;
-    if (wantOfflineTiles() && await pmtilesExists(pmtilesPath)) {
-      style = createMinimalDarkStyle(pmtilesPath);
-    } else {
-      // Fallback to online raster tiles if offline bundle is missing or probing is disabled
-      style = createRasterFallbackStyle();
-    }
+    const initialChoice = getBasemapChoice();
+    const style = await chooseStyle(initialChoice);
 
     map = new maplibregl.Map({
       container: 'live-map',
@@ -156,6 +224,17 @@
     if (btn) btn.addEventListener('click', toggleFollow);
     setFollowButton();
 
+    // Basemap selector
+    const sel = document.getElementById('basemap-select');
+    if (sel) {
+      sel.value = getBasemapChoice();
+      sel.addEventListener('change', async (e) => {
+        const val = e.target.value;
+        localStorage.setItem('basemap', val);
+        await switchBasemap(val);
+      });
+    }
+
     // Resize observer to keep square
     new ResizeObserver(() => { map?.resize(); }).observe(container);
 
@@ -173,6 +252,8 @@
 
       coords.push([lon, lat]);
       if (coords.length > MAX_POINTS) coords.shift();
+
+      lastLon = lon; lastLat = lat;
 
       if (posSource) {
         posSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] } });
