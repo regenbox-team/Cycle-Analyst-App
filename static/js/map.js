@@ -7,6 +7,11 @@
   let posSource = null;
   let trackSource = null;
   let lastLon = null, lastLat = null;
+  const MIN_SPEED_KPH = 3; // do not update heading below this speed
+  const HEADING_MODES = { NORTH: 'north', FREE: 'free', TRAJECTORY: 'trajectory' };
+  let headingMode = HEADING_MODES.NORTH;
+  let filteredBearing = 0; // smoothed map bearing
+  let bearingInitialized = false;
   const pmtilesPath = '/tiles/basemap.pmtiles';
   const BASEMAPS = { AUTO: 'auto', VECTOR_DARK: 'vector_dark', VECTOR_LIGHT: 'vector_light', RASTER_OSM: 'raster_osm' };
   const OFFLINE_PM_TILES_DEFAULT = false; // set to true if you always ship offline tiles
@@ -49,6 +54,67 @@
   function toggleFollow() {
     follow = !follow;
     setFollowButton();
+  }
+
+  function setHeadingButton() {
+    const btn = document.getElementById('map-heading-toggle');
+    if (!btn) return;
+    if (headingMode === HEADING_MODES.NORTH) {
+      btn.textContent = 'N';
+      btn.style.opacity = '1';
+      btn.title = 'Heading: North locked';
+    } else if (headingMode === HEADING_MODES.FREE) {
+      btn.textContent = 'N';
+      btn.style.opacity = '0.4';
+      btn.title = 'Heading: Free (no auto-rotate)';
+    } else {
+      btn.textContent = '↑';
+      btn.style.opacity = '1';
+      btn.title = 'Heading: Trajectory';
+    }
+  }
+
+  function cycleHeadingMode() {
+    if (headingMode === HEADING_MODES.NORTH) headingMode = HEADING_MODES.FREE;
+    else if (headingMode === HEADING_MODES.FREE) headingMode = HEADING_MODES.TRAJECTORY;
+    else headingMode = HEADING_MODES.NORTH;
+    localStorage.setItem('heading_mode', headingMode);
+    setHeadingButton();
+    // On entering North mode, animate back to 0 bearing
+    if (map && headingMode === HEADING_MODES.NORTH) {
+      filteredBearing = 0;
+      bearingInitialized = true;
+      map.easeTo({ bearing: 0, duration: 300 });
+    }
+    // On entering Trajectory mode, start smoothing from current bearing
+    if (map && headingMode === HEADING_MODES.TRAJECTORY) {
+      filteredBearing = normalizeBearing(map.getBearing());
+      bearingInitialized = true;
+    }
+  }
+
+  function normalizeBearing(b) {
+    let x = ((b % 360) + 360) % 360;
+    if (x === -0) x = 0;
+    return x;
+  }
+
+  function shortestAngleDelta(from, to) {
+    let a = normalizeBearing(to) - normalizeBearing(from);
+    if (a > 180) a -= 360;
+    if (a < -180) a += 360;
+    return a;
+  }
+
+  function computeBearing(lon1, lat1, lon2, lat2) {
+    // Returns initial bearing in degrees [0,360)
+    const toRad = (d)=> d * Math.PI / 180;
+    const toDeg = (r)=> r * 180 / Math.PI;
+    const φ1 = toRad(lat1), φ2 = toRad(lat2);
+    const Δλ = toRad(lon2 - lon1);
+    const y = Math.sin(Δλ) * Math.cos(φ2);
+    const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+    return normalizeBearing(toDeg(Math.atan2(y, x)));
   }
 
   // ==== Inline Protomaps-like styles (copied from basemaps.js) ====
@@ -403,6 +469,15 @@
     if (btn) btn.addEventListener('click', toggleFollow);
     setFollowButton();
 
+    // Heading toggle button
+    const hb = document.getElementById('map-heading-toggle');
+    const savedHeadingMode = localStorage.getItem('heading_mode');
+    if (savedHeadingMode && Object.values(HEADING_MODES).includes(savedHeadingMode)) {
+      headingMode = savedHeadingMode;
+    }
+    if (hb) hb.addEventListener('click', cycleHeadingMode);
+    setHeadingButton();
+
     // Basemap selector
     const sel = document.getElementById('basemap-select');
     if (sel) {
@@ -441,9 +516,40 @@
         trackSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords.slice() } }] });
       }
 
-      if (follow && map) {
-        const z = Math.max(8, Math.min(18, map.getZoom()));
-        map.easeTo({ center: [lon, lat], zoom: z, duration: 500 });
+      // Determine target bearing if in trajectory mode and moving sufficiently
+      let applyBearing = null;
+      if (headingMode === HEADING_MODES.NORTH) {
+        applyBearing = 0;
+      } else if (headingMode === HEADING_MODES.TRAJECTORY) {
+        const spd = Number(s.speed_kph);
+        if (isFinite(spd) && spd >= MIN_SPEED_KPH && coords.length >= 2) {
+          const [plon, plat] = coords[coords.length - 2];
+          const [clon, clat] = coords[coords.length - 1];
+          const target = computeBearing(plon, plat, clon, clat);
+          if (!bearingInitialized) {
+            filteredBearing = normalizeBearing(map.getBearing());
+            bearingInitialized = true;
+          }
+          const delta = shortestAngleDelta(filteredBearing, target);
+          const alpha = 0.25; // smoothing factor
+          filteredBearing = normalizeBearing(filteredBearing + delta * alpha);
+          applyBearing = filteredBearing;
+        }
+      }
+
+      if (map) {
+        const opts = { duration: 500 };
+        if (follow) {
+          const z = Math.max(8, Math.min(18, map.getZoom()));
+          opts.center = [lon, lat];
+          opts.zoom = z;
+        }
+        if (applyBearing !== null) {
+          opts.bearing = applyBearing;
+        }
+        if (opts.center || opts.bearing !== undefined) {
+          map.easeTo(opts);
+        }
       }
     } catch (e) {
       // ignore
