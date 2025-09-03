@@ -56,13 +56,13 @@
         // Water
         { id: 'water', type: 'fill', source: 'basemap', 'source-layer': 'water', paint: { 'fill-color': '#0b1a2a', 'fill-opacity': 0.9 } },
         // Roads (Protomaps)
-        { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'roads', paint: { 'line-color': '#2a2a2a', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.2, 12, 1.1, 14, 1.8] } },
+        { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'roads', paint: { 'line-color': '#351a00ff', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.2, 12, 1.1, 14, 1.8] } },
         // Buildings (Protomaps layer name is 'buildings')
-        { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'buildings', paint: { 'fill-color': '#161616', 'fill-opacity': 0.45 } },
+        { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'buildings', paint: { 'fill-color': '#231e1aff', 'fill-opacity': 0.45 } },
 
         // Live track & position
         { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#ff7a00', 'line-width': 3, 'line-opacity': 0.9 } },
-        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#ff7a00', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
       ]
     };
   }
@@ -88,8 +88,8 @@
         { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'buildings', paint: { 'fill-color': '#d7dee6', 'fill-opacity': 0.7 } },
 
         // Live track & position
-        { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#d33', 'line-width': 3, 'line-opacity': 0.9 } },
-        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#0077cc', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+        { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#ff7a00', 'line-width': 3, 'line-opacity': 0.9 } },
+        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#ff7a00', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
       ]
     };
   }
