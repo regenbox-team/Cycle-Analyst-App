@@ -16,6 +16,7 @@
   <div class="header-info">
     <button id="switch-user-button">User: JD</button>
     <button id="mode-button" class="flag-pill">—</button>
+    <button id="gps-status-pill" disabled>GPS: Checking...</button>
     <button id="end-button">End Session</button>
   </div>
   </header>
@@ -227,5 +228,6 @@
 
 
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/gps_status.js') }}"></script>
 </body>
 </html>

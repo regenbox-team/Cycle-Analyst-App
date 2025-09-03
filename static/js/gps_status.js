@@ -6,14 +6,14 @@ async function updateGpsStatus() {
     const pos = document.getElementById('gps-position');
     const extra = document.getElementById('gps-extra');
 
-    if (!pill || !pos || !extra) return;
+    if (!pill) return;
 
     if (s.stale) {
       pill.textContent = 'GPS: No Data';
       pill.classList.remove('active');
       pill.classList.add('inactive');
-      pos.textContent = '-';
-      extra.textContent = '';
+      if (pos) pos.textContent = '-';
+      if (extra) extra.textContent = '';
       return;
     }
 
@@ -22,17 +22,21 @@ async function updateGpsStatus() {
     pill.classList.toggle('active', hasFix);
     pill.classList.toggle('inactive', !hasFix);
 
-    if (s.lat != null && s.lon != null) {
-      pos.textContent = `${s.lat.toFixed(6)}, ${s.lon.toFixed(6)}`;
-    } else {
-      pos.textContent = '-';
+    if (pos) {
+      if (s.lat != null && s.lon != null) {
+        pos.textContent = `${s.lat.toFixed(6)}, ${s.lon.toFixed(6)}`;
+      } else {
+        pos.textContent = '-';
+      }
     }
 
     const parts = [];
-    if (s.alt != null) parts.push(`Alt ${Number(s.alt).toFixed(1)} m`);
-    if (s.speed_kph != null) parts.push(`${Number(s.speed_kph).toFixed(1)} km/h`);
-    if (s.hdop != null) parts.push(`HDOP ${Number(s.hdop).toFixed(1)}`);
-    extra.textContent = parts.join(' • ');
+    if (extra) {
+      if (s.alt != null) parts.push(`Alt ${Number(s.alt).toFixed(1)} m`);
+      if (s.speed_kph != null) parts.push(`${Number(s.speed_kph).toFixed(1)} km/h`);
+      if (s.hdop != null) parts.push(`HDOP ${Number(s.hdop).toFixed(1)}`);
+      extra.textContent = parts.join(' • ');
+    }
   } catch (e) {
     // swallow errors
   }
@@ -42,4 +46,3 @@ window.addEventListener('DOMContentLoaded', () => {
   updateGpsStatus();
   setInterval(updateGpsStatus, 1000);
 });
-
