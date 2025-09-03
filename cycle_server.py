@@ -77,17 +77,6 @@ def create_app(start_reader: bool = False) -> Flask:
     except Exception:
         pass
 
-    # Optional: log all routes for debugging if enabled
-    try:
-        import os as _dbg_os
-        if _dbg_os.getenv("APP_LOG_ROUTES", "0") == "1":
-            print("[DEBUG] Registered routes:")
-            for r in sorted(app.url_map.iter_rules(), key=lambda x: str(x)):
-                methods = ",".join(sorted(m for m in r.methods if m not in {"HEAD","OPTIONS"}))
-                print(f"  {methods:7s} {r}")
-    except Exception:
-        pass
-
     return app
 
 
