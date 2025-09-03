@@ -1,0 +1,125 @@
+// Live Map (MapLibre + PMTiles), dark minimal style with follow toggle
+(function () {
+  let map = null;
+  let follow = false;
+  const coords = [];
+  const MAX_POINTS = 5000;
+  let posSource = null;
+  let trackSource = null;
+
+  function setFollowButton() {
+    const btn = document.getElementById('map-follow-toggle');
+    if (!btn) return;
+    btn.textContent = `Follow: ${follow ? 'On' : 'Off'}`;
+  }
+
+  function toggleFollow() {
+    follow = !follow;
+    setFollowButton();
+  }
+
+  function createMinimalDarkStyle(pmtilesUrl) {
+    return {
+      version: 8,
+      glyphs: undefined, // no labels/symbols → no glyphs endpoint required
+      sources: {
+        basemap: {
+          type: 'vector',
+          url: `pmtiles://${pmtilesUrl}`
+        },
+        track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+        pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
+      },
+      layers: [
+        { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
+        // Landcover/landuse base
+        { id: 'landcover', type: 'fill', source: 'basemap', 'source-layer': 'landcover', paint: { 'fill-color': '#0f1116', 'fill-opacity': 0.35 } },
+        { id: 'landuse', type: 'fill', source: 'basemap', 'source-layer': 'landuse', paint: { 'fill-color': '#0f1116', 'fill-opacity': 0.25 } },
+        // Water
+        { id: 'water', type: 'fill', source: 'basemap', 'source-layer': 'water', paint: { 'fill-color': '#0b1a2a', 'fill-opacity': 0.9 } },
+        // Roads (transportation in OpenMapTiles)
+        { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'transportation', paint: { 'line-color': '#2a2a2a', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.2, 12, 1.1, 14, 1.8] } },
+        // Buildings
+        { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'building', paint: { 'fill-color': '#161616', 'fill-opacity': 0.45 } },
+
+        // Live track & position
+        { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#ff7a00', 'line-width': 3, 'line-opacity': 0.9 } },
+        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+      ]
+    };
+  }
+
+  async function initMap() {
+    const container = document.getElementById('live-map');
+    if (!container) return;
+
+    if (typeof maplibregl === 'undefined' || typeof pmtiles === 'undefined') {
+      container.innerHTML = '<div style="color:#ccc; padding:0.5rem;">Map libraries not loaded. Place local vendor files under static/vendor or connect to the internet once.</div>';
+      return;
+    }
+
+    // Register PMTiles protocol
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles', protocol.tile);
+
+    const pmtilesPath = '/static/tiles/basemap.pmtiles';
+    const style = createMinimalDarkStyle(pmtilesPath);
+
+    map = new maplibregl.Map({
+      container: 'live-map',
+      style,
+      center: [2.35, 48.86],
+      zoom: 12,
+      antialias: false,
+      attributionControl: false,
+    });
+
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+    map.on('load', () => {
+      posSource = map.getSource('pos');
+      trackSource = map.getSource('track');
+    });
+
+    // Follow toggle button
+    const btn = document.getElementById('map-follow-toggle');
+    if (btn) btn.addEventListener('click', toggleFollow);
+    setFollowButton();
+
+    // Resize observer to keep square
+    new ResizeObserver(() => { map?.resize(); }).observe(container);
+
+    // Start GPS polling
+    setInterval(tickGps, 1000);
+  }
+
+  async function tickGps() {
+    try {
+      const res = await fetch('/gps_status', { cache: 'no-store' });
+      const s = await res.json();
+      if (!s || !s.has_fix || s.stale) return;
+      const lon = Number(s.lon), lat = Number(s.lat);
+      if (!isFinite(lon) || !isFinite(lat)) return;
+
+      coords.push([lon, lat]);
+      if (coords.length > MAX_POINTS) coords.shift();
+
+      if (posSource) {
+        posSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] } });
+      }
+      if (trackSource) {
+        trackSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords.slice() } }] });
+      }
+
+      if (follow && map) {
+        const z = Math.max(8, Math.min(18, map.getZoom()));
+        map.easeTo({ center: [lon, lat], zoom: z, duration: 500 });
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  window.addEventListener('DOMContentLoaded', initMap);
+})();
+

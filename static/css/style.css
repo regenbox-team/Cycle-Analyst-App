@@ -148,6 +148,8 @@ button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
 .bar-box, .chart-box, .range-box {
   grid-column: 1 / -1;
 }
+/* Map box full width like other wide sections */
+.map-box { grid-column: 1 / -1; }
 
 
 .box {
@@ -159,6 +161,20 @@ button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
   justify-content: center;
   align-items: center;
   padding: var(--spacing);
+}
+
+/* Map container: square aspect, rounded corners inherit via overflow */
+#live-map {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+/* MapLibre canvas should fill container */
+.mapboxgl-canvas, .maplibregl-canvas {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .box-title {

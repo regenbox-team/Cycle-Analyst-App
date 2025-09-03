@@ -177,6 +177,15 @@
       </div>
     </div>
 
+    <!-- Live Map (PMTiles) -->
+    <div class="box map-box">
+      <div class="box-title">Map</div>
+      <div style="position:absolute; top:0.4rem; right:0.6rem; z-index:2; display:flex; gap:0.3rem;">
+        <button id="map-follow-toggle" class="dashboard-button" title="Toggle follow">Follow: Off</button>
+      </div>
+      <div id="live-map"></div>
+    </div>
+
     <div class="box range-box">
       <div class="box-title">Range</div>
         <div class="trip-metrics" style="flex-direction: column; gap: 0.2rem; align-items: flex-start;">
@@ -229,5 +238,10 @@
 
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
   <script src="{{ url_for('static', filename='js/gps_status.js') }}"></script>
+  <!-- Prefer local vendor copies for offline usage; fallback to CDN if not present -->
+  <link id="ml-style" rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre-gl.css') }}" onerror="this.href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css'">
+  <script src="{{ url_for('static', filename='vendor/maplibre-gl.js') }}" onerror="this.onerror=null;this.src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'"></script>
+  <script src="{{ url_for('static', filename='vendor/pmtiles.js') }}" onerror="this.onerror=null;this.src='https://unpkg.com/pmtiles@4.0.0/dist/pmtiles.js'"></script>
+  <script src="{{ url_for('static', filename='js/map.js') }}"></script>
 </body>
 </html>
