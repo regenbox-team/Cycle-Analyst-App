@@ -6,6 +6,7 @@
   const MAX_POINTS = 5000;
   let posSource = null;
   let trackSource = null;
+  const OFFLINE_PM_TILES_DEFAULT = false; // set to true if you always ship offline tiles
 
   async function ensurePmtiles() {
     if (typeof pmtiles !== 'undefined') return;
@@ -99,6 +100,16 @@
     }
   }
 
+  function wantOfflineTiles() {
+    // Priority: data attribute on container, then localStorage flag, then default
+    const el = document.getElementById('live-map');
+    const attr = el && el.getAttribute('data-use-offline-tiles');
+    if (attr && (attr === '1' || attr === 'true')) return true;
+    const ls = localStorage.getItem('useOfflineTiles');
+    if (ls === '1' || ls === 'true') return true;
+    return OFFLINE_PM_TILES_DEFAULT;
+  }
+
   async function initMap() {
     const container = document.getElementById('live-map');
     if (!container) return;
@@ -117,10 +128,10 @@
 
     const pmtilesPath = '/static/tiles/basemap.pmtiles';
     let style;
-    if (await pmtilesExists(pmtilesPath)) {
+    if (wantOfflineTiles() && await pmtilesExists(pmtilesPath)) {
       style = createMinimalDarkStyle(pmtilesPath);
     } else {
-      // Fallback to online raster tiles if offline bundle is missing
+      // Fallback to online raster tiles if offline bundle is missing or probing is disabled
       style = createRasterFallbackStyle();
     }
 
