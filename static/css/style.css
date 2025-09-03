@@ -4,7 +4,7 @@
   --font-title: 1.5rem;
   --font-label: 1rem;
   --font-value: 0.75rem;
-  --font-medium: 0.75rem;
+  --font-medium: 0.6rem;
   --font-small: 0.5rem;
   --spacing: 0.4rem;
   --radius: 0.75rem;
@@ -53,7 +53,7 @@ button, .dashboard-button, .start-button, .user-button {
   transition: background-color 0.3s ease;
   font-size: var(--font-medium);
   border-radius: var(--radius);
-  padding: 0.3rem 0.5rem;
+  padding: 0.15rem 0.3rem;
   border: none;
 }
 
@@ -323,7 +323,6 @@ button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
 #switch-user-button {
   background-color: #444;
   color: white;
-  margin-left: 0.5rem;
 }
 
 #flags-container {
@@ -338,7 +337,7 @@ button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
   color: #999;
   font-size: var(--font-medium);
   border-radius: var(--radius);
-  padding: 0.3rem 0.5rem;
+  padding: 0.15rem 0.3rem;
   opacity: 0.4;
   transition: all 0.2s ease;
 }
