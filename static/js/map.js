@@ -59,6 +59,46 @@
     };
   }
 
+  function createRasterFallbackStyle() {
+    return {
+      version: 8,
+      sources: {
+        osm: {
+          type: 'raster',
+          tiles: [
+            // Development-only fallback; respect OSM tile usage policy for production
+            'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+          ],
+          tileSize: 256,
+          attribution: '© OpenStreetMap contributors'
+        },
+        track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+        pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
+      },
+      layers: [
+        { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
+        { id: 'osm-raster', type: 'raster', source: 'osm' },
+        { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#ff7a00', 'line-width': 3, 'line-opacity': 0.9 } },
+        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+      ]
+    };
+  }
+
+  async function pmtilesExists(url) {
+    try {
+      const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+      if (head.ok) return true;
+      // Some servers don’t support HEAD
+      if (head.status === 405 || head.status === 501) {
+        const probe = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, cache: 'no-store' });
+        return probe.ok || probe.status === 206; // partial content acceptable
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async function initMap() {
     const container = document.getElementById('live-map');
     if (!container) return;
@@ -76,7 +116,13 @@
     maplibregl.addProtocol('pmtiles', protocol.tile);
 
     const pmtilesPath = '/static/tiles/basemap.pmtiles';
-    const style = createMinimalDarkStyle(pmtilesPath);
+    let style;
+    if (await pmtilesExists(pmtilesPath)) {
+      style = createMinimalDarkStyle(pmtilesPath);
+    } else {
+      // Fallback to online raster tiles if offline bundle is missing
+      style = createRasterFallbackStyle();
+    }
 
     map = new maplibregl.Map({
       container: 'live-map',
