@@ -51,89 +51,223 @@
     setFollowButton();
   }
 
+  // ==== Inline Protomaps-like styles (copied from basemaps.js) ====
+  function getDarkPalette() {
+    // Based on basemaps DARK palette, with CSS-aligned background
+    return {
+      background: '#000000',
+      earth: '#000000',
+      park_a: '#1c2421', park_b: '#192a24', hospital: '#252424', industrial: '#222222', school: '#262323',
+      wood_a: '#202121', wood_b: '#202121', pedestrian: '#1e1e1e', scrub_a: '#222323', scrub_b: '#222323',
+      glacier: '#1c1c1c', sand: '#212123', beach: '#28282a', aerodrome: '#1e1e1e', runway: '#333333',
+      water: '#31353f', zoo: '#222323', military: '#242323',
+      tunnel_other_casing: '#141414', tunnel_minor_casing: '#141414', tunnel_link_casing: '#141414', tunnel_major_casing: '#141414', tunnel_highway_casing: '#141414',
+      tunnel_other: '#292929', tunnel_minor: '#292929', tunnel_link: '#292929', tunnel_major: '#292929', tunnel_highway: '#292929',
+      pier: '#333333', buildings: '#111111',
+      minor_service_casing: '#1f1f1f', minor_casing: '#1f1f1f', link_casing: '#1f1f1f', major_casing_late: '#1f1f1f', highway_casing_late: '#1f1f1f',
+      other: '#333333', minor_service: '#333333', minor_a: '#3d3d3d', minor_b: '#333333', link: '#3d3d3d',
+      major_casing_early: '#1f1f1f', major: '#3d3d3d', highway_casing_early: '#1f1f1f', highway: '#474747',
+      railway: '#000000', boundaries: '#5b6374',
+      bridges_other_casing: '#2b2b2b', bridges_minor_casing: '#1f1f1f', bridges_link_casing: '#1f1f1f', bridges_major_casing: '#1f1f1f', bridges_highway_casing: '#1f1f1f',
+      bridges_other: '#333333', bridges_minor: '#333333', bridges_link: '#3d3d3d', bridges_major: '#3d3d3d', bridges_highway: '#474747',
+      roads_label_minor: '#525252', roads_label_minor_halo: '#1f1f1f',
+      roads_label_major: '#666666', roads_label_major_halo: '#1f1f1f',
+      ocean_label: '#717784',
+      subplace_label: '#525252', subplace_label_halo: '#1f1f1f',
+      city_label: '#7a7a7a', city_label_halo: '#212121',
+      state_label: '#3d3d3d', state_label_halo: '#1f1f1f',
+      country_label: '#5c5c5c',
+      address_label: '#525252', address_label_halo: '#1f1f1f',
+      landcover: {
+        grassland: 'rgba(30, 41, 31, 1)', barren: 'rgba(38, 38, 36, 1)', urban_area: 'rgba(28, 28, 28, 1)',
+        farmland: 'rgba(31, 36, 32, 1)', glacier: 'rgba(43, 43, 43, 1)', scrub: 'rgba(34, 36, 30, 1)', forest: 'rgba(28, 41, 37, 1)'
+      }
+    };
+  }
+
+  function getLightPalette() {
+    // Based on basemaps LIGHT palette, with CSS-aligned background/earth to --bg-box
+    return {
+      background: '#e5e1cf',
+      earth: '#e5e1cf',
+      park_a: '#cfddd5', park_b: '#9cd3b4', hospital: '#e4dad9', industrial: '#d1dde1', school: '#e4ded7',
+      wood_a: '#d0ded0', wood_b: '#a0d9a0', pedestrian: '#e3e0d4', scrub_a: '#cedcd7', scrub_b: '#99d2bb',
+      glacier: '#e7e7e7', sand: '#e2e0d7', beach: '#e8e4d0', aerodrome: '#dadbdf', runway: '#e9e9ed',
+      water: '#80deea', zoo: '#c6dcdc', military: '#dcdcdc',
+      tunnel_other_casing: '#e0e0e0', tunnel_minor_casing: '#e0e0e0', tunnel_link_casing: '#e0e0e0', tunnel_major_casing: '#e0e0e0', tunnel_highway_casing: '#e0e0e0',
+      tunnel_other: '#d5d5d5', tunnel_minor: '#d5d5d5', tunnel_link: '#d5d5d5', tunnel_major: '#d5d5d5', tunnel_highway: '#d5d5d5',
+      pier: '#e0e0e0', buildings: '#cccccc',
+      minor_service_casing: '#e0e0e0', minor_casing: '#e0e0e0', link_casing: '#e0e0e0', major_casing_late: '#e0e0e0', highway_casing_late: '#e0e0e0',
+      other: '#ebebeb', minor_service: '#ebebeb', minor_a: '#ebebeb', minor_b: '#ffffff', link: '#ffffff',
+      major_casing_early: '#e0e0e0', major: '#ffffff', highway_casing_early: '#e0e0e0', highway: '#ffffff',
+      railway: '#a7b1b3', boundaries: '#adadad',
+      bridges_other_casing: '#e0e0e0', bridges_minor_casing: '#e0e0e0', bridges_link_casing: '#e0e0e0', bridges_major_casing: '#e0e0e0', bridges_highway_casing: '#e0e0e0',
+      bridges_other: '#ebebeb', bridges_minor: '#ffffff', bridges_link: '#ffffff', bridges_major: '#f5f5f5', bridges_highway: '#ffffff',
+      roads_label_minor: '#91888b', roads_label_minor_halo: '#ffffff',
+      roads_label_major: '#938a8d', roads_label_major_halo: '#ffffff',
+      ocean_label: '#728dd4',
+      subplace_label: '#8f8f8f', subplace_label_halo: '#e0e0e0',
+      city_label: '#5c5c5c', city_label_halo: '#e0e0e0',
+      state_label: '#b3b3b3', state_label_halo: '#e0e0e0',
+      country_label: '#a3a3a3',
+      address_label: '#91888b', address_label_halo: '#ffffff',
+      landcover: {
+        grassland: 'rgba(210, 239, 207, 1)', barren: 'rgba(255, 243, 215, 1)', urban_area: 'rgba(230, 230, 230, 1)',
+        farmland: 'rgba(216, 239, 210, 1)', glacier: 'rgba(255, 255, 255, 1)', scrub: 'rgba(234, 239, 210, 1)', forest: 'rgba(196, 231, 210, 1)'
+      }
+    };
+  }
+
+  function buildBaseLayers(sourceId, e) {
+    const Z = [
+      { id: 'background', type: 'background', paint: { 'background-color': e.background } },
+      { id: 'earth', type: 'fill', filter: ['==', '$type', 'Polygon'], source: sourceId, 'source-layer': 'earth', paint: { 'fill-color': e.earth } },
+    ];
+    if (e.landcover) {
+      Z.push({
+        id: 'landcover', type: 'fill', source: sourceId, 'source-layer': 'landcover',
+        paint: {
+          'fill-color': ['match', ['get', 'kind'], 'grassland', e.landcover.grassland, 'barren', e.landcover.barren, 'urban_area', e.landcover.urban_area, 'farmland', e.landcover.farmland, 'glacier', e.landcover.glacier, 'scrub', e.landcover.scrub, e.landcover.forest],
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 5, 1, 7, 0]
+        }
+      });
+    }
+    Z.push(
+      { id: 'landuse_park', type: 'fill', source: sourceId, 'source-layer': 'landuse',
+        filter: ['in', 'kind', 'national_park', 'park', 'cemetery', 'protected_area', 'nature_reserve', 'forest', 'golf_course', 'wood', 'nature_reserve', 'forest', 'scrub', 'grassland', 'grass', 'military', 'naval_base', 'airfield'],
+        paint: {
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 6, 0, 11, 1],
+          'fill-color': ['case',
+            ['in', ['get', 'kind'], ['literal', ['national_park','park','cemetery','protected_area','nature_reserve','forest','golf_course']]], e.park_b,
+            ['in', ['get', 'kind'], ['literal', ['wood','nature_reserve','forest']]], e.wood_b,
+            ['in', ['get', 'kind'], ['literal', ['scrub','grassland','grass']]], e.scrub_b,
+            ['in', ['get', 'kind'], ['literal', ['glacier']]], e.glacier,
+            ['in', ['get', 'kind'], ['literal', ['sand']]], e.sand,
+            ['in', ['get', 'kind'], ['literal', ['military','naval_base','airfield']]], e.zoo,
+            e.earth
+          ]
+        }
+      },
+      { id: 'landuse_urban_green', type: 'fill', source: sourceId, 'source-layer': 'landuse', filter: ['in','kind','allotments','village_green','playground'], paint: { 'fill-color': e.park_b, 'fill-opacity': 0.7 } },
+      { id: 'landuse_hospital', type: 'fill', source: sourceId, 'source-layer': 'landuse', filter: ['==','kind','hospital'], paint: { 'fill-color': e.hospital } },
+      { id: 'landuse_industrial', type: 'fill', source: sourceId, 'source-layer': 'landuse', filter: ['==','kind','industrial'], paint: { 'fill-color': e.industrial } },
+      { id: 'landuse_school', type: 'fill', source: sourceId, 'source-layer': 'landuse', filter: ['in','kind','school','university','college'], paint: { 'fill-color': e.school } },
+      { id: 'landuse_beach', type: 'fill', source: sourceId, 'source-layer': 'landuse', filter: ['in','kind','beach'], paint: { 'fill-color': e.beach } },
+      { id: 'landuse_zoo', type: 'fill', source: sourceId, 'source-layer': 'landuse', filter: ['in','kind','zoo'], paint: { 'fill-color': e.zoo } },
+      { id: 'landuse_aerodrome', type: 'fill', source: sourceId, 'source-layer': 'landuse', filter: ['in','kind','aerodrome'], paint: { 'fill-color': e.aerodrome } },
+      { id: 'roads_runway', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['==','kind_detail','runway'], paint: { 'line-color': e.runway, 'line-width': ['interpolate',['exponential',1.6],['zoom'],10,0,12,4,18,30] } },
+      { id: 'roads_taxiway', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 13, filter: ['==','kind_detail','taxiway'], paint: { 'line-color': e.runway, 'line-width': ['interpolate',['exponential',1.6],['zoom'],13,0,13.5,1,15,6] } },
+      { id: 'landuse_runway', type: 'fill', source: sourceId, 'source-layer': 'landuse', filter: ['any',['in','kind','runway','taxiway']], paint: { 'fill-color': e.runway } },
+      { id: 'water', type: 'fill', filter: ['==','$type','Polygon'], source: sourceId, 'source-layer': 'water', paint: { 'fill-color': e.water } },
+      { id: 'water_stream', type: 'line', source: sourceId, 'source-layer': 'water', minzoom: 14, filter: ['in','kind','stream'], paint: { 'line-color': e.water, 'line-width': 0.5 } },
+      { id: 'water_river', type: 'line', source: sourceId, 'source-layer': 'water', minzoom: 9, filter: ['in','kind','river'], paint: { 'line-color': e.water, 'line-width': ['interpolate',['exponential',1.6],['zoom'],9,0,9.5,1,18,12] } },
+      { id: 'landuse_pedestrian', type: 'fill', source: sourceId, 'source-layer': 'landuse', filter: ['in','kind','pedestrian','dam'], paint: { 'fill-color': e.pedestrian } },
+      { id: 'landuse_pier', type: 'fill', source: sourceId, 'source-layer': 'landuse', filter: ['==','kind','pier'], paint: { 'fill-color': e.pier } },
+      // Tunnels casings and lines
+      { id: 'roads_tunnels_other_casing', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['has','is_tunnel'],['in','kind','other','path']], paint: { 'line-color': e.tunnel_other_casing, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],14,0,20,7] } },
+      { id: 'roads_tunnels_minor_casing', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['has','is_tunnel'],['==','kind','minor_road']], paint: { 'line-color': e.tunnel_minor_casing, 'line-dasharray': [3,2], 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],11,0,12.5,0.5,15,2,18,11], 'line-width': ['interpolate',['exponential',1.6],['zoom'],12,0,12.5,1] } },
+      { id: 'roads_tunnels_link_casing', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['has','is_tunnel'],['has','is_link']], paint: { 'line-color': e.tunnel_link_casing, 'line-dasharray': [3,2], 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],13,0,13.5,1,18,11], 'line-width': ['interpolate',['exponential',1.6],['zoom'],12,0,12.5,1] } },
+      { id: 'roads_tunnels_major_casing', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','major_road']], paint: { 'line-color': e.tunnel_major_casing, 'line-dasharray': [3,2], 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],7,0,7.5,0.5,18,13], 'line-width': ['interpolate',['exponential',1.6],['zoom'],9,0,9.5,1] } },
+      { id: 'roads_tunnels_highway_casing', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','highway'],['!has','is_link']], paint: { 'line-color': e.tunnel_highway_casing, 'line-dasharray': [6,0.5], 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],3,0,3.5,0.5,18,15], 'line-width': ['interpolate',['exponential',1.6],['zoom'],7,0,7.5,1,20,15] } },
+      { id: 'roads_tunnels_other', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['has','is_tunnel'],['in','kind','other','path']], paint: { 'line-color': e.tunnel_other, 'line-dasharray': [4.5,0.5], 'line-width': ['interpolate',['exponential',1.6],['zoom'],14,0,20,7] } },
+      { id: 'roads_tunnels_minor', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['has','is_tunnel'],['==',['get','kind'],'minor_road']], paint: { 'line-color': e.tunnel_minor, 'line-width': ['interpolate',['exponential',1.6],['zoom'],11,0,12.5,0.5,15,2,18,11] } },
+      { id: 'roads_tunnels_link', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['has','is_tunnel'],['has','is_link']], paint: { 'line-color': e.tunnel_minor, 'line-width': ['interpolate',['exponential',1.6],['zoom'],13,0,13.5,1,18,11] } },
+      { id: 'roads_tunnels_major', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['has','is_tunnel'],['==','kind','major_road']], paint: { 'line-color': e.tunnel_major, 'line-width': ['interpolate',['exponential',1.6],['zoom'],6,0,12,1.6,15,3,18,13] } },
+      { id: 'roads_tunnels_highway', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['has','is_tunnel'],['==',['get','kind'],'highway'],['!', ['has','is_link']]], paint: { 'line-color': e.tunnel_highway, 'line-width': ['interpolate',['exponential',1.6],['zoom'],3,0,6,1.1,12,1.6,15,5,18,15] } },
+      // Buildings
+      { id: 'buildings', type: 'fill', source: sourceId, 'source-layer': 'buildings', filter: ['in','kind','building','building_part'], paint: { 'fill-color': e.buildings, 'fill-opacity': 0.5 } },
+      // Piers and minor casings/roads
+      { id: 'roads_pier', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['==','kind_detail','pier'], paint: { 'line-color': e.pier, 'line-width': ['interpolate',['exponential',1.6],['zoom'],12,0,12.5,0.5,20,16] } },
+      { id: 'roads_minor_service_casing', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 13, filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','minor_road'],['==','kind_detail','service']], paint: { 'line-color': e.minor_service_casing, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],13,0,18,8], 'line-width': ['interpolate',['exponential',1.6],['zoom'],13,0,13.5,0.8] } },
+      { id: 'roads_minor_casing', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','minor_road'],['!=','kind_detail','service']], paint: { 'line-color': e.minor_casing, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],11,0,12.5,0.5,15,2,18,11], 'line-width': ['interpolate',['exponential',1.6],['zoom'],12,0,12.5,1] } },
+      { id: 'roads_link_casing', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 13, filter: ['has','is_link'], paint: { 'line-color': e.minor_casing, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],13,0,13.5,1,18,11], 'line-width': ['interpolate',['exponential',1.6],['zoom'],13,0,13.5,1.5] } },
+      { id: 'roads_major_casing_late', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','major_road']], paint: { 'line-color': e.major_casing_late, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],6,0,12,1.6,15,3,18,13], 'line-width': ['interpolate',['exponential',1.6],['zoom'],9,0,9.5,1] } },
+      { id: 'roads_highway_casing_late', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','highway'],['!has','is_link']], paint: { 'line-color': e.highway_casing_late, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],3,0,3.5,0.5,18,15], 'line-width': ['interpolate',['exponential',1.6],['zoom'],7,0,7.5,1,20,15] } },
+      { id: 'roads_other', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['in','kind','other','path'],['!=','kind_detail','pier']], paint: { 'line-color': e.other, 'line-dasharray': [3,1], 'line-width': ['interpolate',['exponential',1.6],['zoom'],14,0,20,7] } },
+      { id: 'roads_link', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['has','is_link'], paint: { 'line-color': e.link, 'line-width': ['interpolate',['exponential',1.6],['zoom'],13,0,13.5,1,18,11] } },
+      { id: 'roads_minor_service', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','minor_road'],['==','kind_detail','service']], paint: { 'line-color': e.minor_service, 'line-width': ['interpolate',['exponential',1.6],['zoom'],13,0,18,8] } },
+      { id: 'roads_minor', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','minor_road'],['!=','kind_detail','service']], paint: { 'line-color': ['interpolate',['exponential',1.6],['zoom'],11, e.minor_a, 16, e.minor_b], 'line-width': ['interpolate',['exponential',1.6],['zoom'],11,0,12.5,0.5,15,2,18,11] } },
+      { id: 'roads_major_casing_early', type: 'line', source: sourceId, 'source-layer': 'roads', maxzoom: 12, filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','major_road']], paint: { 'line-color': e.major_casing_early, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],7,0,7.5,0.5,18,13], 'line-width': ['interpolate',['exponential',1.6],['zoom'],9,0,9.5,1] } },
+      { id: 'roads_major', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','major_road']], paint: { 'line-color': e.major, 'line-width': ['interpolate',['exponential',1.6],['zoom'],6,0,12,1.6,15,3,18,13] } },
+      { id: 'roads_highway_casing_early', type: 'line', source: sourceId, 'source-layer': 'roads', maxzoom: 12, filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','highway'],['!has','is_link']], paint: { 'line-color': e.highway_casing_early, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],3,0,3.5,0.5,18,15], 'line-width': ['interpolate',['exponential',1.6],['zoom'],7,0,7.5,1] } },
+      { id: 'roads_highway', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['!has','is_tunnel'],['!has','is_bridge'],['==','kind','highway'],['!has','is_link']], paint: { 'line-color': e.highway, 'line-width': ['interpolate',['exponential',1.6],['zoom'],3,0,6,1.1,12,1.6,15,5,18,15] } },
+      { id: 'roads_rail', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['==','kind','rail'], paint: { 'line-dasharray': [0.3, 0.75], 'line-opacity': 0.5, 'line-color': e.railway, 'line-width': ['interpolate',['exponential',1.6],['zoom'],3,0,6,0.15,18,9] } },
+      { id: 'boundaries_country', type: 'line', source: sourceId, 'source-layer': 'boundaries', filter: ['<=','kind_detail',2], paint: { 'line-color': e.boundaries, 'line-width': 0.7, 'line-dasharray': ['step', ['zoom'], ['literal',[2,0]], 4, ['literal',[2,1]]] } },
+      { id: 'boundaries', type: 'line', source: sourceId, 'source-layer': 'boundaries', filter: ['>','kind_detail',2], paint: { 'line-color': e.boundaries, 'line-width': 0.4, 'line-dasharray': ['step', ['zoom'], ['literal',[2,0]], 4, ['literal',[2,1]]] } },
+      // Bridges
+      { id: 'roads_bridges_other_casing', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['has','is_bridge'],['in','kind','other','path']], paint: { 'line-color': e.bridges_other_casing, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],14,0,20,7] } },
+      { id: 'roads_bridges_link_casing', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['has','is_bridge'],['has','is_link']], paint: { 'line-color': e.bridges_minor_casing, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],13,0,13.5,1,18,11], 'line-width': ['interpolate',['exponential',1.6],['zoom'],12,0,12.5,1.5] } },
+      { id: 'roads_bridges_minor_casing', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['has','is_bridge'],['==','kind','minor_road']], paint: { 'line-color': e.bridges_minor_casing, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],11,0,12.5,0.5,15,2,18,11], 'line-width': ['interpolate',['exponential',1.6],['zoom'],13,0,13.5,0.8] } },
+      { id: 'roads_bridges_major_casing', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['has','is_bridge'],['==','kind','major_road']], paint: { 'line-color': e.bridges_major_casing, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],7,0,7.5,0.5,18,10], 'line-width': ['interpolate',['exponential',1.6],['zoom'],9,0,9.5,1.5] } },
+      { id: 'roads_bridges_other', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['has','is_bridge'],['in','kind','other','path']], paint: { 'line-color': e.bridges_other, 'line-dasharray': [2,1], 'line-width': ['interpolate',['exponential',1.6],['zoom'],14,0,20,7] } },
+      { id: 'roads_bridges_minor', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['has','is_bridge'],['==','kind','minor_road']], paint: { 'line-color': e.bridges_minor, 'line-width': ['interpolate',['exponential',1.6],['zoom'],11,0,12.5,0.5,15,2,18,11] } },
+      { id: 'roads_bridges_link', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['has','is_bridge'],['has','is_link']], paint: { 'line-color': e.bridges_minor, 'line-width': ['interpolate',['exponential',1.6],['zoom'],13,0,13.5,1,18,11] } },
+      { id: 'roads_bridges_major', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['has','is_bridge'],['==','kind','major_road']], paint: { 'line-color': e.bridges_major, 'line-width': ['interpolate',['exponential',1.6],['zoom'],6,0,12,1.6,15,3,18,13] } },
+      { id: 'roads_bridges_highway_casing', type: 'line', source: sourceId, 'source-layer': 'roads', minzoom: 12, filter: ['all',['has','is_bridge'],['==','kind','highway'],['!has','is_link']], paint: { 'line-color': e.bridges_highway_casing, 'line-gap-width': ['interpolate',['exponential',1.6],['zoom'],3,0,3.5,0.5,18,15], 'line-width': ['interpolate',['exponential',1.6],['zoom'],7,0,7.5,1,20,15] } },
+      { id: 'roads_bridges_highway', type: 'line', source: sourceId, 'source-layer': 'roads', filter: ['all',['has','is_bridge'],['==','kind','highway'],['!has','is_link']], paint: { 'line-color': e.bridges_highway, 'line-width': ['interpolate',['exponential',1.6],['zoom'],3,0,6,1.1,12,1.6,15,5,18,15] } }
+    );
+    return Z;
+  }
+
+  function buildLabelLayers(sourceId, e) {
+    // Simplified labels with same palette colors; stick to FONT_STACK and English where available
+    const textField = ['coalesce', ['get','name:en'], ['get','name']];
+    return [
+      { id: 'address_label', type: 'symbol', source: sourceId, 'source-layer': 'buildings', minzoom: 18, filter: ['==','kind','address'], layout: { 'symbol-placement': 'point', 'text-font': [FONT_STACK], 'text-field': ['get','addr_housenumber'], 'text-size': 12 }, paint: { 'text-color': e.address_label, 'text-halo-color': e.address_label_halo, 'text-halo-width': 1 } },
+      { id: 'water_waterway_label', type: 'symbol', source: sourceId, 'source-layer': 'water', minzoom: 13, filter: ['in','kind','river','stream'], layout: { 'symbol-placement': 'line', 'text-font': [FONT_STACK], 'text-field': textField, 'text-size': 12, 'text-letter-spacing': 0.2 }, paint: { 'text-color': e.ocean_label, 'text-halo-color': e.water, 'text-halo-width': 1 } },
+      { id: 'roads_oneway', type: 'symbol', source: sourceId, 'source-layer': 'roads', minzoom: 16, filter: ['==',['get','oneway'],'yes'], layout: { 'symbol-placement': 'line', 'icon-image': 'arrow', 'icon-rotate': 90, 'symbol-spacing': 100 } },
+      { id: 'roads_labels_minor', type: 'symbol', source: sourceId, 'source-layer': 'roads', minzoom: 15, filter: ['in','kind','minor_road','other','path'], layout: { 'symbol-sort-key': ['get','min_zoom'], 'symbol-placement': 'line', 'text-font': [FONT_STACK], 'text-field': textField, 'text-size': 12 }, paint: { 'text-color': e.roads_label_minor, 'text-halo-color': e.roads_label_minor_halo, 'text-halo-width': 1 } },
+      { id: 'water_label_ocean', type: 'symbol', source: sourceId, 'source-layer': 'water', filter: ['in','kind','sea','ocean','bay','strait','fjord'], layout: { 'text-font': [FONT_STACK], 'text-field': textField, 'text-size': ['interpolate',['linear'],['zoom'],3,10,10,12], 'text-letter-spacing': 0.1, 'text-max-width': 9, 'text-transform': 'uppercase' }, paint: { 'text-color': e.ocean_label, 'text-halo-width': 1, 'text-halo-color': e.water } },
+      { id: 'earth_label_islands', type: 'symbol', source: sourceId, 'source-layer': 'earth', filter: ['in','kind','island'], layout: { 'text-font': [FONT_STACK], 'text-field': textField, 'text-size': 10, 'text-letter-spacing': 0.1, 'text-max-width': 8 }, paint: { 'text-color': e.subplace_label, 'text-halo-color': e.subplace_label_halo, 'text-halo-width': 1 } },
+      { id: 'water_label_lakes', type: 'symbol', source: sourceId, 'source-layer': 'water', filter: ['in','kind','lake','water'], layout: { 'text-font': [FONT_STACK], 'text-field': textField, 'text-size': ['interpolate',['linear'],['zoom'],3,10,6,12,10,12], 'text-letter-spacing': 0.1, 'text-max-width': 9 }, paint: { 'text-color': e.ocean_label, 'text-halo-color': e.water, 'text-halo-width': 1 } },
+      { id: 'roads_labels_major', type: 'symbol', source: sourceId, 'source-layer': 'roads', minzoom: 11, filter: ['in','kind','highway','major_road'], layout: { 'symbol-sort-key': ['get','min_zoom'], 'symbol-placement': 'line', 'text-font': [FONT_STACK], 'text-field': textField, 'text-size': 12 }, paint: { 'text-color': e.roads_label_major, 'text-halo-color': e.roads_label_major_halo, 'text-halo-width': 1 } },
+      { id: 'places_subplace', type: 'symbol', source: sourceId, 'source-layer': 'places', filter: ['in','kind','neighbourhood','macrohood'], layout: { 'symbol-sort-key': ['case',['has','sort_key'],['get','sort_key'],['get','min_zoom']], 'text-field': textField, 'text-font': [FONT_STACK], 'text-max-width': 7, 'text-letter-spacing': 0.1, 'text-padding': ['interpolate',['linear'],['zoom'],5,2,8,4,12,18,15,20], 'text-size': ['interpolate',['exponential',1.2],['zoom'],11,8,14,14,18,24], 'text-transform': 'uppercase' }, paint: { 'text-color': e.subplace_label, 'text-halo-color': e.subplace_label_halo, 'text-halo-width': 1 } },
+      { id: 'places_region', type: 'symbol', source: sourceId, 'source-layer': 'places', filter: ['==','kind','region'], layout: { 'symbol-sort-key': ['get','sort_key'], 'text-field': textField, 'text-font': [FONT_STACK], 'text-size': ['interpolate',['linear'],['zoom'],3,11,7,16], 'text-radial-offset': 0.2, 'text-anchor': 'center', 'text-transform': 'uppercase' }, paint: { 'text-color': e.state_label, 'text-halo-color': e.state_label_halo, 'text-halo-width': 1 } },
+      { id: 'places_locality', type: 'symbol', source: sourceId, 'source-layer': 'places', filter: ['==','kind','locality'], layout: { 'icon-image': ['step',['zoom'], ['case',['==',['get','capital'],'yes'],'capital','townspot'], 8, '' ], 'icon-size': 0.7, 'text-field': textField, 'text-font': [FONT_STACK], 'symbol-sort-key': ['case',['has','sort_key'],['get','sort_key'],['get','min_zoom']], 'text-padding': ['interpolate',['linear'],['zoom'],5,3,8,7,12,11], 'text-size': ['interpolate',['linear'],['zoom'],2,8,4,10,6,11,8,11,10,12,15,12], 'icon-padding': ['interpolate',['linear'],['zoom'],0,0,8,4,10,8,12,6,22,2], 'text-justify': 'auto', 'text-variable-anchor': ['step',['zoom'], ['literal',['bottom','left','right','top']], 8, ['literal',['center']] ], 'text-radial-offset': 0.3 }, paint: { 'text-color': e.city_label, 'text-halo-color': e.city_label_halo, 'text-halo-width': 1 } },
+      { id: 'places_country', type: 'symbol', source: sourceId, 'source-layer': 'places', filter: ['==','kind','country'], layout: { 'symbol-sort-key': ['case',['has','sort_key'],['get','sort_key'],['get','min_zoom']], 'text-field': textField, 'text-font': [FONT_STACK], 'text-size': ['interpolate',['linear'],['zoom'],2,8,6,10,8,11], 'icon-padding': ['interpolate',['linear'],['zoom'],0,2,14,2,16,20,17,2,22,2], 'text-transform': 'uppercase' }, paint: { 'text-color': e.country_label, 'text-halo-color': e.earth, 'text-halo-width': 1 } }
+    ];
+  }
+
   function createMinimalDarkStyle(pmtilesUrl, includeLabels) {
+    const palette = getDarkPalette();
+    const layers = [
+      ...buildBaseLayers('basemap', palette),
+      ...(includeLabels ? buildLabelLayers('basemap', palette) : []),
+      // Live track & position styled per CSS highlight
+      { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': 'orange', 'line-width': 3, 'line-opacity': 0.9 } },
+      { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': 'orange', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+    ];
+
     return {
       version: 8,
       ...(includeLabels ? { glyphs: '/static/vendor/fonts/{fontstack}/{range}.pbf' } : {}),
       sources: {
-        basemap: {
-          type: 'vector',
-          url: `pmtiles://${pmtilesUrl}`
-        },
+        basemap: { type: 'vector', url: `pmtiles://${pmtilesUrl}` },
         track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
         pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
       },
-      layers: [
-        { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
-        // Land/Earth base (if missing in dataset, this is harmless)
-        { id: 'earth', type: 'fill', source: 'basemap', 'source-layer': 'earth', paint: { 'fill-color': '#0b0c12' } },
-        { id: 'land', type: 'fill', source: 'basemap', 'source-layer': 'land', paint: { 'fill-color': '#0b0c12' } },
-        // Landuse (parks/greens etc.)
-        { id: 'landuse-park', type: 'fill', source: 'basemap', 'source-layer': 'landuse', filter: ['==', ['get', 'class'], 'park'], paint: { 'fill-color': '#0f2617', 'fill-opacity': 0.7 } },
-        { id: 'landuse-forest', type: 'fill', source: 'basemap', 'source-layer': 'landuse', filter: ['in', ['get', 'class'], ['literal', ['forest', 'wood']]], paint: { 'fill-color': '#0e1f14', 'fill-opacity': 0.7 } },
-        { id: 'landuse-grass', type: 'fill', source: 'basemap', 'source-layer': 'landuse', filter: ['in', ['get', 'class'], ['literal', ['grass', 'scrub', 'meadow']]], paint: { 'fill-color': '#0e1b12', 'fill-opacity': 0.6 } },
-        // Water
-        { id: 'water', type: 'fill', source: 'basemap', 'source-layer': 'water', paint: { 'fill-color': '#0b1a2a', 'fill-opacity': 0.9 } },
-        // Boundaries
-        { id: 'boundaries', type: 'line', source: 'basemap', 'source-layer': 'boundaries', paint: { 'line-color': '#2b2b39', 'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.2, 8, 0.6, 10, 0.8, 12, 1.0] } },
-        // Roads (Protomaps)
-        { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'roads', paint: { 'line-color': '#2a2a2a', 'line-width': ['interpolate', ['linear'], ['zoom'], 6, ['match', ['get', 'class'], 'motorway', 0.6, 'trunk', 0.55, 'primary', 0.5, 'secondary', 0.4, 'tertiary', 0.35, 'residential', 0.25, 'service', 0.2, 0.2], 10, ['match', ['get', 'class'], 'motorway', 1.2, 'trunk', 1.0, 'primary', 1.0, 'secondary', 0.9, 'tertiary', 0.8, 'residential', 0.6, 'service', 0.5, 0.6], 12, ['match', ['get', 'class'], 'motorway', 2.2, 'trunk', 2.0, 'primary', 1.8, 'secondary', 1.5, 'tertiary', 1.2, 'residential', 0.9, 'service', 0.7, 0.8], 14, ['match', ['get', 'class'], 'motorway', 3.5, 'trunk', 3.0, 'primary', 2.6, 'secondary', 2.2, 'tertiary', 1.8, 'residential', 1.4, 'service', 1.0, 1.2] ] } },
-        // Buildings (Protomaps layer name is 'buildings')
-        { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'buildings', paint: { 'fill-color': '#161616', 'fill-opacity': 0.45 } },
-
-        ...(includeLabels ? [
-          { id: 'water-labels', type: 'symbol', source: 'basemap', 'source-layer': 'water', layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': [FONT_STACK], 'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 14], 'text-max-width': 8, 'symbol-placement': 'point' }, paint: { 'text-color': '#7fb0ff', 'text-halo-color': '#0a0b0f', 'text-halo-width': 1 } },
-          { id: 'road-labels', type: 'symbol', source: 'basemap', 'source-layer': 'roads', layout: { 'symbol-placement': 'line', 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': [FONT_STACK], 'text-size': ['match', ['get', 'class'], 'motorway', 12, 'trunk', 12, 'primary', 11, 'secondary', 10, 'tertiary', 10, 'residential', 9, 9] }, paint: { 'text-color': '#a0a3aa', 'text-halo-color': '#0a0b0f', 'text-halo-width': 1 } },
-          { id: 'place-labels', type: 'symbol', source: 'basemap', 'source-layer': 'places', layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': [FONT_STACK], 'text-size': ['match', ['get', 'class'], 'city', 16, 'town', 14, 'village', 12, 'hamlet', 11, 12] }, paint: { 'text-color': '#e0e3e9', 'text-halo-color': '#0a0b0f', 'text-halo-width': 1.2 } },
-        ] : []),
-
-        // Live track & position
-        { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#ff7a00', 'line-width': 3, 'line-opacity': 0.9 } },
-        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#ff7a00', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
-      ]
+      layers
     };
   }
 
   function createMinimalLightStyle(pmtilesUrl, includeLabels) {
+    const palette = getLightPalette();
+    const layers = [
+      ...buildBaseLayers('basemap', palette),
+      ...(includeLabels ? buildLabelLayers('basemap', palette) : []),
+      { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': 'orange', 'line-width': 3, 'line-opacity': 0.9 } },
+      { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': 'orange', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+    ];
+
     return {
       version: 8,
       ...(includeLabels ? { glyphs: '/static/vendor/fonts/{fontstack}/{range}.pbf' } : {}),
       sources: {
-        basemap: {
-          type: 'vector',
-          url: `pmtiles://${pmtilesUrl}`
-        },
+        basemap: { type: 'vector', url: `pmtiles://${pmtilesUrl}` },
         track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
         pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
       },
-      layers: [
-        { id: 'bg', type: 'background', paint: { 'background-color': '#f4f7fb' } },
-        // Land/Earth base
-        { id: 'earth', type: 'fill', source: 'basemap', 'source-layer': 'earth', paint: { 'fill-color': '#f3f6fa' } },
-        { id: 'land', type: 'fill', source: 'basemap', 'source-layer': 'land', paint: { 'fill-color': '#f3f6fa' } },
-        // Landuse (parks/greens etc.)
-        { id: 'landuse-park', type: 'fill', source: 'basemap', 'source-layer': 'landuse', filter: ['==', ['get', 'class'], 'park'], paint: { 'fill-color': '#d5efda', 'fill-opacity': 0.8 } },
-        { id: 'landuse-forest', type: 'fill', source: 'basemap', 'source-layer': 'landuse', filter: ['in', ['get', 'class'], ['literal', ['forest', 'wood']]], paint: { 'fill-color': '#cfe7d4', 'fill-opacity': 0.8 } },
-        { id: 'landuse-grass', type: 'fill', source: 'basemap', 'source-layer': 'landuse', filter: ['in', ['get', 'class'], ['literal', ['grass', 'scrub', 'meadow']]], paint: { 'fill-color': '#e3f3e7', 'fill-opacity': 0.7 } },
-        // Water
-        { id: 'water', type: 'fill', source: 'basemap', 'source-layer': 'water', paint: { 'fill-color': '#cfe8ff', 'fill-opacity': 1.0 } },
-        // Boundaries
-        { id: 'boundaries', type: 'line', source: 'basemap', 'source-layer': 'boundaries', paint: { 'line-color': '#b6c0c9', 'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.2, 8, 0.6, 10, 0.8, 12, 1.0] } },
-        // Roads (Protomaps)
-        { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'roads', paint: { 'line-color': '#9aa4ad', 'line-width': ['interpolate', ['linear'], ['zoom'], 6, ['match', ['get', 'class'], 'motorway', 0.7, 'trunk', 0.6, 'primary', 0.55, 'secondary', 0.45, 'tertiary', 0.4, 'residential', 0.3, 'service', 0.25, 0.25], 10, ['match', ['get', 'class'], 'motorway', 1.4, 'trunk', 1.2, 'primary', 1.2, 'secondary', 1.0, 'tertiary', 0.9, 'residential', 0.7, 'service', 0.6, 0.7], 12, ['match', ['get', 'class'], 'motorway', 2.6, 'trunk', 2.3, 'primary', 2.0, 'secondary', 1.7, 'tertiary', 1.4, 'residential', 1.1, 'service', 0.9, 1.0], 14, ['match', ['get', 'class'], 'motorway', 4.0, 'trunk', 3.4, 'primary', 3.0, 'secondary', 2.6, 'tertiary', 2.0, 'residential', 1.6, 'service', 1.2, 1.4] ] } },
-        // Buildings (Protomaps layer name is 'buildings')
-        { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'buildings', paint: { 'fill-color': '#d7dee6', 'fill-opacity': 0.7 } },
-
-        ...(includeLabels ? [
-          { id: 'water-labels', type: 'symbol', source: 'basemap', 'source-layer': 'water', layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': [FONT_STACK], 'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 14], 'text-max-width': 8, 'symbol-placement': 'point' }, paint: { 'text-color': '#2a5885', 'text-halo-color': '#f4f7fb', 'text-halo-width': 1 } },
-          { id: 'road-labels', type: 'symbol', source: 'basemap', 'source-layer': 'roads', layout: { 'symbol-placement': 'line', 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': [FONT_STACK], 'text-size': ['match', ['get', 'class'], 'motorway', 12, 'trunk', 12, 'primary', 11, 'secondary', 10, 'tertiary', 10, 'residential', 9, 9] }, paint: { 'text-color': '#5f6871', 'text-halo-color': '#ffffff', 'text-halo-width': 1 } },
-          { id: 'place-labels', type: 'symbol', source: 'basemap', 'source-layer': 'places', layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': [FONT_STACK], 'text-size': ['match', ['get', 'class'], 'city', 16, 'town', 14, 'village', 12, 'hamlet', 11, 12] }, paint: { 'text-color': '#30363d', 'text-halo-color': '#ffffff', 'text-halo-width': 1.2 } },
-        ] : []),
-
-        // Live track & position
-        { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#ff7a00', 'line-width': 3, 'line-opacity': 0.9 } },
-        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#ff7a00', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
-      ]
+      layers
     };
   }
 
