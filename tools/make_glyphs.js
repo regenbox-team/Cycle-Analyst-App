@@ -4,7 +4,22 @@
 
 const fs = require('fs');
 const path = require('path');
-const fontnik = require('@mapbox/fontnik');
+let fontnik;
+try {
+  // Prefer scoped package when available
+  fontnik = require('@mapbox/fontnik');
+} catch (e1) {
+  try {
+    // Fallback to unscoped package
+    fontnik = require('fontnik');
+  } catch (e2) {
+    console.error('Cannot find fontnik. Install one of:');
+    console.error('  npm i -D @mapbox/fontnik');
+    console.error('  or');
+    console.error('  npm i -D fontnik');
+    process.exit(1);
+  }
+}
 
 function usage() {
   console.error('Usage: node tools/make_glyphs.js <font-ttf> <out-dir> [maxRange]');
@@ -45,4 +60,3 @@ async function main() {
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
-
