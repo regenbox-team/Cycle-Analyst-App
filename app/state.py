@@ -13,6 +13,22 @@ latest_raw_values = None
 current_user: str = "JD"
 session_active: bool = False
 reader_started: bool = False
+gps_reader_started: bool = False
+
+# GPS state
+gps_state = {
+    "lat": None,
+    "lon": None,
+    "alt": None,
+    "speed_kph": None,
+    "track_deg": None,
+    "fix_quality": 0,
+    "sats": 0,
+    "hdop": None,
+    "timestamp_utc": None,
+    "has_fix": False,
+    "last_update": 0.0,
+}
 
 # Core session metrics store
 session_metrics = {

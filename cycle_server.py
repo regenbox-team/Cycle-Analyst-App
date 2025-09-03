@@ -18,23 +18,26 @@ def create_app(start_reader: bool = False) -> Flask:
     app = Flask(__name__)
 
     # Register routes (blueprints or fallback for tests)
-    from app.routes import core as routes_core, sessions as routes_sessions, admin as routes_admin, modes as routes_modes
+    from app.routes import core as routes_core, sessions as routes_sessions, admin as routes_admin, modes as routes_modes, gps as routes_gps
     if hasattr(app, "register_blueprint"):
         try:
             app.register_blueprint(routes_core.create_blueprint())
             app.register_blueprint(routes_sessions.create_blueprint())
             app.register_blueprint(routes_admin.create_blueprint())
             app.register_blueprint(routes_modes.create_blueprint())
+            app.register_blueprint(routes_gps.create_blueprint())
         except Exception:
             routes_core.register(app)
             routes_sessions.register(app)
             routes_admin.register(app)
             routes_modes.register(app)
+            routes_gps.register(app)
     else:
         routes_core.register(app)
         routes_sessions.register(app)
         routes_admin.register(app)
         routes_modes.register(app)
+        routes_gps.register(app)
 
     # Initialize basic state
     state.session_id = state.session_id or state.load_session_id()
@@ -56,6 +59,16 @@ def create_app(start_reader: bool = False) -> Flask:
         import threading
         threading.Thread(target=read_serial, daemon=True).start()
         state.reader_started = True
+
+    # Start GPS reader thread (safe to run even if device missing)
+    try:
+        if not getattr(state, 'gps_reader_started', False):
+            import threading
+            from app.gps import read_gps
+            threading.Thread(target=read_gps, daemon=True).start()
+            state.gps_reader_started = True
+    except Exception:
+        pass
 
     return app
 

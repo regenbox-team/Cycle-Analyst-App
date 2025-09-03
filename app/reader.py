@@ -158,11 +158,31 @@ def read_serial():
             state.save_session_metrics_to_file()
             raw_line = " ".join(map(str, data))
             timestamp = datetime.utcnow().isoformat()
+            # Snapshot GPS at the same tick
+            gps = getattr(state, 'gps_state', {}) or {}
             try:
                 with sqlite3.connect(get_db_file()) as conn:
                     conn.execute(
-                        "INSERT INTO logs (timestamp, session, raw, user) VALUES (?, ?, ?, ?)",
-                        (timestamp, state.session_id, raw_line, state.current_user)
+                        """
+                        INSERT INTO logs (
+                            timestamp, session, raw, user,
+                            gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            timestamp,
+                            state.session_id,
+                            raw_line,
+                            state.current_user,
+                            gps.get("lat"),
+                            gps.get("lon"),
+                            gps.get("alt"),
+                            gps.get("speed_kph"),
+                            gps.get("track_deg"),
+                            1 if gps.get("has_fix") else 0,
+                            gps.get("sats"),
+                            gps.get("hdop"),
+                        ),
                     )
             except Exception:
                 pass

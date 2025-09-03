@@ -20,6 +20,12 @@ os.makedirs(SESSION_METRICS_DIR, exist_ok=True)
 SERIAL_PORT_DEFAULT = "/dev/ttyUSB0"
 BAUDRATE = 9600
 
+# --- GPS Configuration ---
+# Default USB GPS dongles like VK-162 often appear as /dev/ttyACM0.
+# Override with env var APP_GPS_PORT if needed.
+GPS_SERIAL_PORT_DEFAULT = os.getenv("APP_GPS_PORT", "/dev/ttyACM0")
+GPS_BAUDRATE = int(os.getenv("APP_GPS_BAUDRATE", "9600"))
+
 # --- Test/Vehicle modes ---
 test_mode_lock = Lock()
 
