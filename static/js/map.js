@@ -57,8 +57,8 @@
         { id: 'water', type: 'fill', source: 'basemap', 'source-layer': 'water', paint: { 'fill-color': '#0b1a2a', 'fill-opacity': 0.9 } },
         // Roads (Protomaps)
         { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'roads', paint: { 'line-color': '#2a2a2a', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.2, 12, 1.1, 14, 1.8] } },
-        // Buildings
-        { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'building', paint: { 'fill-color': '#161616', 'fill-opacity': 0.45 } },
+        // Buildings (Protomaps layer name is 'buildings')
+        { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'buildings', paint: { 'fill-color': '#161616', 'fill-opacity': 0.45 } },
 
         // Live track & position
         { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#ff7a00', 'line-width': 3, 'line-opacity': 0.9 } },
@@ -84,8 +84,8 @@
         { id: 'water', type: 'fill', source: 'basemap', 'source-layer': 'water', paint: { 'fill-color': '#cfe8ff', 'fill-opacity': 1.0 } },
         // Roads (Protomaps)
         { id: 'roads', type: 'line', source: 'basemap', 'source-layer': 'roads', paint: { 'line-color': '#9aa4ad', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.2, 12, 1.1, 14, 1.8] } },
-        // Buildings
-        { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'building', paint: { 'fill-color': '#d7dee6', 'fill-opacity': 0.7 } },
+        // Buildings (Protomaps layer name is 'buildings')
+        { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'buildings', paint: { 'fill-color': '#d7dee6', 'fill-opacity': 0.7 } },
 
         // Live track & position
         { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#d33', 'line-width': 3, 'line-opacity': 0.9 } },
