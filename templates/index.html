@@ -241,6 +241,17 @@
   <!-- Prefer local vendor copies for offline usage; fallback to CDN if not present -->
   <link id="ml-style" rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre-gl.css') }}" onerror="this.href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css'">
   <script src="{{ url_for('static', filename='vendor/maplibre-gl.js') }}" onerror="this.onerror=null;this.src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'"></script>
+  <!-- Minimal shim for pmtiles Node-only dynamic require in browsers -->
+  <script>
+    if (typeof window.require === 'undefined') {
+      window.require = function(id) {
+        if (id === 'module') {
+          return { createRequire: function() { return function() { return {}; }; } };
+        }
+        throw new Error('require(\'' + id + '\') not supported in browser');
+      };
+    }
+  </script>
   <!-- Cache-bust and runtime fallback: if local pmtiles is Node build or missing, load CDN UMD -->
   <script src="{{ url_for('static', filename='vendor/pmtiles.js') }}?v=browser-umd" onerror="this.onerror=null;this.src='https://unpkg.com/pmtiles@4.0.0/dist/pmtiles.js'"></script>
   <script>
