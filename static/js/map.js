@@ -7,6 +7,17 @@
   let posSource = null;
   let trackSource = null;
 
+  async function ensurePmtiles() {
+    if (typeof pmtiles !== 'undefined') return;
+    await new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/pmtiles@4.0.0/dist/pmtiles.js';
+      s.onload = resolve;
+      s.onerror = resolve; // resolve anyway; we'll check existence after
+      document.head.appendChild(s);
+    });
+  }
+
   function setFollowButton() {
     const btn = document.getElementById('map-follow-toggle');
     if (!btn) return;
@@ -52,6 +63,9 @@
   async function initMap() {
     const container = document.getElementById('live-map');
     if (!container) return;
+
+    // Try to ensure pmtiles is available (load CDN if missing)
+    await ensurePmtiles();
 
     if (typeof maplibregl === 'undefined' || typeof pmtiles === 'undefined') {
       container.innerHTML = '<div style="color:#ccc; padding:0.5rem;">Map libraries not loaded. Place local vendor files under static/vendor or connect to the internet once.</div>';
@@ -122,4 +136,3 @@
 
   window.addEventListener('DOMContentLoaded', initMap);
 })();
-
