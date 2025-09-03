@@ -32,7 +32,6 @@
   function createMinimalDarkStyle(pmtilesUrl) {
     return {
       version: 8,
-      glyphs: undefined, // no labels/symbols → no glyphs endpoint required
       sources: {
         basemap: {
           type: 'vector',
