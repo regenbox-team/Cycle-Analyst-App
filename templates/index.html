@@ -180,7 +180,14 @@
     <!-- Live Map (PMTiles) -->
     <div class="box map-box">
       <div class="box-title">Map</div>
-      <div style="position:absolute; top:0.4rem; right:0.6rem; z-index:2; display:flex; gap:0.3rem;">
+      <div style="position:absolute; top:0.4rem; right:0.6rem; z-index:2; display:flex; gap:0.3rem; align-items:center;">
+        <label for="basemap-select" style="color:#ccc; font-size:0.85rem;">Base:</label>
+        <select id="basemap-select" class="dashboard-button" style="padding: 0.2rem 0.4rem;">
+          <option value="auto">Auto</option>
+          <option value="vector_dark">Vector Dark</option>
+          <option value="vector_light">Vector Light</option>
+          <option value="raster_osm">Raster OSM</option>
+        </select>
         <button id="map-follow-toggle" class="dashboard-button" title="Toggle follow">Follow: Off</button>
       </div>
       <div id="live-map"></div>
