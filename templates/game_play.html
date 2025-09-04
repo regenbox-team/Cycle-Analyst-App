@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Power Flight — Play</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='game/css/game.css') }}">
+</head>
+<body class="game-body">
+  <div id="game-root" class="game-root" data-username="{{ username|e }}">
+    <canvas id="game-canvas"></canvas>
+    <div id="hud" class="hud">
+      <div class="hud-left">Pilot: <span id="hud-user"></span></div>
+      <div class="hud-center">Distance: <span id="hud-distance">0</span> m</div>
+      <div class="hud-right">Power: <span id="hud-power">0</span> W</div>
+    </div>
+    <div id="warning" class="warning" style="display:none;">CLOUD ZONE! 3…</div>
+    <div id="game-over" class="overlay" style="display:none;">
+      <div class="overlay-card">
+        <div class="overlay-title">Game Over</div>
+        <div class="overlay-score">Distance: <span id="final-distance">0</span> m</div>
+        <div class="overlay-actions">
+          <a class="btn-secondary" href="/game">↺ Play Again</a>
+          <a class="btn-primary" href="/game/leaderboard">🏆 Leaderboard</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="{{ url_for('static', filename='game/js/game.js') }}"></script>
+</body>
+</html>
+

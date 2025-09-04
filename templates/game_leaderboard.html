@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Power Flight — Leaderboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='game/css/game.css') }}">
+</head>
+<body class="game-body">
+  <div class="game-container">
+    <div class="game-card">
+      <div class="game-title">TOP SCORES</div>
+      <div class="scores">
+        {% if scores %}
+          {% for user, distance, ts in scores %}
+            <div class="score-row"><span class="score-user">{{ user }}</span><span class="score-dist">{{ distance }} m</span><span class="score-ts">{{ ts }}</span></div>
+          {% endfor %}
+        {% else %}
+          <div class="score-empty">No scores yet — be the first!</div>
+        {% endif %}
+      </div>
+      <div class="game-actions" style="margin-top: 1rem;">
+        <a class="btn-secondary" href="/dashboard">← Dashboard</a>
+        <a class="btn-primary" href="/game">Play Again</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+

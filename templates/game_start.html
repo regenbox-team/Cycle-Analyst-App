@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Power Flight — Start</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='game/css/game.css') }}">
+</head>
+<body class="game-body">
+  <div class="game-container">
+    <div class="game-card">
+      <div class="game-title">POWER FLIGHT</div>
+      <div class="game-subtitle">Pedal to keep altitude</div>
+      <form class="game-form" action="/game/play" method="get">
+        <label for="user" class="game-label">Pilot Name</label>
+        <input id="user" name="user" class="game-input" placeholder="Your name" value="{{ current_user or '' }}" />
+        <div class="game-actions">
+          <a class="btn-secondary" href="/dashboard">← Back</a>
+          <button class="btn-primary" type="submit">Start Game</button>
+        </div>
+        <div class="game-hint">Center = 50W · Top = 200W · Bottom = 0W</div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
+

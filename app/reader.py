@@ -58,7 +58,7 @@ def generate_fake_data():
         random.randint(0, 90),
         0, 0, 0.8, 0.5, 50,
         round(random.uniform(0, 10), 3),
-        round(random.uniform(2.0, 3.0), 2),
+        round(random.uniform(1.0, 1.2), 2),
         "2B"
     ]
 

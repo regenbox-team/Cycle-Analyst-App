@@ -18,7 +18,7 @@ def create_app(start_reader: bool = False) -> Flask:
     app = Flask(__name__)
 
     # Register routes (each in isolation so one failure won't block others)
-    from app.routes import core as routes_core, sessions as routes_sessions, admin as routes_admin, modes as routes_modes, gps as routes_gps, tiles as routes_tiles, tracks as routes_tracks
+    from app.routes import core as routes_core, sessions as routes_sessions, admin as routes_admin, modes as routes_modes, gps as routes_gps, tiles as routes_tiles, tracks as routes_tracks, game as routes_game
 
     def _register_group(module):
         try:
@@ -43,6 +43,7 @@ def create_app(start_reader: bool = False) -> Flask:
         routes_gps,
         routes_tiles,
         routes_tracks,
+        routes_game,
     ):
         _register_group(mod)
 
@@ -57,6 +58,12 @@ def create_app(start_reader: bool = False) -> Flask:
     migrate_legacy_files()
     # Initialize DB for current mode and restore metrics snapshot from that DB
     init_db()
+    # Initialize game scores DB
+    try:
+        from app.game_db import init_game_db
+        init_game_db()
+    except Exception:
+        pass
     db_path = get_db_file()
     restore_session_metrics(state.session_id, db_path, parse_line)
 
