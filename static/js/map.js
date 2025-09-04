@@ -302,7 +302,7 @@
       ...buildBaseLayers('basemap', palette),
       ...(includeLabels ? buildLabelLayers('basemap', palette) : []),
       // Live track & position styled per CSS highlight
-      { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': 'orange', 'line-width': 3, 'line-opacity': 0.9 } },
+      { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'orange', 'line-width': 2, 'line-opacity': 0.9 } },
       { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': 'orange', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
     ];
 
@@ -323,7 +323,7 @@
     const layers = [
       ...buildBaseLayers('basemap', palette),
       ...(includeLabels ? buildLabelLayers('basemap', palette) : []),
-      { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': 'orange', 'line-width': 3, 'line-opacity': 0.9 } },
+      { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'orange', 'line-width': 2, 'line-opacity': 0.9 } },
       { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': 'orange', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
     ];
 
@@ -358,7 +358,7 @@
       layers: [
         { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
         { id: 'osm-raster', type: 'raster', source: 'osm' },
-        { id: 'track-line', type: 'line', source: 'track', paint: { 'line-color': '#ff7a00', 'line-width': 3, 'line-opacity': 0.9 } },
+        { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 2, 'line-opacity': 0.9 } },
         { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
       ]
     };
