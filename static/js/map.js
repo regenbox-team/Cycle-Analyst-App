@@ -364,7 +364,7 @@
     };
   }
 
-  // Raster OSM + 3D terrain using MapLibre demo terrain tiles
+  // Raster OSM + 3D terrain using Terrarium DEM + hillshade
   function createTerrainRasterStyle() {
     return {
       version: 8,
@@ -378,23 +378,27 @@
           tileSize: 256,
           attribution: '© OpenStreetMap contributors'
         },
-        // MapLibre demo raster-dem tiles.json (no token). Online only.
-        terrain: {
+        // Terrarium DEM (Mapzen on AWS Open Data). Online only.
+        dem: {
           type: 'raster-dem',
-          url: 'https://demotiles.maplibre.org/terrain-tiles/tiles.json',
+          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+          encoding: 'terrarium',
           tileSize: 256,
-          maxzoom: 14
+          maxzoom: 15,
+          attribution: 'Terrain © Mapzen, AWS; data from SRTM/other sources'
         },
         track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
         pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
       },
       terrain: {
-        source: 'terrain',
+        source: 'dem',
         exaggeration: 1.2
       },
       layers: [
         { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
         { id: 'osm-raster', type: 'raster', source: 'osm' },
+        // Hillshade computed client-side from DEM (overlay above raster)
+        { id: 'hillshade', type: 'hillshade', source: 'dem', paint: { 'hillshade-exaggeration': 0.6 } },
         { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 2, 'line-opacity': 0.9 } },
         { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
       ]
