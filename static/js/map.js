@@ -394,16 +394,6 @@
       },
       layers: [
         { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
-        // Sky layer for nicer 3D atmosphere when pitched
-        {
-          id: 'sky',
-          type: 'sky',
-          paint: {
-            'sky-type': 'atmosphere',
-            'sky-atmosphere-sun': [0.0, 0.0],
-            'sky-atmosphere-sun-intensity': 15
-          }
-        },
         { id: 'osm-raster', type: 'raster', source: 'osm' },
         { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 2, 'line-opacity': 0.9 } },
         { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
