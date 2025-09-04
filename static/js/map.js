@@ -15,7 +15,7 @@
   let filteredBearing = 0; // smoothed map bearing
   let bearingInitialized = false;
   const pmtilesPath = '/tiles/basemap.pmtiles';
-  const BASEMAPS = { AUTO: 'auto', VECTOR_DARK: 'vector_dark', VECTOR_LIGHT: 'vector_light', RASTER_OSM: 'raster_osm' };
+  const BASEMAPS = { AUTO: 'auto', VECTOR_DARK: 'vector_dark', VECTOR_LIGHT: 'vector_light', RASTER_OSM: 'raster_osm', TERRAIN_3D: 'terrain_3d' };
   const OFFLINE_PM_TILES_DEFAULT = false; // set to true if you always ship offline tiles
   const FONT_STACK = 'Inter Regular'; // change to your font name
 
@@ -364,6 +364,53 @@
     };
   }
 
+  // Raster OSM + 3D terrain using MapLibre demo terrain tiles
+  function createTerrainRasterStyle() {
+    return {
+      version: 8,
+      sources: {
+        osm: {
+          type: 'raster',
+          tiles: [
+            // Base raster; use a proper, policy-compliant provider for production
+            'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+          ],
+          tileSize: 256,
+          attribution: '© OpenStreetMap contributors'
+        },
+        // MapLibre demo raster-dem tiles.json (no token). Online only.
+        terrain: {
+          type: 'raster-dem',
+          url: 'https://demotiles.maplibre.org/terrain-tiles/tiles.json',
+          tileSize: 256,
+          maxzoom: 14
+        },
+        track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+        pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
+      },
+      terrain: {
+        source: 'terrain',
+        exaggeration: 1.2
+      },
+      layers: [
+        { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
+        // Sky layer for nicer 3D atmosphere when pitched
+        {
+          id: 'sky',
+          type: 'sky',
+          paint: {
+            'sky-type': 'atmosphere',
+            'sky-atmosphere-sun': [0.0, 0.0],
+            'sky-atmosphere-sun-intensity': 15
+          }
+        },
+        { id: 'osm-raster', type: 'raster', source: 'osm' },
+        { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 2, 'line-opacity': 0.9 } },
+        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+      ]
+    };
+  }
+
   async function pmtilesExists(url) {
     try {
       const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
@@ -391,7 +438,7 @@
 
   function getBasemapChoice() {
     const v = localStorage.getItem('basemap');
-    if (v === BASEMAPS.VECTOR_DARK || v === BASEMAPS.VECTOR_LIGHT || v === BASEMAPS.RASTER_OSM || v === BASEMAPS.AUTO) return v;
+    if (v === BASEMAPS.VECTOR_DARK || v === BASEMAPS.VECTOR_LIGHT || v === BASEMAPS.RASTER_OSM || v === BASEMAPS.TERRAIN_3D || v === BASEMAPS.AUTO) return v;
     return BASEMAPS.AUTO;
   }
 
@@ -400,6 +447,10 @@
     const includeLabels = await glyphsAvailable();
     if (choice === BASEMAPS.RASTER_OSM) {
       return createRasterFallbackStyle();
+    }
+    if (choice === BASEMAPS.TERRAIN_3D) {
+      // Online-only; falls back to OSM raster if terrain source unavailable
+      return createTerrainRasterStyle();
     }
     if (choice === BASEMAPS.VECTOR_DARK || choice === BASEMAPS.VECTOR_LIGHT) {
       if (useOffline && await pmtilesExists(pmtilesPath)) {
@@ -433,7 +484,13 @@
   async function switchBasemap(choice) {
     const style = await chooseStyle(choice);
     map.setStyle(style);
-    map.once('styledata', rebindSourcesAndRefresh);
+    map.once('styledata', () => {
+      rebindSourcesAndRefresh();
+      // Give a hint of 3D when terrain basemap is chosen
+      if (choice === BASEMAPS.TERRAIN_3D) {
+        try { map.easeTo({ pitch: 55, duration: 600 }); } catch {}
+      }
+    });
   }
 
   async function initMap() {
@@ -472,6 +529,9 @@
       routeSource = map.getSource('route');
       // Attempt loading persisted GPX route, if any
       loadRouteFromServer();
+      if (initialChoice === BASEMAPS.TERRAIN_3D) {
+        try { map.easeTo({ pitch: 55, duration: 600 }); } catch {}
+      }
     });
 
     // Follow toggle button
