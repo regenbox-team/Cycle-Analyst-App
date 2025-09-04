@@ -373,7 +373,7 @@
           type: 'raster',
           tiles: [
             // Base raster; use a proper, policy-compliant provider for production
-            'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+            'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg'
           ],
           tileSize: 256,
           attribution: '© OpenStreetMap contributors'
@@ -392,13 +392,19 @@
       },
       terrain: {
         source: 'dem',
-        exaggeration: 1.2
+        exaggeration: 1
       },
       layers: [
         { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
         { id: 'osm-raster', type: 'raster', source: 'osm' },
         // Hillshade computed client-side from DEM (overlay above raster)
-        { id: 'hillshade', type: 'hillshade', source: 'dem', paint: { 'hillshade-exaggeration': 0.6 } },
+        { id: 'hillshade', type: 'hillshade', source: 'dem',
+          paint: {
+            'hillshade-exaggeration': 0.35,
+            'hillshade-highlight-color': 'rgba(255,255,255,0.20)',
+            'hillshade-shadow-color': 'rgba(0,0,0,0.30)'
+          }
+        },
         { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 2, 'line-opacity': 0.9 } },
         { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
       ]
@@ -511,6 +517,7 @@
       style,
       center: [2.35, 48.86],
       zoom: 12,
+      maxPitch: 85,
       antialias: false,
       attributionControl: false,
     });
