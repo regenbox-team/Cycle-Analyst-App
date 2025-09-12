@@ -12,6 +12,7 @@ SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.txt")
 SESSION_METRICS_DIR = os.path.join(BASE_DIR, "session_metrics")
 DB_FILE = os.path.join(BASE_DIR, "ride_data.db")
 USER_FILE = os.path.join(BASE_DIR, "current_user.txt")
+SCORES_DB_FILE = os.path.join(BASE_DIR, "game_scores.db")
 
 # GPX route file path (persist during session, cleared on end)
 GPX_ROUTE_FILE = os.path.join(BASE_DIR, "route.gpx")
@@ -76,3 +77,8 @@ def get_db_file(mode: str | None = None) -> str:
     except Exception:
         pass
     return DB_FILE
+
+    # --- Scores DB helper ---
+def get_scores_db_file() -> str:
+    return SCORES_DB_FILE
+
