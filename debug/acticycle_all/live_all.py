@@ -100,7 +100,8 @@ def live_all(args):
     db = load_db_merged(args.dbc)
     idx = build_index(db)
 
-    bus = can.interface.Bus(channel=args.channel, bustype="socketcan")
+    # Use modern python-can API (avoid deprecation of bustype)
+    bus = can.Bus(interface="socketcan", channel=args.channel)
 
     # State: latest decoded signals across all messages
     latest_values = {}
@@ -128,110 +129,130 @@ def live_all(args):
     STALE_TEMP_S = 5.0
 
     def sset(name, val):
-        latest_values[name] = float(val)
+        # Store as-is (already converted to float or string by caller)
+        latest_values[name] = val
         last_seen[name] = time.time()
 
-    while True:
-        now = time.time()
-        msg = bus.recv(timeout=0.02)
-        if msg is not None:
-            key = (msg.arbitration_id, bool(msg.is_extended_id))
-            messages = idx.get(key, [])
-            for m in messages:
-                decoded = safe_decode(m, bytes(msg.data))
-                if not decoded:
-                    continue
-                # Store every decoded signal under "Message.Signal"
-                for sig_name, raw_val in decoded.items():
+    try:
+        while True:
+            now = time.time()
+            msg = bus.recv(timeout=0.02)
+            if msg is not None:
+                key = (msg.arbitration_id, bool(msg.is_extended_id))
+                messages = idx.get(key, [])
+                for m in messages:
+                    decoded = safe_decode(m, bytes(msg.data))
+                    if not decoded:
+                        continue
+                    # Store every decoded signal under "Message.Signal"
+                    for sig_name, raw_val in decoded.items():
+                        try:
+                            # Numeric values
+                            val = float(raw_val)
+                        except Exception:
+                            # Non-numeric (e.g., NamedSignalValue or other) → stringify for JSON safety
+                            try:
+                                # If it's a cantools NamedSignalValue, prefer its name when available
+                                name_attr = getattr(raw_val, "name", None)
+                                if isinstance(name_attr, str):
+                                    val = name_attr
+                                else:
+                                    val = str(raw_val)
+                            except Exception:
+                                val = str(raw_val)
+                        sset(f"{m.name}.{sig_name}", val)
+
+                    # Try to map common fields for the 15-field line when possible
+                    # Heuristics based on known message/signal names from the provided DBCs.
                     try:
-                        val = float(raw_val)
+                        # Battery current/voltage
+                        if m.name == "BMS_Information":
+                            if "BMSBatteryCurrent" in decoded:
+                                sset("current", float(decoded["BMSBatteryCurrent"]))
+                            if "BMSBatteryVoltage" in decoded:
+                                sset("voltage", float(decoded["BMSBatteryVoltage"]))
+                        # Vehicle speed
+                        if m.name == "DISPLAY_Moteur_statut_controleur" and "Vehicle_speed" in decoded:
+                            sset("speed", float(decoded["Vehicle_speed"]))
+                        # Distance
+                        if m.name == "DISPLAY_Odo_trip_controleur" and "Trip" in decoded:
+                            sset("distance", float(decoded["Trip"]))
+                        # Motor temp
+                        if m.name in ("MIC_id20_Status4",) and "Status_MotorTemp" in decoded:
+                            sset("temp", float(decoded["Status_MotorTemp"]))
+                        # Pedal power → compute equivalent current at pack voltage
+                        if m.name == "Display_Riding_Power" and "displayPedallingPower" in decoded:
+                            p_w = float(decoded["displayPedallingPower"]) or 0.0
+                            v = float(latest_values.get("voltage", 0.0) or 0.0)
+                            derived["solar_A"] = (p_w / v) if v >= 5.0 else 0.0
                     except Exception:
-                        # Keep strings as-is (choices) if not numeric
-                        val = raw_val
-                    sset(f"{m.name}.{sig_name}", val)
+                        pass
 
-                # Try to map common fields for the 15-field line when possible
-                # Heuristics based on known message/signal names from the provided DBCs.
-                try:
-                    # Battery current/voltage
-                    if m.name == "BMS_Information":
-                        if "BMSBatteryCurrent" in decoded:
-                            sset("current", float(decoded["BMSBatteryCurrent"]))
-                        if "BMSBatteryVoltage" in decoded:
-                            sset("voltage", float(decoded["BMSBatteryVoltage"]))
-                    # Vehicle speed
-                    if m.name == "DISPLAY_Moteur_statut_controleur" and "Vehicle_speed" in decoded:
-                        sset("speed", float(decoded["Vehicle_speed"]))
-                    # Distance
-                    if m.name == "DISPLAY_Odo_trip_controleur" and "Trip" in decoded:
-                        sset("distance", float(decoded["Trip"]))
-                    # Motor temp
-                    if m.name in ("MIC_id20_Status4",) and "Status_MotorTemp" in decoded:
-                        sset("temp", float(decoded["Status_MotorTemp"]))
-                    # Pedal power → compute equivalent current at pack voltage
-                    if m.name == "Display_Riding_Power" and "displayPedallingPower" in decoded:
-                        p_w = float(decoded["displayPedallingPower"]) or 0.0
-                        v = float(latest_values.get("voltage", 0.0) or 0.0)
-                        derived["solar_A"] = (p_w / v) if v >= 5.0 else 0.0
-                except Exception:
-                    pass
+            # Integrate Ah only when current is fresh
+            dt = now - last_time
+            if 0 < dt < 1.0:
+                cur = float(latest_values.get("current", 0.0) or 0.0)
+                if (now - last_seen.get("current", 0)) <= STALE_CURRENT_S:
+                    derived["ah"] += cur * dt / 3600.0
+            last_time = now
 
-        # Integrate Ah only when current is fresh
-        dt = now - last_time
-        if 0 < dt < 1.0:
-            cur = float(latest_values.get("current", 0.0) or 0.0)
-            if (now - last_seen.get("current", 0)) <= STALE_CURRENT_S:
-                derived["ah"] += cur * dt / 3600.0
-        last_time = now
+            # Periodic publish
+            if now >= next_pub:
+                next_pub = now + publish_dt
 
-        # Periodic publish
-        if now >= next_pub:
-            next_pub = now + publish_dt
+                # Build acticycle values with staleness
+                pub_voltage = latest_values.get("voltage", 0.0)
+                pub_distance = latest_values.get("distance", 0.0)
+                pub_temp = latest_values.get("temp", 0.0)
 
-            # Build acticycle values with staleness
-            pub_voltage = latest_values.get("voltage", 0.0)
-            pub_distance = latest_values.get("distance", 0.0)
-            pub_temp = latest_values.get("temp", 0.0)
+                # speed smoothing
+                raw_speed = latest_values.get("speed", 0.0)
+                if smooth_speed is None:
+                    smooth_speed = raw_speed
+                else:
+                    alpha = 0.3
+                    smooth_speed = smooth_speed + alpha * (raw_speed - smooth_speed)
 
-            # speed smoothing
-            raw_speed = latest_values.get("speed", 0.0)
-            if smooth_speed is None:
-                smooth_speed = raw_speed
-            else:
-                alpha = 0.3
-                smooth_speed = smooth_speed + alpha * (raw_speed - smooth_speed)
-
-            line = fmt_acticycle_line({
-                "ah": derived.get("ah", 0.0),
-                "voltage": pub_voltage,
-                "current": latest_values.get("current", 0.0),
-                "speed": smooth_speed,
-                "distance": pub_distance,
-                "temp": pub_temp,
-                "solar_A": derived.get("solar_A", 0.0),
-            })
-
-            # Emit the 15-field line to stdout (consumed by app in exec mode)
-            print(line, flush=True)
-
-            # Write a JSONL snapshot with all latest decoded values
-            snapshot = {
-                "epoch": now,
-                "acticycle": {
+                line = fmt_acticycle_line({
                     "ah": derived.get("ah", 0.0),
-                    "voltage": latest_values.get("voltage"),
-                    "current": latest_values.get("current"),
-                    "speed": latest_values.get("speed"),
-                    "distance": latest_values.get("distance"),
-                    "temp": latest_values.get("temp"),
+                    "voltage": pub_voltage,
+                    "current": latest_values.get("current", 0.0),
+                    "speed": smooth_speed,
+                    "distance": pub_distance,
+                    "temp": pub_temp,
                     "solar_A": derived.get("solar_A", 0.0),
-                },
-                "signals": latest_values,  # includes Message.Signal keys for all decoded
-            }
-            try:
-                outf.write(json.dumps(snapshot, ensure_ascii=False) + "\n")
-            except Exception as e:
-                print(f"[warn] failed to write snapshot: {e}", file=sys.stderr)
+                })
+
+                # Emit the 15-field line to stdout (consumed by app in exec mode)
+                print(line, flush=True)
+
+                # Write a JSONL snapshot with all latest decoded values
+                snapshot = {
+                    "epoch": now,
+                    "acticycle": {
+                        "ah": derived.get("ah", 0.0),
+                        "voltage": latest_values.get("voltage"),
+                        "current": latest_values.get("current"),
+                        "speed": latest_values.get("speed"),
+                        "distance": latest_values.get("distance"),
+                        "temp": latest_values.get("temp"),
+                        "solar_A": derived.get("solar_A", 0.0),
+                    },
+                    "signals": latest_values,  # includes Message.Signal keys for all decoded
+                }
+                try:
+                    outf.write(json.dumps(snapshot, ensure_ascii=False) + "\n")
+                except Exception as e:
+                    print(f"[warn] failed to write snapshot: {e}", file=sys.stderr)
+    finally:
+        try:
+            outf.close()
+        except Exception:
+            pass
+        try:
+            bus.shutdown()
+        except Exception:
+            pass
 
 
 def main():
@@ -242,12 +263,25 @@ def main():
     ap.add_argument("--outfile", default="var/debug/all_signals.jsonl", help="Path to JSONL snapshot file")
     args = ap.parse_args()
 
+    bus = None
+    outf = None
     try:
         live_all(args)
     except KeyboardInterrupt:
         pass
+    finally:
+        # Best-effort clean shutdown when exceptions occur higher up
+        try:
+            if bus is not None:
+                bus.shutdown()
+        except Exception:
+            pass
+        try:
+            if outf is not None:
+                outf.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
     main()
-
