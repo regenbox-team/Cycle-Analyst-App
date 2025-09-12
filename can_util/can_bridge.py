@@ -12,14 +12,17 @@ import cantools
 
 # ---- Mapping (from your message) ----
 MAP = {
-    # frame_id, extended?, message_name, signal_name
-    "current":  {"id": 0x0D2,  "ext": False, "msg": "BMS_Information",                     "sig": "BMSBatteryCurrent"},
-    "voltage":  {"id": 0x0D2,  "ext": False, "msg": "BMS_Information",                     "sig": "BMSBatteryVoltage"},
-    "speed":    {"id": 0x610,  "ext": False, "msg": "DISPLAY_Moteur_statut_controleur",    "sig": "Vehicle_speed"},
-    "distance": {"id": 0x620,  "ext": False, "msg": "DISPLAY_Odo_trip_controleur",         "sig": "Trip"},
-    "mot_temp": {"id": 0x1014, "ext": True,  "msg": "MIC_id20_Status4",                    "sig": "Status_MotorTemp"},
-    # Cockpit (human/pedalling power) → we will map to solar_A (as A = W / V)
-    "ped_power": {"id": 0x158, "ext": False, "msg": "Display_Riding_Power",            "sig": "displayPedallingPower"},
+    # current/voltage now from MIC_id10_Status1
+    "current":  {"id": None,  "ext": None, "msg": "MIC_id10_Status1",                  "sig": "Status_TotalCurrent"},
+    "voltage":  {"id": None,  "ext": None, "msg": "MIC_id10_Status1",                  "sig": "Status_InputVoltage"},
+    # keep speed, distance, temp as-is
+    "speed":    {"id": 0x610,  "ext": False, "msg": "DISPLAY_Moteur_statut_controleur", "sig": "Vehicle_speed"},
+    "distance": {"id": 0x620,  "ext": False, "msg": "DISPLAY_Odo_trip_controleur",      "sig": "Trip"},
+    "mot_temp": {"id": 0x1014, "ext": True,  "msg": "MIC_id20_Status4",                 "sig": "Status_MotorTemp"},
+    # Pedal power (W) → solar_A (A = W / V)
+    "ped_power": {"id": 0x158, "ext": False, "msg": "Display_Riding_Power",             "sig": "displayPedallingPower"},
+    # Lynx map mode for flags (0=Neutral,1=Legal,2=Medium,3=Power)
+    "lynx_map": {"id": None,  "ext": None, "msg": "DISPLAY_Statut_Lynx",               "sig": "Map_Lynx"},
 }
 
 FIELDS = ["ah", "voltage", "current", "speed", "distance", "temp", "cyclist_rpm",
@@ -68,7 +71,7 @@ def fmt_line(vals):
         "unused12": 0.0,          # ← add this missing field
         "solar_Ah": 0.0,
         "solar_A": vals.get("solar_A", 0.0),
-        "flags": "2B",
+        "flags": vals.get("flags", "2B"),
     }
     # ordering + formatting
     line = [
@@ -98,6 +101,12 @@ def make_index(db):
         idx.setdefault(key, []).append(m)
     return idx
 
+def make_name_index(db):
+    by_name = {}
+    for m in db.messages:
+        by_name[m.name] = m
+    return by_name
+
 def pick_msg(candidates, name=None):
     if not candidates:
         return None
@@ -114,18 +123,25 @@ def live_mode(args):
 
     db = load_db(args.dbc)
     idx = make_index(db)
+    by_name = make_name_index(db)
 
     # Resolve message objects we care about
     targets = {}
     for key, meta in MAP.items():
-        mlist = idx.get((meta["id"], meta["ext"]), [])
-        targets[key] = pick_msg(mlist, meta["msg"])
+        mobj = None
+        if meta.get("id") is not None and meta.get("ext") is not None:
+            mlist = idx.get((meta["id"], meta["ext"]), [])
+            mobj = pick_msg(mlist, meta.get("msg"))
+        # Fallback: resolve by message name only
+        if not mobj and meta.get("msg"):
+            mobj = by_name.get(meta["msg"]) 
+        targets[key] = mobj
 
     bus = can.interface.Bus(channel=args.channel, bustype="socketcan")
 
     # State
     last_vals = {"solar_A": 0.0}
-    last_seen = {"current": 0, "voltage": 0, "speed": 0, "distance": 0, "temp": 0}
+    last_seen = {"current": 0, "voltage": 0, "speed": 0, "distance": 0, "temp": 0, "lynx_map": 0}
     ah_used = 0.0
     last_time = time.time()
     next_pub = last_time
@@ -176,6 +192,8 @@ def live_mode(args):
                                     # Convert pedalling power (W) into an equivalent current (A) at pack voltage
                                     v = float(last_vals.get("voltage", 0.0) or 0.0)
                                     last_vals["solar_A"] = (val / v) if v >= 5.0 else 0.0
+                                elif field == "lynx_map":
+                                    last_vals["lynx_map"] = int(val)
                 except Exception:
                     pass
 
@@ -205,6 +223,11 @@ def live_mode(args):
             # Current for display: show last value, but it might be stale; that’s OK visually
             pub_current = last_vals.get("current", 0.0)
 
+            # Build flags from Lynx map mode
+            mode = int(last_vals.get("lynx_map", 0) or 0)
+            if mode not in (0,1,2,3):
+                mode = 0
+
             line = fmt_line({
                 "ah": ah_used,
                 "voltage": pub_voltage,
@@ -212,7 +235,8 @@ def live_mode(args):
                 "speed": pub_speed,
                 "distance": pub_distance,
                 "temp": pub_temp,
-                "solar_A": last_vals.get("solar_A", 0.0)
+                "solar_A": last_vals.get("solar_A", 0.0),
+                "flags": str(mode)
             })
             print(line, flush=True)
 

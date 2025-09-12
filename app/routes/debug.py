@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 import os
-from flask import jsonify, render_template, request
+from flask import jsonify, render_template, request, make_response
 import cantools
 
 DEFAULT_JSONL_PATH = os.getenv("ALL_SIGNALS_JSONL", "var/debug/all_signals.jsonl")
@@ -42,14 +42,15 @@ def _read_last_jsonl(path: str):
 def all_signals_json():
     path = request.args.get('path') or DEFAULT_JSONL_PATH
     snapshot = _read_last_jsonl(path)
-    if not snapshot:
-        return jsonify({"epoch": None, "signals": {}, "note": "No snapshot yet"})
-    # Only expose the signals map and epoch (pass through acticycle for convenience)
-    return jsonify({
+    payload = {
         "epoch": snapshot.get("epoch"),
         "acticycle": snapshot.get("acticycle", {}),
         "signals": snapshot.get("signals", {}),
-    })
+    } if snapshot else {"epoch": None, "signals": {}, "note": "No snapshot yet"}
+    resp = make_response(jsonify(payload))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 
 def all_signals_page():
@@ -95,9 +96,15 @@ def all_signal_names_json():
             for s in m.signals:
                 names.append(f"{m.name}.{s.name}")
         names.sort()
-        return jsonify({"dbc": dbc, "count": len(names), "names": names})
+        resp = make_response(jsonify({"dbc": dbc, "count": len(names), "names": names}))
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        resp.headers['Pragma'] = 'no-cache'
+        return resp
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        resp = make_response(jsonify({"error": str(e)}), 500)
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        resp.headers['Pragma'] = 'no-cache'
+        return resp
 
 
 # Register endpoint in both styles

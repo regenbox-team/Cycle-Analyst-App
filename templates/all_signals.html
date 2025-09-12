@@ -18,6 +18,7 @@
   <div class="section section-compact">
     <div class="card card-wide">
       <div class="section-title">Acticycle Derived</div>
+      <div class="muted">Last update: <span id="last-epoch" class="mono"></span></div>
       <div id="acticycle" class="kv"></div>
     </div>
   </div>
@@ -60,7 +61,7 @@
 
     async function loadAllNames() {
       try {
-        const res = await fetch('/debug/all_signal_names.json');
+        const res = await fetch('/debug/all_signal_names.json?t=' + Date.now());
         const data = await res.json();
         if (data && Array.isArray(data.names)) {
           knownNames = data.names;
@@ -100,8 +101,10 @@
 
     async function tick() {
       try {
-        const res = await fetch('/debug/all_signals.json');
+        const res = await fetch('/debug/all_signals.json?t=' + Date.now());
         const data = await res.json();
+        const ts = (data.epoch ? new Date(data.epoch * 1000) : null);
+        document.getElementById('last-epoch').textContent = ts ? ts.toISOString() : '—';
         renderSignals(knownNames, data.signals || {});
         renderKV(document.getElementById('acticycle'), data.acticycle || {});
       } catch (e) {
