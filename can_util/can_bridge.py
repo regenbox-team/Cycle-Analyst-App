@@ -43,8 +43,9 @@ def load_db(dbc_path):
         db.messages.extend(getattr(sub, "messages", []))
         db.nodes.extend(getattr(sub, "nodes", []))
         if hasattr(sub, "buses"):
-            db.buses = getattr(db, "buses", []) + list(getattr(sub, "buses", []))
+            db._buses.extend(sub.buses)
     return db
+    
 
 def fmt_line(vals):
     """

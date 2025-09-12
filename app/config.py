@@ -12,7 +12,6 @@ SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.txt")
 SESSION_METRICS_DIR = os.path.join(BASE_DIR, "session_metrics")
 DB_FILE = os.path.join(BASE_DIR, "ride_data.db")
 USER_FILE = os.path.join(BASE_DIR, "current_user.txt")
-SCORES_DB_FILE = os.path.join(BASE_DIR, "game_scores.db")
 
 # GPX route file path (persist during session, cleared on end)
 GPX_ROUTE_FILE = os.path.join(BASE_DIR, "route.gpx")
@@ -47,11 +46,11 @@ VEHICLE_CONFIGS = {
         "test_mode": True,
     },
     "acticycle_live": {
-        "serial_port": "exec:python3 can_util/can_bridge.py --dbc can_util/Cockpit_CAN_Database_V1.4.dbc,can_util/Act2.5_database_can_A_V1.5.dbc live --channel can0",
+        "serial_port": "exec:/home/jeandard/Projects/Cycle-Analyst-App/.venv/bin/python can_util/can_bridge.py --dbc can_util/Cockpit_CAN_Database_V1.4.dbc,can_util/Act2.5_database_can_A_V1.5.dbc live --channel can0",
         "test_mode": False,
     },
     "acticycle_test": {
-        "serial_port": "exec:python3 can_util/can_bridge.py --dbc can_util/Cockpit_CAN_Database_V1.4.dbc,can_util/Act2.5_database_can_A_V1.5.dbc csv --csv can_util/can_log.csv",
+        "serial_port": "exec:/home/jeandard/Projects/Cycle-Analyst-App/.venv/bin/python can_util/can_bridge.py --dbc can_util/Cockpit_CAN_Database_V1.4.dbc,can_util/Act2.5_database_can_A_V1.5.dbc csv --csv can_util/can_log.csv",
         "test_mode": False,
     },
 }
@@ -77,8 +76,3 @@ def get_db_file(mode: str | None = None) -> str:
     except Exception:
         pass
     return DB_FILE
-
-
-# --- Scores DB helper ---
-def get_scores_db_file() -> str:
-    return SCORES_DB_FILE
