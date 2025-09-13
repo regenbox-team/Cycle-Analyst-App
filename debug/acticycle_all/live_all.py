@@ -144,8 +144,8 @@ def live_all(args):
                     decoded = safe_decode(m, bytes(msg.data))
                     if not decoded:
                         continue
-                # Store every decoded signal under "Message.Signal"
-                for sig_name, raw_val in decoded.items():
+                    # Store every decoded signal under "Message.Signal"
+                    for sig_name, raw_val in decoded.items():
                         try:
                             # Numeric values
                             val = float(raw_val)
@@ -186,22 +186,22 @@ def live_all(args):
                         # Motor temp
                         if m.name in ("MIC_id20_Status4",) and "Status_MotorTemp" in decoded:
                             sset("temp", float(decoded["Status_MotorTemp"]))
-                    # Pedal power → compute equivalent current at pack voltage
-                    if m.name == "Display_Riding_Power" and "displayPedallingPower" in decoded:
-                        p_w = float(decoded["displayPedallingPower"]) or 0.0
-                        v = float(latest_values.get("voltage", 0.0) or 0.0)
-                        derived["solar_A"] = (p_w / v) if v >= 5.0 else 0.0
-                    # Lynx map mode for flags
-                    if m.name == "DISPLAY_Statut_Lynx" and "Map_Lynx" in decoded:
-                        try:
-                            derived["lynx_map"] = int(float(decoded["Map_Lynx"]))
-                        except Exception:
-                            # Named value or string; try name attribute
-                            name_attr = getattr(decoded["Map_Lynx"], "name", None)
-                            if isinstance(name_attr, str) and name_attr.isdigit():
-                                derived["lynx_map"] = int(name_attr)
-                            else:
-                                derived["lynx_map"] = 0
+                        # Pedal power → compute equivalent current at pack voltage
+                        if m.name == "Display_Riding_Power" and "displayPedallingPower" in decoded:
+                            p_w = float(decoded["displayPedallingPower"]) or 0.0
+                            v = float(latest_values.get("voltage", 0.0) or 0.0)
+                            derived["solar_A"] = (p_w / v) if v >= 5.0 else 0.0
+                        # Lynx map mode for flags
+                        if m.name == "DISPLAY_Statut_Lynx" and "Map_Lynx" in decoded:
+                            try:
+                                derived["lynx_map"] = int(float(decoded["Map_Lynx"]))
+                            except Exception:
+                                # Named value or string; try name attribute
+                                name_attr = getattr(decoded["Map_Lynx"], "name", None)
+                                if isinstance(name_attr, str) and name_attr.isdigit():
+                                    derived["lynx_map"] = int(name_attr)
+                                else:
+                                    derived["lynx_map"] = 0
                     except Exception:
                         pass
 
