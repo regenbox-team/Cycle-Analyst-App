@@ -41,18 +41,22 @@ VEHICLE_CONFIGS = {
     "supercycle_live": {
         "serial_port": "/dev/ttyUSB0",
         "test_mode": False,
+        "battery_capacity_ah": 64,
     },
     "supercycle_test": {
         "serial_port": "/dev/ttyUSB0",
         "test_mode": True,
+        "battery_capacity_ah": 64,
     },
     "acticycle_live": {
         "serial_port": "exec:/home/jeandard/Projects/Cycle-Analyst-App/.venv/bin/python can_util/can_bridge.py --dbc can_util/Cockpit_CAN_Database_V1.4.dbc,can_util/Act2.5_database_can_A_V1.5.dbc live --channel can0",
         "test_mode": False,
+        "battery_capacity_ah": 40,
     },
     "acticycle_test": {
         "serial_port": "exec:/home/jeandard/Projects/Cycle-Analyst-App/.venv/bin/python can_util/can_bridge.py --dbc can_util/Cockpit_CAN_Database_V1.4.dbc,can_util/Act2.5_database_can_A_V1.5.dbc csv --csv can_util/can_log.csv",
         "test_mode": False,
+        "battery_capacity_ah": 40,
     },
 }
 
@@ -81,4 +85,3 @@ def get_db_file(mode: str | None = None) -> str:
     # --- Scores DB helper ---
 def get_scores_db_file() -> str:
     return SCORES_DB_FILE
-

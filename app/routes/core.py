@@ -2,7 +2,8 @@ from __future__ import annotations
 import sqlite3
 from flask import render_template, jsonify, redirect, request
 
-from app.config import get_db_file
+from app.config import get_db_file, VEHICLE_CONFIGS
+from app.modes import vehicle_mode
 from app import state
 from app.metrics import update_metrics  # re-export compatibility
 
@@ -15,7 +16,8 @@ def _get_metrics_payload():
 
     ah_used = (state.latest_raw_values[0] if state.latest_raw_values else 0) + sm.get("ah_offset", 0.0)
     voltage = state.latest_raw_values[1] if state.latest_raw_values else 0
-    Wh_remaining = (64 - ah_used) * voltage
+    capacity_ah = VEHICLE_CONFIGS.get(vehicle_mode, {}).get("battery_capacity_ah", 64)
+    Wh_remaining = (capacity_ah - ah_used) * voltage
 
     net_list = sm.get("net_Wh_per_km_last", [])
     net_last_km = net_list[-1] if net_list else 0
@@ -32,6 +34,7 @@ def _get_metrics_payload():
         "raw_CA_values": state.latest_raw_values,
         "session_id": state.session_id,
         "user": state.current_user,
+        "battery_capacity_ah": capacity_ah,
         "ca_reset_detected": sm.get("ca_reset_detected", False),
         "ca_reset_prompt": sm.get("ca_reset_prompt", False),
         "decoded_acticycle": (

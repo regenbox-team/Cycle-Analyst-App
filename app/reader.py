@@ -7,10 +7,11 @@ import serial
 import sqlite3
 from datetime import datetime
 
-from .config import BAUDRATE, get_db_file
+from .config import BAUDRATE, get_db_file, VEHICLE_CONFIGS
 from .modes import is_test_mode
 from .metrics import update_metrics
 from . import state
+from .modes import vehicle_mode
 
 
 def parse_line(line: str):
@@ -46,7 +47,8 @@ def generate_fake_data():
     voltage = 50
 
     generate_fake_data.ah += max(0, amps) * dt
-    generate_fake_data.ah = max(0, min(64, generate_fake_data.ah))
+    capacity_ah = VEHICLE_CONFIGS.get(vehicle_mode, {}).get("battery_capacity_ah", 64)
+    generate_fake_data.ah = max(0, min(capacity_ah, generate_fake_data.ah))
 
     return [
         round(generate_fake_data.ah, 4),
