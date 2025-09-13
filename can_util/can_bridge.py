@@ -125,24 +125,46 @@ def live_mode(args):
     idx = make_index(db)
     by_name = make_name_index(db)
 
-    # Resolve message objects we care about
-    targets = {}
+    # Resolve message objects we care about (support multiple candidates per field)
+    resolved_by_field = {}
     for key, meta in MAP.items():
-        mobj = None
-        # First try id/extended if provided
+        msgs = []
+        # If id/ext provided, use that as a strong hint
         if meta.get("id") is not None and meta.get("ext") is not None:
             mlist = idx.get((meta["id"], meta["ext"]), [])
-            mobj = pick_msg(mlist, meta.get("msg") if isinstance(meta.get("msg"), str) else None)
-        # Then try by name(s)
-        if not mobj and meta.get("msg"):
+            if mlist:
+                # keep all candidates for this id/ext
+                msgs.extend(mlist)
+        # Also try by name(s)
+        if meta.get("msg"):
             names = meta["msg"] if isinstance(meta["msg"], (list, tuple)) else [meta["msg"]]
             for nm in names:
-                if nm in by_name:
-                    mobj = by_name[nm]
-                    break
-        targets[key] = mobj
+                mobj = by_name.get(nm)
+                if mobj and mobj not in msgs:
+                    msgs.append(mobj)
+        resolved_by_field[key] = msgs
+
+    # Build quick lookups: by (id,ext) and list of fields per message
+    wanted_by_key = {}
+    fields_by_msg = {}
+    for field, mlist in resolved_by_field.items():
+        for m in mlist:
+            key = (m.frame_id, bool(getattr(m, "is_extended_frame", False)))
+            wanted_by_key[key] = m
+            fields_by_msg.setdefault(m, []).append((field, MAP[field]["sig"]))
 
     bus = can.interface.Bus(channel=args.channel, bustype="socketcan")
+    # Apply kernel-side CAN filters to reduce user-space load
+    try:
+        filters = []
+        for (fid, ext) in set(wanted_by_key.keys()):
+            # Match exactly this arbitration id
+            filters.append({"can_id": fid, "can_mask": 0x1FFFFFFF, "extended": bool(ext)})
+        if filters:
+            bus.set_filters(filters)
+    except Exception:
+        # Backend may not support extended flag or filters; ignore gracefully
+        pass
 
     # State
     last_vals = {"solar_A": 0.0}
@@ -172,33 +194,33 @@ def live_mode(args):
 
         if msg:
             key = (msg.arbitration_id, msg.is_extended_id)
-            mlist = idx.get(key, [])
-            m = pick_msg(mlist)
-            if m:
+            m = wanted_by_key.get(key)
+            if not m:
+                # Not a message we care about
+                pass
+            else:
                 try:
                     decoded = m.decode(bytes(msg.data), decode_choices=True, allow_truncated=True)
-                    # Update any mapped field present in this message
-                    for field, meta in MAP.items():
-                        if m is targets[field]:
-                            sig = meta["sig"]
-                            if sig in decoded:
-                                val = float(decoded[sig])
-                                if field == "current":
-                                    last_vals["current"] = val; last_seen["current"] = now
-                                elif field == "voltage":
-                                    last_vals["voltage"] = val; last_seen["voltage"] = now
-                                elif field == "speed":
-                                    last_vals["speed"]   = val; last_seen["speed"]   = now
-                                elif field == "distance":
-                                    last_vals["distance"]= val; last_seen["distance"]= now
-                                elif field == "mot_temp":
-                                    last_vals["temp"]    = val; last_seen["temp"]    = now
-                                elif field == "ped_power":
-                                    # Convert pedalling power (W) into an equivalent current (A) at pack voltage
-                                    v = float(last_vals.get("voltage", 0.0) or 0.0)
-                                    last_vals["solar_A"] = (val / v) if v >= 5.0 else 0.0
-                                elif field == "lynx_map":
-                                    last_vals["lynx_map"] = int(val)
+                    # Update only the fields mapped to this message
+                    for field, sig in fields_by_msg.get(m, []):
+                        if sig in decoded:
+                            val = float(decoded[sig])
+                            if field == "current":
+                                last_vals["current"] = val; last_seen["current"] = now
+                            elif field == "voltage":
+                                last_vals["voltage"] = val; last_seen["voltage"] = now
+                            elif field == "speed":
+                                last_vals["speed"]   = val; last_seen["speed"]   = now
+                            elif field == "distance":
+                                last_vals["distance"]= val; last_seen["distance"]= now
+                            elif field == "mot_temp":
+                                last_vals["temp"]    = val; last_seen["temp"]    = now
+                            elif field == "ped_power":
+                                # Convert pedalling power (W) into an equivalent current (A) at pack voltage
+                                v = float(last_vals.get("voltage", 0.0) or 0.0)
+                                last_vals["solar_A"] = (val / v) if v >= 5.0 else 0.0
+                            elif field == "lynx_map":
+                                last_vals["lynx_map"] = int(val)
                 except Exception:
                     pass
 
