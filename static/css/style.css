@@ -345,6 +345,27 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   height: 100% !important;
 }
 
+/* Map reduce/extend UI */
+.map-extend-button {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 2;
+  display: none;
+}
+.map-box.reduced .map-extend-button {
+  display: inline-flex;
+}
+.map-box.reduced .map-controls-top,
+.map-box.reduced .map-controls-bottom {
+  display: none !important;
+}
+/* Half height map when reduced */
+.map-box.reduced #live-map {
+  aspect-ratio: 2 / 1 !important;
+}
+
+
 .box-title {
   position: absolute;
   top: 0.1rem;

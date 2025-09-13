@@ -762,5 +762,19 @@
       });
     }
     if (erBtn) erBtn.addEventListener('click', eraseRoute);
+        // Map reduce / extend controls
+    const mapBox = document.querySelector('.map-box');
+    const reduceBtn = document.getElementById('map-reduce-btn');
+    const extendBtn = document.getElementById('map-extend-btn');
+    if (reduceBtn && mapBox) {
+      reduceBtn.addEventListener('click', () => {
+        mapBox.classList.add('reduced');
+      });
+    }
+    if (extendBtn && mapBox) {
+      extendBtn.addEventListener('click', () => {
+        mapBox.classList.remove('reduced');
+      });
+    }
   });
 })();
