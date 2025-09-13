@@ -262,30 +262,31 @@
     </div>
 
     <div class="box reset-box">
-        <div id="session-id-display">Session ID: <span id="session-id">...</span></div>
-        <button class="dashboard-button" onclick="showAhPopup()">+ Add Ah</button>
-        <a class="dashboard-button" href="/select_session">View Session Summaries</a>
-        <a class="dashboard-button" href="/game">🎮 Play Power Flight</a>
+      <div id="session-id-display">Session ID: <span id="session-id">...</span></div>
+      <button class="dashboard-button" onclick="showAhPopup()">+ Add Ah</button>
+      <a class="dashboard-button" href="/select_session">View Session Summaries</a>
+      <a class="dashboard-button" href="/game">🎮 Play Power Flight</a>
+    </div>
+
+    <!-- System Performance Box -->
+    <div class="box sys-box">
+      <div class="box-title">System</div>
+      <div class="sys-stats" style="display:flex; flex-direction:column; gap:0.25rem; width:100%; align-items:center;">
+        <div class="sys-row" style="display:flex; gap:0.8rem; flex-wrap:wrap; justify-content:center;">
+          <span id="sys-load">Load: – / – / –</span>
+          <span id="sys-temp">Temp: –°C</span>
+          <span id="sys-cpu">CPU: – MHz</span>
+        </div>
+        <div class="sys-row" style="display:flex; gap:0.8rem; flex-wrap:wrap; justify-content:center;">
+          <span id="sys-mem">Mem: – / – (–%)</span>
+          <span id="sys-uptime">Uptime: –</span>
+          <span id="sys-throttled">Throttled: –</span>
+        </div>
+      </div>
     </div>
   </div>
 
   </div> <!-- /#page-scale-root -->
-
-  <!-- System performance footer -->
-  <footer id="sys-footer" class="sys-footer">
-    <div class="sys-section">
-      <span id="sys-load">Load: – / – / –</span>
-      <span id="sys-temp">Temp: –°C</span>
-      <span id="sys-cpu">CPU: – MHz</span>
-    </div>
-    <div class="sys-section">
-      <span id="sys-mem">Mem: – / – (–%)</span>
-      <span id="sys-uptime">Uptime: –</span>
-    </div>
-    <div class="sys-section">
-      <span id="sys-throttled">Throttled: –</span>
-    </div>
-  </footer>
 
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
   <script src="{{ url_for('static', filename='js/gps_status.js') }}"></script>
