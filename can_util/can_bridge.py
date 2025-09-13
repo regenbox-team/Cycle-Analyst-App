@@ -12,9 +12,9 @@ import cantools
 
 # ---- Mapping (from your message) ----
 MAP = {
-    # current/voltage now from MIC_id10_Status1
-    "current":  {"id": None,  "ext": None, "msg": "MIC_id10_Status1",                  "sig": "Status_TotalCurrent"},
-    "voltage":  {"id": None,  "ext": None, "msg": "MIC_id10_Status1",                  "sig": "Status_InputVoltage"},
+    # current/voltage prefer MIC_id10_Status1; fallback to MIC_id20_Status1 if present in DBC
+    "current":  {"id": None,  "ext": None, "msg": ["MIC_id10_Status1", "MIC_id20_Status1"], "sig": "Status_TotalCurrent"},
+    "voltage":  {"id": None,  "ext": None, "msg": ["MIC_id10_Status1", "MIC_id20_Status1"], "sig": "Status_InputVoltage"},
     # keep speed, distance, temp as-is
     "speed":    {"id": 0x610,  "ext": False, "msg": "DISPLAY_Moteur_statut_controleur", "sig": "Vehicle_speed"},
     "distance": {"id": 0x620,  "ext": False, "msg": "DISPLAY_Odo_trip_controleur",      "sig": "Trip"},
@@ -129,12 +129,17 @@ def live_mode(args):
     targets = {}
     for key, meta in MAP.items():
         mobj = None
+        # First try id/extended if provided
         if meta.get("id") is not None and meta.get("ext") is not None:
             mlist = idx.get((meta["id"], meta["ext"]), [])
-            mobj = pick_msg(mlist, meta.get("msg"))
-        # Fallback: resolve by message name only
+            mobj = pick_msg(mlist, meta.get("msg") if isinstance(meta.get("msg"), str) else None)
+        # Then try by name(s)
         if not mobj and meta.get("msg"):
-            mobj = by_name.get(meta["msg"]) 
+            names = meta["msg"] if isinstance(meta["msg"], (list, tuple)) else [meta["msg"]]
+            for nm in names:
+                if nm in by_name:
+                    mobj = by_name[nm]
+                    break
         targets[key] = mobj
 
     bus = can.interface.Bus(channel=args.channel, bustype="socketcan")
