@@ -74,7 +74,7 @@ def fmt_acticycle_line(vals: dict) -> str:
         "unused12": 0.0,
         "solar_Ah": 0.0,
         "solar_A": float(vals.get("solar_A", 0.0) or 0.0),
-        "flags": "2B",
+        "flags": str(vals.get("flags", "2B")),
     }
     line = [
         f"{out['ah']:.4f}",
@@ -144,8 +144,8 @@ def live_all(args):
                     decoded = safe_decode(m, bytes(msg.data))
                     if not decoded:
                         continue
-                    # Store every decoded signal under "Message.Signal"
-                    for sig_name, raw_val in decoded.items():
+                # Store every decoded signal under "Message.Signal"
+                for sig_name, raw_val in decoded.items():
                         try:
                             # Numeric values
                             val = float(raw_val)
@@ -165,11 +165,17 @@ def live_all(args):
                     # Try to map common fields for the 15-field line when possible
                     # Heuristics based on known message/signal names from the provided DBCs.
                     try:
-                        # Battery current/voltage
+                        # Battery current/voltage (MIC preferred)
+                        if m.name == "MIC_id10_Status1":
+                            if "Status_TotalCurrent" in decoded:
+                                sset("current", float(decoded["Status_TotalCurrent"]))
+                            if "Status_InputVoltage" in decoded:
+                                sset("voltage", float(decoded["Status_InputVoltage"]))
+                        # Fallback to BMS values if MIC not present yet
                         if m.name == "BMS_Information":
-                            if "BMSBatteryCurrent" in decoded:
+                            if "BMSBatteryCurrent" in decoded and "current" not in latest_values:
                                 sset("current", float(decoded["BMSBatteryCurrent"]))
-                            if "BMSBatteryVoltage" in decoded:
+                            if "BMSBatteryVoltage" in decoded and "voltage" not in latest_values:
                                 sset("voltage", float(decoded["BMSBatteryVoltage"]))
                         # Vehicle speed
                         if m.name == "DISPLAY_Moteur_statut_controleur" and "Vehicle_speed" in decoded:
@@ -180,11 +186,22 @@ def live_all(args):
                         # Motor temp
                         if m.name in ("MIC_id20_Status4",) and "Status_MotorTemp" in decoded:
                             sset("temp", float(decoded["Status_MotorTemp"]))
-                        # Pedal power → compute equivalent current at pack voltage
-                        if m.name == "Display_Riding_Power" and "displayPedallingPower" in decoded:
-                            p_w = float(decoded["displayPedallingPower"]) or 0.0
-                            v = float(latest_values.get("voltage", 0.0) or 0.0)
-                            derived["solar_A"] = (p_w / v) if v >= 5.0 else 0.0
+                    # Pedal power → compute equivalent current at pack voltage
+                    if m.name == "Display_Riding_Power" and "displayPedallingPower" in decoded:
+                        p_w = float(decoded["displayPedallingPower"]) or 0.0
+                        v = float(latest_values.get("voltage", 0.0) or 0.0)
+                        derived["solar_A"] = (p_w / v) if v >= 5.0 else 0.0
+                    # Lynx map mode for flags
+                    if m.name == "DISPLAY_Statut_Lynx" and "Map_Lynx" in decoded:
+                        try:
+                            derived["lynx_map"] = int(float(decoded["Map_Lynx"]))
+                        except Exception:
+                            # Named value or string; try name attribute
+                            name_attr = getattr(decoded["Map_Lynx"], "name", None)
+                            if isinstance(name_attr, str) and name_attr.isdigit():
+                                derived["lynx_map"] = int(name_attr)
+                            else:
+                                derived["lynx_map"] = 0
                     except Exception:
                         pass
 
@@ -213,6 +230,11 @@ def live_all(args):
                     alpha = 0.3
                     smooth_speed = smooth_speed + alpha * (raw_speed - smooth_speed)
 
+                # Build flags from Lynx map mode
+                mode = int(derived.get("lynx_map", 0) or 0)
+                if mode not in (0,1,2,3):
+                    mode = 0
+
                 line = fmt_acticycle_line({
                     "ah": derived.get("ah", 0.0),
                     "voltage": pub_voltage,
@@ -221,6 +243,7 @@ def live_all(args):
                     "distance": pub_distance,
                     "temp": pub_temp,
                     "solar_A": derived.get("solar_A", 0.0),
+                    "flags": str(mode),
                 })
 
                 # Emit the 15-field line to stdout (consumed by app in exec mode)
@@ -237,6 +260,7 @@ def live_all(args):
                         "distance": latest_values.get("distance"),
                         "temp": latest_values.get("temp"),
                         "solar_A": derived.get("solar_A", 0.0),
+                        "flags": str(mode),
                     },
                     "signals": latest_values,  # includes Message.Signal keys for all decoded
                 }
