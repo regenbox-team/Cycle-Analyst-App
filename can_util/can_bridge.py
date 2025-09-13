@@ -215,18 +215,18 @@ def live_mode(args):
         if now >= next_pub:
             next_pub = now + 0.1
 
-            # Apply staleness policies for publishing (don’t zero immediately)
-            pub_voltage  = last_vals.get("voltage", 0.0)  if (now - last_seen["voltage"])  <= STALE_VOLT_S else last_vals.get("voltage", 0.0)
-            pub_distance = last_vals.get("distance", 0.0) if (now - last_seen["distance"]) <= STALE_DIST_S else last_vals.get("distance", 0.0)
-            pub_temp     = last_vals.get("temp", 0.0)     if (now - last_seen["temp"])     <= STALE_TEMP_S else last_vals.get("temp", 0.0)
+            # Apply staleness policies for publishing (zero after a short gap)
+            pub_voltage  = last_vals.get("voltage", 0.0)  if (now - last_seen["voltage"])  <= STALE_VOLT_S else 0.0
+            pub_distance = last_vals.get("distance", 0.0) # distance is cumulative; do not zero
+            pub_temp     = last_vals.get("temp", 0.0)     if (now - last_seen["temp"])     <= STALE_TEMP_S else 0.0
 
             # Speed: keep last value for a short time then let it gently fall (optional smoothing)
-            raw_speed = last_vals.get("speed", 0.0) if (now - last_seen["speed"]) <= STALE_SPEED_S else last_vals.get("speed", 0.0)
+            raw_speed = last_vals.get("speed", 0.0) if (now - last_seen["speed"]) <= STALE_SPEED_S else 0.0
             smoothed["speed"] = smooth(smoothed["speed"], raw_speed, alpha=0.3)
             pub_speed = smoothed["speed"] if smoothed["speed"] is not None else raw_speed
 
             # Current for display: show last value, but it might be stale; that’s OK visually
-            pub_current = last_vals.get("current", 0.0)
+            pub_current = last_vals.get("current", 0.0) if (now - last_seen["current"]) <= STALE_CURRENT_S else 0.0
 
             # Build flags from Lynx map mode
             mode = int(last_vals.get("lynx_map", 0) or 0)
@@ -286,7 +286,8 @@ def csv_mode(args):
 
             # map fields
             for field, meta in MAP.items():
-                if m is not None and m.name == meta["msg"]:
+                names = meta["msg"] if isinstance(meta.get("msg"), (list, tuple)) else [meta.get("msg")]
+                if m is not None and m.name in names:
                     sig = meta["sig"]
                     if sig in decoded:
                         if field == "current":
