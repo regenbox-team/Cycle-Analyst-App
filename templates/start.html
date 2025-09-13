@@ -22,63 +22,52 @@
 
       <!-- Vehicle selector card with dark background and status -->
       <div class="card card-dark" id="vehicle-card" style="max-width: 820px;">
-        <div class="carousel" id="vehicle-carousel">
-          <div class="vehicle-title">Select Vehicle</div>
-          <div class="carousel-track">
-            <div class="carousel-item" data-mode="supercycle_live">
-              <img src="{{ url_for('static', filename='img/start/supercyle_live.png') }}" alt="Supercycle Live">
-              <div class="caption">Supercycle Live</div>
-            </div>
-            <div class="carousel-item" data-mode="supercycle_test">
-              <img src="{{ url_for('static', filename='img/start/superycle_test.png') }}" alt="Supercycle Test">
-              <div class="caption">Supercycle Test</div>
-            </div>
-            <div class="carousel-item" data-mode="acticycle_live">
-              <img src="{{ url_for('static', filename='img/start/acticycle_live.png') }}" alt="Acticycle Live">
-              <div class="caption">Acticycle Live</div>
-            </div>
-            <div class="carousel-item" data-mode="acticycle_test">
-              <img src="{{ url_for('static', filename='img/start/acticycle_test.png') }}" alt="Acticycle Test">
-              <div class="caption">Acticycle Test</div>
-            </div>
+        <div class="vehicle-title">Select Vehicle</div>
+        <!-- Small test mode toggle, top-left -->
+        <div class="vehicle-controls">
+          <label class="toggle-label"><input type="checkbox" id="test-mode-toggle"> Test Mode</label>
+        </div>
+        <!-- Two-vehicle layout: selected centered large, unselected top-right small -->
+        <div class="vehicle-select">
+          <div class="vehicle-option" id="vehicle-supercycle" data-vehicle="supercycle" title="Supercycle">
+            <img id="img-supercycle"
+                 data-active-src="{{ url_for('static', filename='img/start/supercyle_active.png') }}"
+                 data-inactive-src="{{ url_for('static', filename='img/start/supercyle_inactive.png') }}"
+                 alt="Supercycle" />
           </div>
-          <div class="vehicle-card-footer" id="connection-status-wrapper">
+          <div class="vehicle-option" id="vehicle-acticycle" data-vehicle="acticycle" title="Acticycle">
+            <img id="img-acticycle"
+                 data-active-src="{{ url_for('static', filename='img/start/acticycle_active.png') }}"
+                 data-inactive-src="{{ url_for('static', filename='img/start/acticycle_inactive.png') }}"
+                 alt="Acticycle" />
+          </div>
+        </div>
+        <div class="vehicle-card-footer" id="connection-status-wrapper">
           <button id="connection-status" disabled>Checking connection...</button>
         </div>
-        </div>
-    
       </div>
-      <!-- Start form wraps user card + external start button -->
+
+      <!-- Start form with merged User + GPS card and big Start button -->
       <form id="start-form" method="POST" action="/start_session" style="width:100%; display:flex; flex-direction:column; align-items:center;">
-        <!-- User selector card -->
-        <div class="card" id="user-card" style="max-width:720px;">
-          <div class="form-group" style="width:100%;">
-            <div class="section-title">User</div>
-            <div style="display:flex; gap:0.8rem; align-items:center; justify-content:center; flex-wrap:wrap; width:100%;">
-              <label><input type="radio" name="user" value="JD" checked> JD</label>
-              <label><input type="radio" name="user" value="LL"> LL</label>
+        <div class="card" id="user-gps-card" style="max-width:820px;">
+          <div style="width:100%; display:flex; flex-direction:column; gap:0.6rem; align-items:stretch;">
+            <div class="kv" style="grid-template-columns: auto 1fr; align-items:center;">
+              <div class="kv-key">Select User:</div>
+              <div class="kv-val" style="display:flex; gap:0.8rem; align-items:center; flex-wrap:wrap;">
+                <label><input type="radio" name="user" value="JD" checked> JD</label>
+                <label><input type="radio" name="user" value="LL"> LL</label>
+              </div>
+            </div>
+            <div class="kv" style="grid-template-columns: auto 1fr; align-items:center;">
+              <div class="kv-key">GPS Status:</div>
+              <div class="kv-val"><button id="gps-status-pill" disabled>GPS: Checking...</button></div>
+            </div>
+            <div style="margin-top:0.6rem;">
+              <button class="start-button start-button-large" type="submit" id="start-btn" disabled>Start Session</button>
             </div>
           </div>
         </div>
-
-        <!-- Start button outside of cards -->
-        <div style="text-align:center; width:100%; margin: 0.4rem 0 0.8rem 0;">
-          <button class="start-button" type="submit" id="start-btn" disabled>Start Session</button>
-        </div>
       </form>
-
-      <!-- GPS status card -->
-      <div class="card" id="gps-card" style="max-width:720px;">
-        <div style="text-align:center; width:100%;">
-          <div class="section-title">GPS Status</div>
-          <div style="margin: 0.4rem 0;">
-            <button id="gps-status-pill" disabled>GPS: Checking...</button>
-          </div>
-          <div class="subtitle">Position</div>
-          <div id="gps-position" class="muted">-</div>
-          <div id="gps-extra" class="muted" style="margin-top:0.25rem;"></div>
-        </div>
-      </div>
 
       <!-- Other actions card -->
       <div class="card" id="actions-card" style="max-width:820px;">

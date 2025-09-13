@@ -626,10 +626,6 @@ th, td {
   text-align: left;
 }
 
-#connection-status-wrapper {
-  margin-top: 1rem;
-}
-
 #connection-status {
   background-color: #999;
   color: white;
@@ -715,6 +711,11 @@ th, td {
 #vehicle-card {
   padding: 0;           /* allow image to reach edges */
   overflow: hidden;     /* clip to rounded corners */
+  position: relative;
+  display: flex;        /* stack children vertically */
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
 }
 
 /* legacy header (no longer used) removed */
@@ -831,3 +832,77 @@ th, td {
 }
 
 #vehicle-card #connection-status { cursor: default; }
+
+/* ===== Two-vehicle layout (no swipe) ===== */
+.vehicle-controls {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 4;
+}
+.vehicle-controls .toggle-label {
+  font-size: 0.8rem;
+  color: #ccc;
+}
+
+.vehicle-select {
+  position: relative;
+  width: 100%;
+  min-height: 360px;
+  padding: 0.5rem 0.5rem 0;
+}
+
+.vehicle-option {
+  position: absolute;
+  transition: transform 220ms ease, opacity 220ms ease, filter 220ms ease;
+  cursor: pointer;
+}
+.vehicle-option img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+.vehicle-option .caption {
+  text-align: center;
+  margin-top: 0.35rem;
+  font-weight: bold;
+  font-size: 0.95rem;
+  color: #ddd;
+}
+
+/* Default position places them out of view until JS applies classes */
+.vehicle-option { opacity: 0; pointer-events: none; }
+.vehicle-option.selected {
+  top: 58%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 72%;
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 3;
+}
+.vehicle-option.unselected {
+  top: 0.75rem;
+  right: 0.75rem;
+  transform: none;
+  width: 28%;
+  opacity: 0.35;
+  filter: grayscale(35%) brightness(85%);
+  pointer-events: auto; /* allow clicking to select */
+  z-index: 2;
+}
+
+@media (max-width: 520px) {
+  .vehicle-select { min-height: 300px; }
+  .vehicle-option.selected { width: 100%; top: 60%; }
+  .vehicle-option.unselected { width: 36%; }
+}
+
+/* Enlarged Start button */
+.start-button-large {
+  display: block;
+  width: 100%;
+  padding: 1rem 0.5rem;
+  font-size: 1rem;
+}
