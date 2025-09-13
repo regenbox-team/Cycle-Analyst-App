@@ -533,6 +533,8 @@
       if (initialChoice === BASEMAPS.TERRAIN_3D) {
         try { map.easeTo({ pitch: 55, duration: 600 }); } catch {}
       }
+      // On initial load, if GPS has a fresh fix, center the map once
+      initialFocusOnGps();
     });
 
     // Follow toggle button
@@ -622,6 +624,22 @@
           map.easeTo(opts);
         }
       }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // One-time focus on current GPS position after map load
+  async function initialFocusOnGps() {
+    try {
+      const res = await fetch('/gps_status', { cache: 'no-store' });
+      const s = await res.json();
+      if (!s || !s.has_fix || s.stale) return;
+      const lon = Number(s.lon), lat = Number(s.lat);
+      if (!isFinite(lon) || !isFinite(lat)) return;
+      // Center the map; choose a reasonable zoom if current is low
+      const targetZoom = Math.max(map.getZoom() || 0, 14);
+      map.easeTo({ center: [lon, lat], zoom: targetZoom, duration: 500 });
     } catch (e) {
       // ignore
     }
