@@ -1,5 +1,6 @@
 from __future__ import annotations
 from flask import jsonify, request
+import subprocess
 from app import state
 
 
@@ -32,12 +33,30 @@ def reset_session():
     return jsonify({"status": "Session reset", "session_id": state.session_id})
 
 
+def restart_service():
+    """Attempt to restart the systemd service. Requires sudoers rule.
+    Example sudoers (no password) for user 'pi':
+      pi ALL=NOPASSWD: /bin/systemctl restart cycle-analyst.service
+    """
+    try:
+        # Keep timeout short to avoid hanging the request
+        subprocess.run([
+            'sudo', 'systemctl', 'restart', 'cycle-analyst.service'
+        ], check=True, timeout=5)
+        return jsonify({"status": "ok", "message": "Service restart requested"})
+    except subprocess.TimeoutExpired:
+        return jsonify({"status": "pending", "message": "Restart initiated (timeout waiting for confirmation)"}), 202
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
 def create_blueprint():
     from flask import Blueprint
     bp = Blueprint("admin", __name__)
     bp.add_url_rule("/switch_user", methods=["POST"], view_func=switch_user)
     bp.add_url_rule("/add_ah", methods=["POST"], view_func=add_ah)
     bp.add_url_rule("/reset", methods=["POST"], view_func=reset_session)
+    bp.add_url_rule("/restart_service", methods=["POST"], view_func=restart_service)
     return bp
 
 
@@ -45,4 +64,4 @@ def register(app):
     app.add_url_rule("/switch_user", methods=["POST"], view_func=switch_user)
     app.add_url_rule("/add_ah", methods=["POST"], view_func=add_ah)
     app.add_url_rule("/reset", methods=["POST"], view_func=reset_session)
-
+    app.add_url_rule("/restart_service", methods=["POST"], view_func=restart_service)

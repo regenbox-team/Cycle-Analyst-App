@@ -1215,6 +1215,27 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // Restart service button
+  const restartBtn = document.getElementById('restart-service-button');
+  const restartStatus = document.getElementById('restart-status');
+  if (restartBtn) {
+    restartBtn.addEventListener('click', async () => {
+      if (!confirm('Restart the Cycle Analyst service now?')) return;
+      restartBtn.disabled = true;
+      if (restartStatus) restartStatus.textContent = 'Restarting...';
+      try {
+        const res = await fetch('/restart_service', { method: 'POST' });
+        let msg = 'Restart requested';
+        try { const j = await res.json(); msg = j.message || j.status || msg; } catch {}
+        if (restartStatus) restartStatus.textContent = msg;
+        setTimeout(() => window.location.reload(), 5000);
+      } catch (e) {
+        if (restartStatus) restartStatus.textContent = 'Restart failed';
+        restartBtn.disabled = false;
+      }
+    });
+  }
+
   fetchMetrics();
   setInterval(fetchMetrics, 100);
 });
