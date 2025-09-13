@@ -64,7 +64,7 @@
               <div class="kv-key">Add Route:</div>
               <div class="kv-val">
                 <input type="file" id="gpx-file-input-start" accept=".gpx" style="display:none" />
-                <button class="dashboard-button" id="gpx-upload-start">Upload GPX</button>
+                <button class="dashboard-button" id="gpx-upload-start" type="button">Upload GPX</button>
               </div>
             </div>
             <div style="margin-top:0.6rem;">
@@ -136,7 +136,7 @@
       const erBtn = document.getElementById('gpx-erase-start');
       const fileInput = document.getElementById('gpx-file-input-start');
       if (upBtn && fileInput) {
-        upBtn.addEventListener('click', ()=> fileInput.click());
+        upBtn.addEventListener('click', (e)=> { e.preventDefault(); fileInput.click(); });
         fileInput.addEventListener('change', async ()=>{
           const f = fileInput.files && fileInput.files[0];
           if (!f) return;
