@@ -6,6 +6,7 @@ const START_ANGLE = -126;
 const END_ANGLE = 126;
 
 let isLongRange = false;
+let metricsPaused = false;
 
 const solarHistory = [];
 const maxSolarHistoryPoints = 1000;
@@ -726,6 +727,10 @@ drawTicks("solar-ticks", 0, 300, 5, 50, 80, 70, 75);
 
 /* ====== FETCH + RENDER LOOP ====== */
 async function fetchMetrics() {
+  if (document.body.classList.contains('edit-mode')) {
+    metricsPaused = true;
+    return;
+  }
   try {
     const res = await fetch('/metrics');
     const json = await res.json();
@@ -877,7 +882,314 @@ document.getElementById("end-button").addEventListener("click", async () => {
   }
 });
 
+// ====== LAYOUT EDIT MODE (Drag & Drop) ======
+function ensureBoxIds() {
+  const grid = document.querySelector('.grid-container');
+  if (!grid) return;
+  const boxes = Array.from(grid.querySelectorAll(':scope > .box'));
+  boxes.forEach((el, idx) => {
+    if (!el.id) {
+      const base = (el.className || 'box').split(/\s+/).find(c => c && c !== 'box') || 'box';
+      el.id = `${base}-${idx}`;
+    }
+  });
+}
+
+function saveLayoutOrder() {
+  const grid = document.querySelector('.grid-container');
+  if (!grid) return;
+  const ids = Array.from(grid.querySelectorAll(':scope > .box')).map(el => el.id);
+  try { localStorage.setItem('dashboardLayoutOrder', JSON.stringify(ids)); } catch (e) {}
+}
+
+function restoreLayoutOrder() {
+  const grid = document.querySelector('.grid-container');
+  if (!grid) return;
+  let order = [];
+  try { order = JSON.parse(localStorage.getItem('dashboardLayoutOrder') || '[]'); } catch(e) { order = []; }
+  if (!Array.isArray(order) || order.length === 0) return;
+  const present = new Set(Array.from(grid.children).map(ch => ch.id));
+  order.filter(id => present.has(id)).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) grid.appendChild(el);
+  });
+}
+
+function setEditMode(active) {
+  const body = document.body;
+  const grid = document.querySelector('.grid-container');
+  const resetBtn = document.getElementById('layout-reset');
+  const pageRoot = document.getElementById('page-scale-root');
+  const editBtn = document.getElementById('layout-edit-toggle');
+  if (!grid) return;
+  if (active) {
+    body.classList.add('edit-mode');
+    if (resetBtn) resetBtn.style.display = '';
+    metricsPaused = true;
+
+    // Compute scale to fit vertically
+    function computeScale() {
+      if (!pageRoot) return;
+      // Reset scale to 1 to measure intrinsic height
+      pageRoot.style.setProperty('--edit-scale', 1);
+      const rect = pageRoot.getBoundingClientRect();
+      const contentHeight = rect.height;
+      const contentWidth = rect.width;
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      const vw = window.innerWidth || document.documentElement.clientWidth;
+      const scaleH = contentHeight > 0 ? (vh - 8) / contentHeight : 1;
+      const scaleW = contentWidth > 0 ? (vw - 8) / contentWidth : 1;
+      const scale = Math.min(1, Math.max(0.1, Math.min(scaleH, scaleW)));
+      pageRoot.style.setProperty('--edit-scale', scale);
+    }
+    computeScale();
+    window.addEventListener('resize', computeScale, { passive: true });
+    body._computeEditScale = computeScale;
+
+    // Create visible grab handles next to each title
+    try {
+      Array.from(grid.querySelectorAll(':scope > .box')).forEach(box => {
+        const title = box.querySelector('.box-title');
+        if (!title) return;
+        if (title.querySelector('.drag-handle')) return;
+        const h = document.createElement('span');
+        h.className = 'drag-handle';
+        h.title = 'Drag to reorder';
+        h.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">\
+          <path d="M7 5h2v2H7V5zm4 0h2v2h-2V5zm4 0h2v2h-2V5zM7 9h2v2H7V9zm4 0h2v2h-2V9zm4 0h2v2h-2V9zM7 13h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zM7 17h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"/></svg>';
+        title.appendChild(h);
+      });
+    } catch (_) {}
+
+    // Create a floating Validate button if missing
+    let vbtn = document.getElementById('edit-validate-button');
+    if (!vbtn) {
+      vbtn = document.createElement('button');
+      vbtn.id = 'edit-validate-button';
+      vbtn.className = 'edit-validate-button';
+      vbtn.textContent = 'Validate';
+      vbtn.addEventListener('click', () => {
+        // Save current order for safety, then exit edit mode
+        saveLayoutOrder();
+        setEditMode(false);
+      });
+      document.body.appendChild(vbtn);
+    }
+    vbtn.style.display = '';
+
+    // Create a floating Reset button (bottom-left) if missing
+    let rbtn = document.getElementById('edit-reset-button');
+    if (!rbtn) {
+      rbtn = document.createElement('button');
+      rbtn.id = 'edit-reset-button';
+      rbtn.className = 'edit-reset-button';
+      rbtn.textContent = 'Reset';
+      rbtn.addEventListener('click', () => {
+        try { localStorage.removeItem('dashboardLayoutOrder'); } catch (e) {}
+        window.location.reload();
+      });
+      document.body.appendChild(rbtn);
+    }
+    rbtn.style.display = '';
+  } else {
+    body.classList.remove('edit-mode');
+    if (resetBtn) resetBtn.style.display = 'none';
+    metricsPaused = false;
+    const pageRoot = document.getElementById('page-scale-root');
+    if (pageRoot) pageRoot.style.setProperty('--edit-scale', 1);
+    if (body._computeEditScale) {
+      window.removeEventListener('resize', body._computeEditScale);
+      delete body._computeEditScale;
+    }
+    const vbtn = document.getElementById('edit-validate-button');
+    if (vbtn) vbtn.style.display = 'none';
+    const rbtn = document.getElementById('edit-reset-button');
+    if (rbtn) rbtn.style.display = 'none';
+    // Remove drag handles to keep UI clean in normal mode
+    document.querySelectorAll('.drag-handle').forEach(el => el.remove());
+  }
+}
+
+function initDragAndDrop() {
+  const grid = document.querySelector('.grid-container');
+  if (!grid) return;
+
+  let draggingEl = null;
+
+  function onDragStart(e) {
+    if (!document.body.classList.contains('edit-mode')) return e.preventDefault();
+    draggingEl = e.currentTarget;
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', draggingEl.id); } catch (_) {}
+    draggingEl.classList.add('dragging');
+  }
+
+  function onDragEnd() {
+    if (draggingEl) draggingEl.classList.remove('dragging');
+    draggingEl = null;
+    Array.from(grid.children).forEach(ch => { ch.classList.remove('drop-before', 'drop-after'); });
+  }
+
+  function positionRelativeTo(el, clientY) {
+    const r = el.getBoundingClientRect();
+    const midpoint = r.top + r.height / 2;
+    return clientY < midpoint ? 'before' : 'after';
+  }
+
+  grid.addEventListener('dragover', (e) => {
+    if (!document.body.classList.contains('edit-mode')) return;
+    e.preventDefault();
+    const target = e.target.closest('.box');
+    Array.from(grid.children).forEach(ch => { ch.classList.remove('drop-before', 'drop-after'); });
+    if (!target || !draggingEl || target === draggingEl) return;
+    const pos = positionRelativeTo(target, e.clientY);
+    target.classList.add(pos === 'before' ? 'drop-before' : 'drop-after');
+  });
+
+  grid.addEventListener('drop', (e) => {
+    if (!document.body.classList.contains('edit-mode')) return;
+    e.preventDefault();
+    const target = e.target.closest('.box');
+    Array.from(grid.children).forEach(ch => { ch.classList.remove('drop-before', 'drop-after'); });
+    const draggedId = (e.dataTransfer && e.dataTransfer.getData('text/plain')) || (draggingEl && draggingEl.id);
+    const dragged = draggedId ? document.getElementById(draggedId) : draggingEl;
+    if (!dragged) return;
+    if (!target || target === dragged) return;
+    const pos = positionRelativeTo(target, e.clientY);
+    if (pos === 'before') {
+      grid.insertBefore(dragged, target);
+    } else {
+      grid.insertBefore(dragged, target.nextSibling);
+    }
+    saveLayoutOrder();
+    // Recompute scale after DOM height changes (drag reorder)
+    if (document.body._computeEditScale) document.body._computeEditScale();
+  });
+
+  // Delegate dragstart/dragend to boxes
+  Array.from(grid.querySelectorAll(':scope > .box')).forEach(el => {
+    el.setAttribute('draggable', 'true');
+    el.addEventListener('dragstart', onDragStart);
+    el.addEventListener('dragend', onDragEnd);
+  });
+
+  // Touch/Pen support via Pointer Events (mobile friendly)
+  function initPointerDnD() {
+    let pDraggingEl = null;
+    let pPointerId = null;
+
+    function clearHints() {
+      Array.from(grid.children).forEach(ch => ch.classList.remove('drop-before', 'drop-after'));
+    }
+
+    function posRelativeTo(el, clientY) {
+      const r = el.getBoundingClientRect();
+      return clientY < (r.top + r.height / 2) ? 'before' : 'after';
+    }
+
+    function isInteractiveTarget(target) {
+      return !!target.closest('button, a, input, select, textarea');
+    }
+
+    function canStartFrom(target, boxEl) {
+      if (isInteractiveTarget(target)) return false;
+      const title = boxEl.querySelector('.box-title');
+      // If a title exists, only allow dragging starting from the title to avoid interfering with widgets
+      if (title) return !!target.closest('.box-title, .drag-handle');
+      return true; // otherwise allow from anywhere in the box
+    }
+
+    function onPointerDown(e) {
+      if (!document.body.classList.contains('edit-mode')) return;
+      if (e.pointerType === 'mouse') return; // mouse uses native HTML5 DnD
+      const boxEl = e.currentTarget;
+      if (!canStartFrom(e.target, boxEl)) return;
+
+      pDraggingEl = boxEl;
+      pPointerId = e.pointerId;
+      try { boxEl.setPointerCapture(pPointerId); } catch(_) {}
+      boxEl.classList.add('dragging');
+      e.preventDefault();
+    }
+
+    function onPointerMove(e) {
+      if (!document.body.classList.contains('edit-mode')) return;
+      if (!pDraggingEl || e.pointerId !== pPointerId) return;
+      e.preventDefault();
+
+      // Temporarily ignore the dragging element for hit testing
+      const prevPE = pDraggingEl.style.pointerEvents;
+      pDraggingEl.style.pointerEvents = 'none';
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      pDraggingEl.style.pointerEvents = prevPE;
+      const target = el && el.closest && el.closest('.box');
+
+      clearHints();
+      if (!target || target === pDraggingEl) return;
+      const pos = posRelativeTo(target, e.clientY);
+      target.classList.add(pos === 'before' ? 'drop-before' : 'drop-after');
+    }
+
+    function onPointerUp(e) {
+      if (!document.body.classList.contains('edit-mode')) return;
+      if (!pDraggingEl || e.pointerId !== pPointerId) return;
+      e.preventDefault();
+
+      const boxEl = pDraggingEl;
+      try { boxEl.releasePointerCapture(pPointerId); } catch(_) {}
+      boxEl.classList.remove('dragging');
+
+      // Determine drop target under pointer
+      const prevPE = boxEl.style.pointerEvents;
+      boxEl.style.pointerEvents = 'none';
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      boxEl.style.pointerEvents = prevPE;
+      const target = el && el.closest && el.closest('.box');
+
+      if (target && target !== boxEl) {
+        const pos = posRelativeTo(target, e.clientY);
+        if (pos === 'before') grid.insertBefore(boxEl, target);
+        else grid.insertBefore(boxEl, target.nextSibling);
+        saveLayoutOrder();
+      }
+
+      pDraggingEl = null;
+      pPointerId = null;
+      clearHints();
+      if (document.body._computeEditScale) document.body._computeEditScale();
+    }
+
+    Array.from(grid.querySelectorAll(':scope > .box')).forEach(el => {
+      el.addEventListener('pointerdown', onPointerDown);
+      el.addEventListener('pointermove', onPointerMove);
+      el.addEventListener('pointerup', onPointerUp);
+      el.addEventListener('pointercancel', onPointerUp);
+    });
+  }
+
+  initPointerDnD();
+}
+
 window.addEventListener("DOMContentLoaded", () => {
+  // Restore and enable layout editing
+  ensureBoxIds();
+  restoreLayoutOrder();
+  initDragAndDrop();
+  const editBtn = document.getElementById('layout-edit-toggle');
+  const resetBtn = document.getElementById('layout-reset');
+  if (editBtn) {
+    editBtn.addEventListener('click', () => {
+      const isActive = document.body.classList.contains('edit-mode');
+      setEditMode(!isActive);
+    });
+  }
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      try { localStorage.removeItem('dashboardLayoutOrder'); } catch (e) {}
+      window.location.reload();
+    });
+  }
+
   // Chart picker buttons
   const chartButtons = {
     "btn-wh": "wh-per-km-chart",

@@ -38,6 +38,12 @@ body {
   flex-direction: column;
 }
 
+/* Page scale wrapper for edit mode */
+#page-scale-root {
+  transform-origin: top center;
+  transform: scale(var(--edit-scale, 1));
+}
+
 h1 {
   font-size: var(--font-title);
   margin-bottom: 2rem;
@@ -55,6 +61,8 @@ button, .dashboard-button, .start-button, .user-button {
   border-radius: var(--radius);
   padding: 0.15rem 0.3rem;
   border: none;
+  min-height: 1.7em;
+  min-width: 1.7em;
 }
 
 button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
@@ -68,6 +76,15 @@ button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
   color: white;
   margin: 0.1rem;
 }
+
+/* Icon-sized header button */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0rem;
+}
+.icon-button svg { width: 0.9rem; height: 0.9rem; }
 
 .active-chart {
   background-color: var(--highlight) !important;
@@ -102,10 +119,21 @@ button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
   background-color: var(--bg-box);
   border-bottom: 0.4rem solid var(--border);
   padding: 0.2rem 1rem;
-  /* display: flex; */
-  justify-content: space-between;
+  display: flex;
+  justify-content: center;
   align-items: center;
   color: var(--text-dark);
+  /* Ensure enough height to vertically center the button row */
+  min-height: 1.7rem;
+}
+
+/* Lay out header buttons horizontally */
+.main-header .header-info {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: nowrap;
+  height: 100%;
 }
 
 .main-header h1 {
@@ -129,6 +157,109 @@ button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
   display: flex;
   flex-direction: column;
 }
+
+/* Edit layout mode */
+body.edit-mode .grid-container > .box {
+  cursor: move;
+  outline: 2px dashed rgba(0,0,0,0.25);
+}
+body.edit-mode .grid-container > .box.dragging {
+  opacity: 0.7;
+}
+body.edit-mode .grid-container {
+  user-select: none;
+}
+body.edit-mode .grid-container > .box {
+  /* Prevent native scrolling while dragging on touch */
+  touch-action: none;
+}
+
+/* Narrower grid and single column while editing for clarity on mobile */
+body.edit-mode .grid-container {
+    width: 50vw;
+    max-width: 900px;
+    margin: 15px auto;
+}
+
+/* Simplified edit-mode UI: hide headers and non-title content */
+body.edit-mode .title-header,
+body.edit-mode .main-header {
+  display: none;
+}
+body.edit-mode {
+  overflow: hidden; /* prevent scrollbars while scaled */
+}
+body.edit-mode .box {
+  min-height: 56px;
+  justify-content: flex-start;
+}
+body.edit-mode .box > *:not(.box-title) {
+  display: none !important;
+}
+body.edit-mode .box .box-title {
+  position: static;
+  margin: 0.4rem 0;
+}
+
+/* Visible grab handle next to titles in edit mode */
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.5rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 0.3rem;
+  background: rgba(0,0,0,0.08);
+  color: #222;
+}
+.drag-handle svg {
+  width: 14px; height: 14px;
+}
+body:not(.edit-mode) .drag-handle { display: none; }
+
+/* Floating validate button shown only in edit mode */
+.edit-validate-button {
+  position: fixed;
+  right: 0.8rem;
+  bottom: 0.8rem;
+  z-index: 1000;
+  background: var(--highlight);
+  color: #000;
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.8rem;
+  font-weight: bold;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  border: none;
+}
+body:not(.edit-mode) .edit-validate-button { display: none; }
+
+/* Floating reset button (edit mode, bottom-left) */
+.edit-reset-button {
+  position: fixed;
+  left: 0.8rem;
+  bottom: 0.8rem;
+  z-index: 1000;
+  background: #555;
+  color: #fff;
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.8rem;
+  font-weight: bold;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  border: none;
+}
+body:not(.edit-mode) .edit-reset-button { display: none; }
+body.edit-mode .drop-before::before,
+body.edit-mode .drop-after::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 0;
+  border-top: 3px solid orange;
+}
+body.edit-mode .drop-before::before { top: -3px; }
+body.edit-mode .drop-after::after { bottom: -3px; }
 
 .dashboard-title-box {
   grid-column: 1 / -1;

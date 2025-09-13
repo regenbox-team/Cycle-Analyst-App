@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
+  <div id="page-scale-root">
 
   <header class="title-header">
     <div class="main-title">Cycle Analyst Dashboard</div>
@@ -18,6 +19,15 @@
     <button id="mode-button" class="flag-pill">—</button>
     <button id="gps-status-pill" disabled>GPS: Checking...</button>
     <button id="end-button">End Session</button>
+    <button id="layout-edit-toggle" class="icon-button" title="Rearrange layout" aria-label="Rearrange layout">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <rect x="5" y="5" width="6" height="6" rx="1"></rect>
+        <rect x="13" y="5" width="6" height="6" rx="1"></rect>
+        <rect x="5" y="13" width="6" height="6" rx="1"></rect>
+        <rect x="13" y="13" width="6" height="6" rx="1"></rect>
+      </svg>
+    </button>
+    <button id="layout-reset" class="dashboard-button" style="display:none;" title="Reset layout to default">Reset</button>
   </div>
   </header>
 
@@ -256,6 +266,7 @@
     </div>
   </div>
 
+  </div> <!-- /#page-scale-root -->
 
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
   <script src="{{ url_for('static', filename='js/gps_status.js') }}"></script>
