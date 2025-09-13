@@ -18,7 +18,7 @@ def create_app(start_reader: bool = False) -> Flask:
     app = Flask(__name__)
 
     # Register routes (each in isolation so one failure won't block others)
-    from app.routes import core as routes_core, sessions as routes_sessions, admin as routes_admin, modes as routes_modes, gps as routes_gps, tiles as routes_tiles, tracks as routes_tracks, game as routes_game
+    from app.routes import core as routes_core, sessions as routes_sessions, admin as routes_admin, modes as routes_modes, gps as routes_gps, tiles as routes_tiles, tracks as routes_tracks, game as routes_game, sys as routes_sys
     # Optional debug routes (safe to import; if missing, ignored below)
     try:
         from app.routes import debug as routes_debug
@@ -49,6 +49,7 @@ def create_app(start_reader: bool = False) -> Flask:
         routes_tiles,
         routes_tracks,
         routes_game,
+        routes_sys,
         routes_debug,
     ):
         _register_group(mod)

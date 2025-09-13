@@ -271,8 +271,25 @@
 
   </div> <!-- /#page-scale-root -->
 
+  <!-- System performance footer -->
+  <footer id="sys-footer" class="sys-footer">
+    <div class="sys-section">
+      <span id="sys-load">Load: – / – / –</span>
+      <span id="sys-temp">Temp: –°C</span>
+      <span id="sys-cpu">CPU: – MHz</span>
+    </div>
+    <div class="sys-section">
+      <span id="sys-mem">Mem: – / – (–%)</span>
+      <span id="sys-uptime">Uptime: –</span>
+    </div>
+    <div class="sys-section">
+      <span id="sys-throttled">Throttled: –</span>
+    </div>
+  </footer>
+
   <script src="{{ url_for('static', filename='js/script.js') }}"></script>
   <script src="{{ url_for('static', filename='js/gps_status.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/sys_metrics.js') }}"></script>
   <!-- Prefer local vendor copies for offline usage; fallback to CDN if not present -->
   <link id="ml-style" rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre-gl.css') }}" onerror="this.href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css'">
   <script src="{{ url_for('static', filename='vendor/maplibre-gl.js') }}" onerror="this.onerror=null;this.src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'"></script>

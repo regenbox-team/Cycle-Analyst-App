@@ -136,6 +136,13 @@ button:hover, .dashboard-button:hover, .start-button:hover, .user-button:hover {
   height: 100%;
 }
 
+/* Compact look for performance pill */
+#pi-perf-pill[disabled] {
+  opacity: 0.9;
+  background-color: #3a3a3a;
+  color: #fff;
+}
+
 .main-header h1 {
   font-size: var(--font-title);
   margin: 0;
@@ -363,6 +370,28 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 /* Half height map when reduced */
 .map-box.reduced #live-map {
   aspect-ratio: 2 / 1 !important;
+}
+
+/* --- System footer --- */
+.sys-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(0,0,0,0.72);
+  color: #ddd;
+  font-size: var(--font-small);
+  pointer-events: none; /* do not block clicks on content */
+}
+.sys-footer .sys-section {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
 }
 
 
