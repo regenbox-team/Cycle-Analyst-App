@@ -61,6 +61,11 @@
             <div class="kv" style="grid-template-columns: auto 1fr; align-items:center;">
               <div class="kv-key">GPS Status:</div>
               <div class="kv-val"><button id="gps-status-pill" disabled>GPS: Checking...</button></div>
+              <div class="kv-key">Add Route:</div>
+              <div class="kv-val">
+                <input type="file" id="gpx-file-input-start" accept=".gpx" style="display:none" />
+                <button class="dashboard-button" id="gpx-upload-start">Upload GPX</button>
+              </div>
             </div>
             <div style="margin-top:0.6rem;">
               <button class="start-button start-button-large" type="submit" id="start-btn" disabled>Start Session</button>
@@ -79,18 +84,7 @@
         </div>
       </div>
 
-      <!-- Route upload card -->
-      <div class="card" id="gpx-card" style="max-width:820px;">
-        <div style="text-align:center; width:100%;">
-          <div class="section-title">Route (GPX)</div>
-          <div style="display:flex; gap:0.6rem; justify-content:center; flex-wrap:wrap; width:100%; margin-top:0.4rem;">
-            <input type="file" id="gpx-file-input-start" accept=".gpx" style="display:none" />
-            <button class="dashboard-button" id="gpx-upload-start">Upload GPX</button>
-            <button class="dashboard-button" id="gpx-erase-start">Erase track</button>
-          </div>
-          <div id="gpx-message-start" class="muted" style="margin-top:0.4rem; display:none;">&nbsp;</div>
-        </div>
-      </div>
+      <!-- Route upload card removed per request -->
 
     {% endif %}
 
@@ -114,12 +108,29 @@
     // Minimal GPX upload/erase handlers for start page
     (function(){
       function showMsg(msg, ok=true){
-        const el = document.getElementById('gpx-message-start');
-        if (!el) return;
+        let el = document.getElementById('toast-msg');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'toast-msg';
+          el.style.position = 'fixed';
+          el.style.bottom = '1rem';
+          el.style.left = '50%';
+          el.style.transform = 'translateX(-50%)';
+          el.style.background = '#fff';
+          el.style.color = '#111';
+          el.style.padding = '0.5rem 0.8rem';
+          el.style.borderRadius = '0.6rem';
+          el.style.border = '2px solid black';
+          el.style.zIndex = '1000';
+          el.style.boxShadow = '0 4px 10px rgba(0,0,0,0.4)';
+          document.body.appendChild(el);
+        }
         el.textContent = msg;
-        el.style.color = ok ? '#ccc' : '#f88';
+        el.style.color = ok ? '#111' : '#900';
+        el.style.borderColor = ok ? 'black' : '#900';
         el.style.display = '';
-        setTimeout(()=>{ el.style.display='none'; }, 3000);
+        clearTimeout(el._hideTimer);
+        el._hideTimer = setTimeout(()=>{ el.style.display='none'; }, 3000);
       }
       const upBtn = document.getElementById('gpx-upload-start');
       const erBtn = document.getElementById('gpx-erase-start');
