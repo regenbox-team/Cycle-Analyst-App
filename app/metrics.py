@@ -62,6 +62,23 @@ def update_metrics(data, now=None):
 
     session_metrics["ca_reset_prompt"] = 53 <= v <= 54.6 and distance > 1
 
+    # Align distance baseline on first tick after app start for Acticycle modes.
+    # Ensures we don't double-count persisted session distance with CAN trip distance.
+    try:
+        from .modes import vehicle_mode as _veh_mode
+    except Exception:
+        _veh_mode = "supercycle_live"
+    if getattr(update_metrics, "_acticycle_distance_aligned", False) is False and str(_veh_mode).startswith("acticycle_"):
+        restored = float(session_metrics.get("distance_km", 0.0) or 0.0)
+        # Ensure a baseline exists
+        if session_metrics.get("distance_start") is None:
+            session_metrics["distance_start"] = distance
+        # Choose offset so that adjusted_distance == restored on this first tick
+        base = distance - session_metrics["distance_start"]
+        session_metrics["distance_offset"] = restored - base
+        # One-time alignment per app start
+        update_metrics._acticycle_distance_aligned = True
+
     if not hasattr(update_metrics, "last_time"):
         update_metrics.last_time = now
     dt = now - update_metrics.last_time
