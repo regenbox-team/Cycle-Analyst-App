@@ -17,7 +17,8 @@ MAP = {
     "voltage":  {"id": None,  "ext": None, "msg": ["MIC_id10_Status1", "MIC_id20_Status1"], "sig": "Status_InputVoltage"},
     # keep speed, distance, temp as-is
     "speed":    {"id": 0x610,  "ext": False, "msg": "DISPLAY_Moteur_statut_controleur", "sig": "Vehicle_speed"},
-    "distance": {"id": 0x620,  "ext": False, "msg": "DISPLAY_Odo_trip_controleur",      "sig": "Trip"},
+    # Use Cockpit DBC trip distance (Trip_info.tripDistance)
+    "distance": {"id": None,   "ext": None,  "msg": "Trip_info",                       "sig": "tripDistance"},
     "mot_temp": {"id": 0x1014, "ext": True,  "msg": "MIC_id20_Status4",                 "sig": "Status_MotorTemp"},
     # Pedal power (W) → solar_A (A = W / V)
     "ped_power": {"id": 0x158, "ext": False, "msg": "Display_Riding_Power",             "sig": "displayPedallingPower"},
