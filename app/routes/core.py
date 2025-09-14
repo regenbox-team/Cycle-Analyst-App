@@ -14,7 +14,12 @@ def _get_metrics_payload():
     net_Wh = sm["positive_Wh"] - sm["regen_Wh"] - sm["solar_Wh"]
     distance = max(sm["distance_km"], 0.001)
 
-    ah_used = (state.latest_raw_values[0] if state.latest_raw_values else 0) + sm.get("ah_offset", 0.0)
+    # In Acticycle modes, Ah is a calculated session metric to persist across restarts.
+    if vehicle_mode.startswith("acticycle_"):
+        base_ah = sm.get("ah_used_calc", 0.0)
+    else:
+        base_ah = (state.latest_raw_values[0] if state.latest_raw_values else 0)
+    ah_used = base_ah + sm.get("ah_offset", 0.0)
     voltage = state.latest_raw_values[1] if state.latest_raw_values else 0
     capacity_ah = VEHICLE_CONFIGS.get(vehicle_mode, {}).get("battery_capacity_ah", 64)
     Wh_remaining = (capacity_ah - ah_used) * voltage

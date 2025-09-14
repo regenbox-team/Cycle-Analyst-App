@@ -23,6 +23,8 @@ def reset_session_state():
         "positive_Wh": 0,
         "regen_Wh": 0,
         "solar_Wh": 0,
+        # Calculated Ah accumulator (used in Acticycle modes)
+        "ah_used_calc": 0.0,
         "calories_burned": 0,
         "distance_km": 0,
         "distance_start": None,
@@ -92,6 +94,10 @@ def update_metrics(data, now=None):
 
     session_metrics["solar_Wh"] += (v * solar_a) * dt / 3600
     session_metrics["calories_burned"] = session_metrics["solar_Wh"] * 1.433
+
+    # Calculated Ah used (signed, matches Acticycle bridge semantics)
+    # Persisted in session metrics, so it survives app restarts.
+    session_metrics["ah_used_calc"] = session_metrics.get("ah_used_calc", 0.0) + (a * dt / 3600.0)
 
     # Distance tracking (with CA reset handling)
     if session_metrics.get("last_raw_distance") is not None and distance < session_metrics["last_raw_distance"] - 0.1:
@@ -168,4 +174,3 @@ def restore_session_metrics(session_id: str, db_file: str, parse_line_func):
                     update_metrics(parsed)
     except Exception:
         pass
-
