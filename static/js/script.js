@@ -7,8 +7,6 @@ const END_ANGLE = 126;
 
 let isLongRange = false;
 let metricsPaused = false;
-let currentVehicleMode = null; // e.g., 'supercycle_live', 'acticycle_live'
-
 const solarHistory = [];
 const maxSolarHistoryPoints = 1000;
 
@@ -736,10 +734,7 @@ async function fetchMetrics() {
     const res = await fetch('/metrics');
     const json = await res.json();
 
-    // Hide CA reset prompt in Acticycle live mode; otherwise follow backend flag
-    if (currentVehicleMode === 'acticycle_live') {
-      hideCaResetPopup();
-    } else if (json.ca_reset_prompt) {
+    if (json.ca_reset_prompt) {
       showCaResetPopup();
     } else {
       hideCaResetPopup();
@@ -1241,16 +1236,7 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Initialize mode, then start metrics loop
-  (async () => {
-    try {
-      const res = await fetch('/get_vehicle_mode');
-      const data = await res.json();
-      currentVehicleMode = typeof data.mode === 'string' ? data.mode : null;
-    } catch (_) {
-      currentVehicleMode = null;
-    }
-    fetchMetrics();
-    setInterval(fetchMetrics, 100);
-  })();
+  // Start metrics loop
+  fetchMetrics();
+  setInterval(fetchMetrics, 100);
 });

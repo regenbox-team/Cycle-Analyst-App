@@ -35,8 +35,8 @@ async function checkConnection() {
   }
 }
 
-// ===== Two-vehicle selection (no swipe) =====
-let selectedVehicle = "supercycle"; // 'supercycle' | 'acticycle'
+// ===== Vehicle selection =====
+let selectedVehicle = "supercycle";
 let isTest = false;
 
 function deriveMode(vehicle, test) {
@@ -46,26 +46,16 @@ function deriveMode(vehicle, test) {
 
 function applySelectionUI() {
   const elSuper = document.getElementById("vehicle-supercycle");
-  const elActi = document.getElementById("vehicle-acticycle");
-  if (!elSuper || !elActi) return;
-  const superSelected = selectedVehicle === "supercycle";
-
-  elSuper.classList.toggle("selected", superSelected);
-  elSuper.classList.toggle("unselected", !superSelected);
-  elActi.classList.toggle("selected", !superSelected);
-  elActi.classList.toggle("unselected", superSelected);
+  if (!elSuper) return;
+  elSuper.classList.add("selected");
+  elSuper.classList.remove("unselected");
 }
 
 function updateVehicleImages(connectionActive) {
   const imgSuper = document.getElementById("img-supercycle");
-  const imgActi = document.getElementById("img-acticycle");
   if (imgSuper) {
     const src = connectionActive ? imgSuper.dataset.activeSrc : imgSuper.dataset.inactiveSrc;
     if (src && imgSuper.src !== src) imgSuper.src = src;
-  }
-  if (imgActi) {
-    const src = connectionActive ? imgActi.dataset.activeSrc : imgActi.dataset.inactiveSrc;
-    if (src && imgActi.src !== src) imgActi.src = src;
   }
 }
 
@@ -91,8 +81,6 @@ async function fetchVehicleMode() {
     const mode = data.mode;
     if (typeof mode === 'string') {
       isTest = mode.endsWith('_test');
-      if (mode.startsWith('supercycle')) selectedVehicle = 'supercycle';
-      else if (mode.startsWith('acticycle')) selectedVehicle = 'acticycle';
     }
     applySelectionUI();
     updateLinksForMode(mode);
@@ -119,16 +107,10 @@ window.onclick = function(event) {
 
 window.addEventListener("DOMContentLoaded", () => {
   const superEl = document.getElementById('vehicle-supercycle');
-  const actiEl = document.getElementById('vehicle-acticycle');
   const testToggle = document.getElementById('test-mode-toggle');
 
   if (superEl) superEl.addEventListener('click', () => {
     selectedVehicle = 'supercycle';
-    applySelectionUI();
-    setVehicleMode(deriveMode(selectedVehicle, isTest));
-  });
-  if (actiEl) actiEl.addEventListener('click', () => {
-    selectedVehicle = 'acticycle';
     applySelectionUI();
     setVehicleMode(deriveMode(selectedVehicle, isTest));
   });

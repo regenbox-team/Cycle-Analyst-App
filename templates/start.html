@@ -27,19 +27,13 @@
         <div class="vehicle-controls">
           <label class="toggle-label"><input type="checkbox" id="test-mode-toggle"> Test Mode</label>
         </div>
-        <!-- Two-vehicle layout: selected centered large, unselected top-right small -->
+        <!-- Vehicle layout -->
         <div class="vehicle-select">
           <div class="vehicle-option" id="vehicle-supercycle" data-vehicle="supercycle" title="Supercycle">
             <img id="img-supercycle"
                  data-active-src="{{ url_for('static', filename='img/start/supercyle_active.png') }}"
                  data-inactive-src="{{ url_for('static', filename='img/start/supercyle_inactive.png') }}"
                  alt="Supercycle" />
-          </div>
-          <div class="vehicle-option" id="vehicle-acticycle" data-vehicle="acticycle" title="Acticycle">
-            <img id="img-acticycle"
-                 data-active-src="{{ url_for('static', filename='img/start/acticycle_active.png') }}"
-                 data-inactive-src="{{ url_for('static', filename='img/start/acticycle_inactive.png') }}"
-                 alt="Acticycle" />
           </div>
         </div>
         <div class="vehicle-card-footer" id="connection-status-wrapper">

@@ -10,7 +10,6 @@
     - admin.py (switch_user, add_ah, reset)
     - modes.py (vehicle/test mode endpoints)
 - scripts/
-  - can_bridge.py (moved from root)
   - checkdb.py, db_viewer.py, export_sessions.py, merge_sessions.py, user_change.py (moved from root)
 - templates/, static/ (unchanged)
 - var/ (runtime data; created on first run)
@@ -37,7 +36,6 @@
 
 ## Command-Line Utilities (scripts/)
 
-- `scripts/can_bridge.py` (path updated in config for acticycle modes)
 - `scripts/checkdb.py` (summaries and integrity checks)
 - `scripts/db_viewer.py` (viewer)
 - `scripts/export_sessions.py` (export)

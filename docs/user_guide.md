@@ -1,8 +1,8 @@
 # Cycle Analyst App — User Guide
 
 ## Overview
-- Purpose: Live dashboard and session logging for Cycle Analyst/vehicle telemetry. Supports multiple vehicle modes (Supercycle, Acticycle) with test/live sources.
-- Stack: Flask app with background reader (serial or CAN bridge) publishing raw values and session metrics. Per-mode SQLite databases under `var/`.
+- Purpose: Live dashboard and session logging for Cycle Analyst/vehicle telemetry. Supports Supercycle test/live sources.
+- Stack: Flask app with background reader (serial) publishing raw values and session metrics. Per-mode SQLite databases under `var/`.
 
 ## Quick Start
 - Install deps: `pip install -r requirements.txt`
@@ -18,12 +18,12 @@
   - `modes.py`: Current mode + test mode, apply/save/load functions.
   - `state.py`: Runtime state (session_id, current_user, latest_raw_values, session_active), metric store, JSON persistence.
   - `metrics.py`: Metric updates, reset, restore from DB/JSON.
-  - `reader.py`: Background loop. Test mode generates fake data, live mode reads serial or runs CAN bridge.
+  - `reader.py`: Background loop. Test mode generates fake data, live mode reads serial.
   - `db.py`: Initializes SQLite schema for the active mode DB.
   - `bootstrap.py`: Migrates legacy files into `var/` at startup.
   - `routes/`: Flask route groups (core, sessions, admin, modes).
 - `templates/`, `static/`: UI.
-- `scripts/`: Utilities (CAN bridge, DB tools).
+- `scripts/`: Utilities (DB tools).
 - `var/`: Runtime data (per‑mode DB, session metrics JSON, user/mode flags).
 
 ## Runtime Storage
@@ -38,8 +38,6 @@
 - Built‑in modes:
   - `supercycle_live`: serial `/dev/ttyUSB0`, test_mode=false
   - `supercycle_test`: serial `/dev/ttyUSB0`, test_mode=true (fake data)
-  - `acticycle_live`: CAN via `can_util/can_bridge.py --dbc ... live --channel can0`
-  - `acticycle_test`: CAN via `can_util/can_bridge.py --dbc ... csv --csv can_util/can_log.csv`
 - Switch mode:
   - UI control (if present), or
   - POST `/set_vehicle_mode` with body `{"mode":"supercycle_test"}`
@@ -55,9 +53,9 @@
 - The app reads/writes the DB for the current vehicle mode by default.
 - Browsing other DBs: add `?mode=<vehicle_mode>` to list/fetch routes:
   - `/sessions?mode=supercycle_live`
-  - `/logs?mode=acticycle_live`
+  - `/logs?mode=supercycle_live`
   - `/select_session?mode=supercycle_test`
-  - `/summary?session=<id>&mode=acticycle_test`
+  - `/summary?session=<id>&mode=supercycle_test`
 
 ## Sessions Workflow
 - Start:
@@ -101,9 +99,6 @@
 - Reset session state: POST `/reset` → new session id, metrics cleared
 
 ## Scripts
-- `scripts/can_bridge.py`:
-  - Live from SocketCAN: `python scripts/can_bridge.py --dbc path/to.dbc live --channel can0`
-  - From CSV: `python scripts/can_bridge.py --dbc path/to.dbc csv --csv can_util/can_log.csv`
 - `scripts/export_sessions.py`:
   - Exports each session to CSV in `sessions_csv/` from the current mode DB.
 - `scripts/db_viewer.py` (micro viewer API):
@@ -121,12 +116,10 @@
   - `APP_START_READER=1`: force reader thread to start under factory (not needed for test mode)
 - Serial:
   - `SERIAL_PORT_DEFAULT` in `app/config.py` (`/dev/ttyUSB0`)
-- CAN:
-  - DBC/CSV paths configured in `app/config.py` under mode entries (`acticycle_*`)
 
 ## API Reference (Selected)
 - GET `/metrics`
-- POST `/set_vehicle_mode` `{ "mode": "supercycle_test" | "supercycle_live" | "acticycle_live" | "acticycle_test" }`
+- POST `/set_vehicle_mode` `{ "mode": "supercycle_test" | "supercycle_live" }`
 - GET `/get_vehicle_mode`
 - POST `/set_test_mode` `{ "enabled": true|false }`
 - GET `/get_test_mode`
@@ -140,11 +133,9 @@
 ## Troubleshooting
 - Connection shows “inactive”:
   - Verify test mode is enabled (`/get_test_mode`). In test mode, the reader should auto‑start and publish fake data.
-  - For live mode, check the serial port or CAN bridge command. After >3s without data, connection goes inactive by design.
+  - For live mode, check the serial port. After >3s without data, connection goes inactive by design.
 - Switching test → live remains “active”:
   - The app clears simulated values immediately when switching to a non‑test mode; refresh `/metrics` to see `raw_CA_values: null`.
-- Missing DBC / CAN CSV:
-  - Update paths in `app/config.py` for `acticycle_*` modes, or run the bridge manually and point the mode to your command path.
 
 ## Backups & Maintenance
 - DBs are simple SQLite files per mode under `var/`:
@@ -162,4 +153,3 @@
 - App factory: `create_app(start_reader=False)` registers blueprints and initializes state/DB. Use `start_reader=True` for dev runs.
 - Route modules in `app/routes/*` — add endpoints by extending these modules or creating new blueprints.
 - Metrics logic resides in `app/metrics.py`; changes here affect both live calculations and summary.
-

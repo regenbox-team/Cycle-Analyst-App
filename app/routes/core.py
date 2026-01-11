@@ -14,11 +14,7 @@ def _get_metrics_payload():
     net_Wh = sm["positive_Wh"] - sm["regen_Wh"] - sm["solar_Wh"]
     distance = max(sm["distance_km"], 0.001)
 
-    # In Acticycle modes, Ah is a calculated session metric to persist across restarts.
-    if vehicle_mode.startswith("acticycle_"):
-        base_ah = sm.get("ah_used_calc", 0.0)
-    else:
-        base_ah = (state.latest_raw_values[0] if state.latest_raw_values else 0)
+    base_ah = (state.latest_raw_values[0] if state.latest_raw_values else 0)
     ah_used = base_ah + sm.get("ah_offset", 0.0)
     voltage = state.latest_raw_values[1] if state.latest_raw_values else 0
     capacity_ah = VEHICLE_CONFIGS.get(vehicle_mode, {}).get("battery_capacity_ah", 64)
@@ -42,19 +38,6 @@ def _get_metrics_payload():
         "battery_capacity_ah": capacity_ah,
         "ca_reset_detected": sm.get("ca_reset_detected", False),
         "ca_reset_prompt": sm.get("ca_reset_prompt", False),
-        "decoded_acticycle": (
-            {
-                "voltage_V": state.latest_raw_values[1],
-                "current_A": state.latest_raw_values[2],
-                "speed_kph": state.latest_raw_values[3],
-                "distance_km": state.latest_raw_values[4],
-                "motor_temp_C": state.latest_raw_values[5],
-                "pedal_current_A": state.latest_raw_values[13],
-                "pedal_power_W": state.latest_raw_values[1] * state.latest_raw_values[13] if state.latest_raw_values else 0,
-            }
-            if state.latest_raw_values
-            else None
-        ),
         "calculated_CA_values": {
             "speed_avg": sm["speed_sum"] / max(1, sm["speed_count"]),
             "speed_max": sm["speed_max"],

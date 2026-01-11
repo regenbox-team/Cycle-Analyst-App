@@ -26,13 +26,6 @@
     </div>
   </div>
 
-  <div class="section">
-    <div class="card card-wide">
-      <div class="section-title">Decoded Acticycle (from DBC)</div>
-      <div id="acticycle-list" class="kv"></div>
-    </div>
-  </div>
-
   <script>
     const rawLabels = [
       'Ah used',
@@ -80,7 +73,6 @@
         const data = await res.json();
         renderKV(document.getElementById('raw-list'), toRawMap(data.raw_CA_values));
         renderKV(document.getElementById('calc-list'), data.calculated_CA_values);
-        renderKV(document.getElementById('acticycle-list'), data.decoded_acticycle);
       } catch (err) {
         console.error('Failed to load /metrics:', err);
       }

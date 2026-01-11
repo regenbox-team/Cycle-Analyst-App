@@ -23,8 +23,6 @@ def reset_session_state():
         "positive_Wh": 0,
         "regen_Wh": 0,
         "solar_Wh": 0,
-        # Calculated Ah accumulator (used in Acticycle modes)
-        "ah_used_calc": 0.0,
         "calories_burned": 0,
         "distance_km": 0,
         "distance_start": None,
@@ -62,23 +60,6 @@ def update_metrics(data, now=None):
 
     session_metrics["ca_reset_prompt"] = 53 <= v <= 54.6 and distance > 1
 
-    # Align distance baseline on first tick after app start for Acticycle modes.
-    # Ensures we don't double-count persisted session distance with CAN trip distance.
-    try:
-        from .modes import vehicle_mode as _veh_mode
-    except Exception:
-        _veh_mode = "supercycle_live"
-    if getattr(update_metrics, "_acticycle_distance_aligned", False) is False and str(_veh_mode).startswith("acticycle_"):
-        restored = float(session_metrics.get("distance_km", 0.0) or 0.0)
-        # Ensure a baseline exists
-        if session_metrics.get("distance_start") is None:
-            session_metrics["distance_start"] = distance
-        # Choose offset so that adjusted_distance == restored on this first tick
-        base = distance - session_metrics["distance_start"]
-        session_metrics["distance_offset"] = restored - base
-        # One-time alignment per app start
-        update_metrics._acticycle_distance_aligned = True
-
     if not hasattr(update_metrics, "last_time"):
         update_metrics.last_time = now
     dt = now - update_metrics.last_time
@@ -111,10 +92,6 @@ def update_metrics(data, now=None):
 
     session_metrics["solar_Wh"] += (v * solar_a) * dt / 3600
     session_metrics["calories_burned"] = session_metrics["solar_Wh"] * 1.433
-
-    # Calculated Ah used (signed, matches Acticycle bridge semantics)
-    # Persisted in session metrics, so it survives app restarts.
-    session_metrics["ah_used_calc"] = session_metrics.get("ah_used_calc", 0.0) + (a * dt / 3600.0)
 
     # Distance tracking (with CA reset handling)
     if session_metrics.get("last_raw_distance") is not None and distance < session_metrics["last_raw_distance"] - 0.1:

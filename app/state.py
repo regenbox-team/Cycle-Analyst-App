@@ -47,8 +47,6 @@ session_metrics = {
     "positive_Wh": 0,
     "regen_Wh": 0,
     "solar_Wh": 0,
-    # Calculated Ah accumulator (used in Acticycle modes)
-    "ah_used_calc": 0.0,
     "distance_km": 0,
     "distance_start": None,
     "last_km_checkpoints": [0],
