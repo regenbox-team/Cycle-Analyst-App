@@ -14,6 +14,7 @@ current_user: str = "JD"
 session_active: bool = False
 reader_started: bool = False
 gps_reader_started: bool = False
+monitor_started: bool = False
 
 # GPS state
 gps_state = {

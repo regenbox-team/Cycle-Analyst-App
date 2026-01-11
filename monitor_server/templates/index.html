@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Cycle Monitor</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; color: #222; }
+      h1 { margin: 0 0 8px 0; }
+      h2 { margin: 24px 0 8px 0; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+      th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; font-size: 14px; }
+      th { background: #f2f2f2; }
+      .muted { color: #666; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Cycle Monitor</h1>
+    <div class="muted">Last refresh: {{ now }}</div>
+
+    <h2>Devices</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Device</th>
+          <th>Status</th>
+          <th>Last Seen</th>
+          <th>Last Session</th>
+          <th>Mode</th>
+          <th>Test</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in devices %}
+        <tr>
+          <td>{{ d["device_id"] }}</td>
+          <td>{{ "active pi" if d["active"] else "offline" }}</td>
+          <td>{{ d["last_seen"] or "" }}</td>
+          <td>{{ d["last_session"] or "" }}</td>
+          <td>{{ d["mode"] or "" }}</td>
+          <td>{{ "yes" if d["test_mode"] else "no" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>Recent Sessions</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Device</th>
+          <th>Session</th>
+          <th>Mode</th>
+          <th>Start</th>
+          <th>End</th>
+          <th>Rows</th>
+          <th>Distance (km)</th>
+          <th>Uploaded</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in sessions %}
+        <tr>
+          <td>{{ s["device_id"] }}</td>
+          <td>{{ s["session_id"] }}</td>
+          <td>{{ s["mode"] }}</td>
+          <td>{{ s["start_ts"] or "" }}</td>
+          <td>{{ s["end_ts"] or "" }}</td>
+          <td>{{ s["rows_count"] or 0 }}</td>
+          <td>{{ "%.2f"|format(s["distance_km"] or 0) }}</td>
+          <td>{{ s["uploaded_at"] or "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </body>
+</html>

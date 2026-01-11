@@ -91,6 +91,13 @@ def create_app(start_reader: bool = False) -> Flask:
     except Exception:
         pass
 
+    # Start monitor sync thread if configured
+    try:
+        from app.monitor_client import start_monitor_sync
+        start_monitor_sync()
+    except Exception:
+        pass
+
     return app
 
 
