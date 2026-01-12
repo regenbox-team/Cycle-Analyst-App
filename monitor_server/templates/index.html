@@ -88,9 +88,51 @@
       .sort-btn.active { color: var(--accent); }
       .download-arrow { font-size: 16px; color: #0f766e; text-decoration: none; }
       .download-arrow:hover { text-decoration: underline; }
+      .summary-card {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+        gap: 16px;
+      }
+      .summary-stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .stat {
+        background: #faf6ef;
+        border: 1px solid #efe3d5;
+        border-radius: 12px;
+        padding: 12px 14px;
+        min-height: 72px;
+      }
+      .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+      .stat-value { font-size: 20px; font-weight: 700; margin-top: 6px; }
+      .stat-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+      .chart-wrap { display: flex; flex-direction: column; gap: 10px; }
+      .chart-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .chart-toggle { display: inline-flex; gap: 6px; }
+      .toggle-btn {
+        border: 1px solid var(--border);
+        background: #fffaf2;
+        color: var(--muted);
+        font-size: 12px;
+        border-radius: 999px;
+        padding: 4px 10px;
+        cursor: pointer;
+      }
+      .toggle-btn.active {
+        border-color: var(--accent);
+        color: #0f766e;
+        background: var(--accent-soft);
+        font-weight: 600;
+      }
+      #distance-chart { width: 100%; height: 160px; }
+      .chart-bg { fill: #fffaf2; }
+      .chart-bar { fill: #0d9488; opacity: 0.85; }
       @media (max-width: 720px) {
         main { padding: 24px 16px 40px; }
         table { font-size: 13px; }
+        .summary-card { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -125,6 +167,41 @@
             {% endfor %}
           </tbody>
         </table>
+      </div>
+
+      <h2>Summary</h2>
+      <div class="card summary-card">
+        <div class="summary-stats">
+          <div class="stat">
+            <div class="stat-label">Total distance (last 30 days)</div>
+            <div class="stat-value">{{ "%.1f"|format(total_distance_30 or 0) }} km</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Total uphill (last 30 days)</div>
+            <div class="stat-value">{{ "%.0f"|format(total_uphill_30 or 0) }} m</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Average speed</div>
+            <div class="stat-value">{{ "%.1f"|format(avg_speed or 0) }} km/h</div>
+            <div class="stat-sub">All sessions</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Average session distance</div>
+            <div class="stat-value">{{ "%.1f"|format(avg_session_distance or 0) }} km</div>
+            <div class="stat-sub">All sessions</div>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-header">
+            <div class="pill">Distance per day</div>
+            <div class="chart-toggle">
+              <button class="toggle-btn active" data-range="30">Last 30 days</button>
+              <button class="toggle-btn" data-range="all">All data</button>
+            </div>
+          </div>
+          <svg id="distance-chart" viewBox="0 0 600 160" role="img" aria-label="Distance per day chart"></svg>
+          <div class="muted">Daily distance (km)</div>
+        </div>
       </div>
 
       <h2>Recent Sessions</h2>
@@ -220,6 +297,46 @@
           rows.forEach((row) => tbody.appendChild(row));
         });
       });
+
+      const distanceSeries = {
+        "30": {{ daily_last_30 | tojson }},
+        "all": {{ daily_all | tojson }}
+      };
+      const chart = document.getElementById("distance-chart");
+      const toggleButtons = document.querySelectorAll(".toggle-btn");
+
+      const renderChart = (rangeKey) => {
+        const data = distanceSeries[rangeKey] || [];
+        const width = 600;
+        const height = 160;
+        const padding = 20;
+        if (!data.length) {
+          chart.innerHTML = `<rect x="0" y="0" width="${width}" height="${height}" rx="12" class="chart-bg"></rect>` +
+            `<text x="24" y="32" fill="#6f665b" font-size="12">No data yet.</text>`;
+          return;
+        }
+        const maxVal = Math.max(...data.map((d) => d.distance_km), 1);
+        const gap = 4;
+        const barWidth = Math.max(2, (width - padding * 2 - gap * (data.length - 1)) / data.length);
+        let bars = "";
+        data.forEach((point, index) => {
+          const x = padding + index * (barWidth + gap);
+          const barHeight = ((point.distance_km || 0) / maxVal) * (height - padding * 2);
+          const y = height - padding - barHeight;
+          bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="3" class="chart-bar"></rect>`;
+        });
+        chart.innerHTML = `<rect x="0" y="0" width="${width}" height="${height}" rx="12" class="chart-bg"></rect>` + bars;
+      };
+
+      toggleButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          toggleButtons.forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          renderChart(btn.dataset.range);
+        });
+      });
+
+      renderChart("30");
     </script>
   </body>
 </html>

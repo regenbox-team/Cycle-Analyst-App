@@ -50,6 +50,9 @@ def _init_db() -> None:
                 end_ts TEXT,
                 rows_count INTEGER,
                 distance_km REAL,
+                duration_sec REAL,
+                avg_speed_kph REAL,
+                uphill_m REAL,
                 metrics_json TEXT,
                 uploaded_at TEXT,
                 UNIQUE(device_id, session_id, mode)
@@ -75,6 +78,35 @@ def _init_db() -> None:
                 gps_sats INTEGER,
                 gps_hdop REAL
             )
+            """
+        )
+        conn.commit()
+
+
+def _migrate_db() -> None:
+    with _get_db() as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        missing = {
+            "duration_sec": "REAL",
+            "avg_speed_kph": "REAL",
+            "uphill_m": "REAL",
+        }
+        for name, col_type in missing.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {col_type}")
+        conn.execute(
+            """
+            UPDATE sessions
+            SET duration_sec = (julianday(end_ts) - julianday(start_ts)) * 86400
+            WHERE duration_sec IS NULL AND start_ts IS NOT NULL AND end_ts IS NOT NULL
+            """
+        )
+        conn.execute(
+            """
+            UPDATE sessions
+            SET avg_speed_kph = distance_km / (duration_sec / 3600.0)
+            WHERE avg_speed_kph IS NULL AND duration_sec IS NOT NULL AND duration_sec > 0
+              AND distance_km IS NOT NULL
             """
         )
         conn.commit()
@@ -118,6 +150,7 @@ def _parse_distance_km(raw: str | None) -> float | None:
 def create_app() -> Flask:
     app = Flask(__name__)
     _init_db()
+    _migrate_db()
 
     def _is_active(ts: str | None, window_sec: int = 120) -> bool:
         if not ts:
@@ -166,6 +199,16 @@ def create_app() -> Flask:
                 continue
         return ts
 
+    def _parse_ts(ts: str | None) -> datetime | None:
+        if not ts:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return datetime.strptime(ts, fmt)
+            except Exception:
+                continue
+        return None
+
     def _project_point(lat: float, lon: float, width: float = 1000, height: float = 500) -> tuple[float, float]:
         x = (lon + 180.0) / 360.0 * width
         y = (90.0 - lat) / 180.0 * height
@@ -187,6 +230,50 @@ def create_app() -> Flask:
                 LIMIT 50
                 """
             ).fetchall()
+            daily_all_rows = conn.execute(
+                """
+                SELECT date(start_ts) AS day, SUM(COALESCE(distance_km, 0)) AS distance_km
+                FROM sessions
+                WHERE start_ts IS NOT NULL
+                GROUP BY day
+                ORDER BY day
+                """
+            ).fetchall()
+            daily_last_30_rows = conn.execute(
+                """
+                SELECT date(start_ts) AS day, SUM(COALESCE(distance_km, 0)) AS distance_km
+                FROM sessions
+                WHERE start_ts IS NOT NULL
+                  AND date(start_ts) >= date('now', '-30 days')
+                GROUP BY day
+                ORDER BY day
+                """
+            ).fetchall()
+            totals_30 = conn.execute(
+                """
+                SELECT
+                    SUM(COALESCE(distance_km, 0)) AS total_distance_km,
+                    SUM(COALESCE(uphill_m, 0)) AS total_uphill_m
+                FROM sessions
+                WHERE start_ts IS NOT NULL
+                  AND date(start_ts) >= date('now', '-30 days')
+                """
+            ).fetchone()
+            avg_session = conn.execute(
+                """
+                SELECT AVG(COALESCE(distance_km, 0)) AS avg_distance_km
+                FROM sessions
+                WHERE distance_km IS NOT NULL
+                """
+            ).fetchone()
+            avg_speed_row = conn.execute(
+                """
+                SELECT
+                    SUM(COALESCE(distance_km, 0)) AS total_distance_km,
+                    SUM(COALESCE(duration_sec, 0)) AS total_duration_sec
+                FROM sessions
+                """
+            ).fetchone()
             session_points = []
             for s in sessions:
                 point = conn.execute(
@@ -234,11 +321,34 @@ def create_app() -> Flask:
             }
             for s in sessions
         ]
+        daily_all = [
+            {"day": row["day"], "distance_km": float(row["distance_km"] or 0)}
+            for row in daily_all_rows
+        ]
+        daily_last_30 = [
+            {"day": row["day"], "distance_km": float(row["distance_km"] or 0)}
+            for row in daily_last_30_rows
+        ]
+        total_distance_30 = float(totals_30["total_distance_km"] or 0) if totals_30 else 0.0
+        total_uphill_30 = float(totals_30["total_uphill_m"] or 0) if totals_30 else 0.0
+        avg_session_distance = float(avg_session["avg_distance_km"] or 0) if avg_session else 0.0
+        avg_speed = 0.0
+        if avg_speed_row and avg_speed_row["total_duration_sec"]:
+            total_duration = float(avg_speed_row["total_duration_sec"] or 0)
+            total_distance = float(avg_speed_row["total_distance_km"] or 0)
+            if total_duration > 0:
+                avg_speed = total_distance / (total_duration / 3600)
         return render_template(
             "index.html",
             devices=devices,
             sessions=sessions,
             session_points=session_points,
+            daily_last_30=daily_last_30,
+            daily_all=daily_all,
+            total_distance_30=total_distance_30,
+            total_uphill_30=total_uphill_30,
+            avg_session_distance=avg_session_distance,
+            avg_speed=avg_speed,
             now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
 
@@ -315,6 +425,30 @@ def create_app() -> Flask:
             start_ts = logs[0].get("timestamp") if logs else None
             end_ts = logs[-1].get("timestamp") if logs else None
             distance_km = _parse_distance_km(logs[-1].get("raw") if logs else None)
+            if distance_km is None and isinstance(data.get("metrics"), dict):
+                distance_km = data.get("metrics", {}).get("distance_km")
+            duration_sec = None
+            avg_speed_kph = None
+            start_dt = _parse_ts(start_ts)
+            end_dt = _parse_ts(end_ts)
+            if start_dt and end_dt:
+                duration_sec = max(0.0, (end_dt - start_dt).total_seconds())
+            prev_alt = None
+            total_uphill = 0.0
+            for row in logs:
+                alt = row.get("gps_alt")
+                if alt is None:
+                    continue
+                try:
+                    alt_val = float(alt)
+                except Exception:
+                    continue
+                if prev_alt is not None and alt_val > prev_alt:
+                    total_uphill += alt_val - prev_alt
+                prev_alt = alt_val
+            uphill_m = total_uphill
+            if duration_sec and distance_km is not None and duration_sec > 0:
+                avg_speed_kph = float(distance_km) / (duration_sec / 3600)
             metrics_json = None
             if data.get("metrics") is not None:
                 try:
@@ -326,8 +460,8 @@ def create_app() -> Flask:
                 """
                 INSERT INTO sessions (
                     device_id, session_id, mode, start_ts, end_ts,
-                    rows_count, distance_km, metrics_json, uploaded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rows_count, distance_km, duration_sec, avg_speed_kph, uphill_m, metrics_json, uploaded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     device_id,
@@ -337,6 +471,9 @@ def create_app() -> Flask:
                     end_ts,
                     rows_count,
                     distance_km,
+                    duration_sec,
+                    avg_speed_kph,
+                    uphill_m,
                     metrics_json,
                     datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                 ),
