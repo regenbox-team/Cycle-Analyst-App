@@ -45,6 +45,10 @@ dmypy.json
 logs/
 *.log
 
+# Monitor server DB
+monitor.db
+monitor_server/monitor.db
+
 # Local env files
 .env
 .env.*
