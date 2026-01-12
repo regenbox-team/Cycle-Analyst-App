@@ -4,77 +4,222 @@
     <meta charset="utf-8">
     <title>Cycle Monitor</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 24px; color: #222; }
-      h1 { margin: 0 0 8px 0; }
-      h2 { margin: 24px 0 8px 0; }
-      table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
-      th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; font-size: 14px; }
-      th { background: #f2f2f2; }
-      .muted { color: #666; font-size: 12px; }
+      :root {
+        color-scheme: light;
+        --bg: #f7f3ec;
+        --panel: #ffffff;
+        --ink: #1a1a1a;
+        --muted: #5f5f5f;
+        --accent: #0d9488;
+        --accent-soft: #d5f1ee;
+        --border: #e6dfd3;
+        --shadow: 0 10px 30px rgba(20, 20, 20, 0.08);
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: "Apfel Grotesk", "Helvetica Neue", Arial, sans-serif;
+        margin: 0;
+        color: var(--ink);
+        background: radial-gradient(circle at 10% 10%, #fff7eb 0%, #f7f3ec 45%, #efe7db 100%);
+      }
+      main { max-width: 1200px; margin: 0 auto; padding: 32px 24px 48px; }
+      h1 { margin: 0 0 6px 0; font-size: 32px; letter-spacing: -0.02em; }
+      h2 { margin: 28px 0 12px 0; font-size: 20px; }
+      .muted { color: var(--muted); font-size: 12px; letter-spacing: 0.02em; text-transform: uppercase; }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        box-shadow: var(--shadow);
+        padding: 16px 18px;
+      }
+      table { border-collapse: collapse; width: 100%; font-size: 14px; }
+      th, td { padding: 8px 10px; text-align: left; }
+      th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+      tbody tr { border-top: 1px solid var(--border); }
+      tbody tr:hover { background: #faf7f0; }
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        box-shadow: 0 0 0 2px #fff, 0 0 8px rgba(0, 0, 0, 0.08);
+      }
+      .status-online { background: #22c55e; }
+      .status-offline { background: #ef4444; }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: #0f766e;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .map-wrap { margin-top: 10px; }
+      .map {
+        width: 100%;
+        height: 220px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, #f0ede7 0%, #fffaf2 100%);
+        border: 1px dashed #dacfc1;
+      }
+      .map svg { width: 100%; height: 100%; display: block; }
+      .map-dot { fill: #0d9488; opacity: 0.8; }
+      .map-grid { stroke: #d7cec3; stroke-width: 1; opacity: 0.6; }
+      .map-label { font-size: 12px; fill: #6f665b; }
+      .table-card { margin-top: 12px; }
+      .link { color: #0f766e; text-decoration: none; font-weight: 600; }
+      .link:hover { text-decoration: underline; }
+      .table-compact th, .table-compact td { padding: 6px 8px; }
+      .table-compact td { white-space: nowrap; }
+      .sort-btn {
+        border: none;
+        background: none;
+        color: var(--muted);
+        font-size: 12px;
+        cursor: pointer;
+        padding: 0 2px;
+      }
+      .sort-btn.active { color: var(--accent); }
+      .download-arrow { font-size: 16px; color: #0f766e; text-decoration: none; }
+      .download-arrow:hover { text-decoration: underline; }
+      @media (max-width: 720px) {
+        main { padding: 24px 16px 40px; }
+        table { font-size: 13px; }
+      }
     </style>
   </head>
   <body>
-    <h1>Cycle Monitor</h1>
-    <div class="muted">Last refresh: {{ now }}</div>
+    <main>
+      <h1>Cycle Monitor</h1>
+      <div class="muted">Last refresh: {{ now }}</div>
 
-    <h2>Devices</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Device</th>
-          <th>Status</th>
-          <th>Last Seen</th>
-          <th>Last Session</th>
-          <th>Mode</th>
-          <th>Test</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for d in devices %}
-        <tr>
-          <td>{{ d["device_id"] }}</td>
-          <td>{{ "active pi" if d["active"] else "offline" }}</td>
-          <td>{{ d["last_seen"] or "" }}</td>
-          <td>{{ d["last_session"] or "" }}</td>
-          <td>{{ d["mode"] or "" }}</td>
-          <td>{{ "yes" if d["test_mode"] else "no" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+      <h2>Devices</h2>
+      <div class="card table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Device</th>
+              <th>Status</th>
+              <th>Last Seen</th>
+              <th>Last Session</th>
+              <th>Test</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in devices %}
+            <tr>
+              <td>{{ d["device_id"] }}</td>
+              <td>
+                <span class="status-dot {{ "status-online" if d["active"] else "status-offline" }}" title="{{ "online" if d["active"] else "offline" }}"></span>
+              </td>
+              <td>{{ d["last_seen_ago"] or "" }}</td>
+              <td>{{ d["last_session"] or "" }}</td>
+              <td>{{ "yes" if d["test_mode"] else "no" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
 
-    <h2>Recent Sessions</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Device</th>
-          <th>Session</th>
-          <th>Mode</th>
-          <th>Download</th>
-          <th>Start</th>
-          <th>End</th>
-          <th>Rows</th>
-          <th>Distance (km)</th>
-          <th>Uploaded</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for s in sessions %}
-        <tr>
-          <td>{{ s["device_id"] }}</td>
-          <td>{{ s["session_id"] }}</td>
-          <td>{{ s["mode"] }}</td>
-          <td>
-            <a href="/api/export_session?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}">download</a>
-          </td>
-          <td>{{ s["start_ts"] or "" }}</td>
-          <td>{{ s["end_ts"] or "" }}</td>
-          <td>{{ s["rows_count"] or 0 }}</td>
-          <td>{{ "%.2f"|format(s["distance_km"] or 0) }}</td>
-          <td>{{ s["uploaded_at"] or "" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+      <h2>Recent Sessions</h2>
+      <div class="card">
+        <div class="pill">Session starts</div>
+        <div class="map-wrap">
+          <div class="map">
+            <svg viewBox="0 0 1000 500" role="img" aria-label="Recent session locations">
+              <line class="map-grid" x1="0" y1="250" x2="1000" y2="250"></line>
+              <line class="map-grid" x1="250" y1="0" x2="250" y2="500"></line>
+              <line class="map-grid" x1="500" y1="0" x2="500" y2="500"></line>
+              <line class="map-grid" x1="750" y1="0" x2="750" y2="500"></line>
+              {% if session_points %}
+              {% for p in session_points %}
+              <circle class="map-dot" cx="{{ "%.1f"|format(p["x"]) }}" cy="{{ "%.1f"|format(p["y"]) }}" r="5"></circle>
+              {% endfor %}
+              {% else %}
+              <text class="map-label" x="20" y="40">No location data yet.</text>
+              {% endif %}
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="card table-card">
+        <table class="table-compact">
+          <thead>
+            <tr>
+              <th>Device</th>
+              <th>Session</th>
+              <th>Mode</th>
+              <th>Download</th>
+              <th>
+                Start
+                <button class="sort-btn" data-sort-key="start" data-sort-order="desc" aria-label="Sort by start time">↕</button>
+              </th>
+              <th>Rows</th>
+              <th>
+                Distance (km)
+                <button class="sort-btn" data-sort-key="distance" data-sort-order="desc" aria-label="Sort by distance">↕</button>
+              </th>
+              <th>Uploaded</th>
+            </tr>
+          </thead>
+          <tbody id="sessions-body">
+            {% for s in sessions %}
+            <tr data-start="{{ s['start_ts'] or '' }}" data-distance="{{ s['distance_km'] or 0 }}">
+              <td>{{ s["device_id"] }}</td>
+              <td>{{ s["session_id"] }}</td>
+              <td>{{ s["mode"] }}</td>
+              <td>
+                <a class="download-arrow" href="/api/export_session?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}" aria-label="Download">↓</a>
+              </td>
+              <td>{{ s["start_ts_fmt"] or "" }}</td>
+              <td>{{ s["rows_count"] or 0 }}</td>
+              <td>{{ "%.2f"|format(s["distance_km"] or 0) }}</td>
+              <td>{{ s["uploaded_at_fmt"] or "" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </main>
+    <script>
+      const sortButtons = document.querySelectorAll(".sort-btn");
+      const tbody = document.getElementById("sessions-body");
+      const getValue = (row, key) => {
+        if (key === "start") {
+          const raw = row.dataset.start || "";
+          const ts = Date.parse(raw.replace(" ", "T"));
+          return Number.isNaN(ts) ? 0 : ts;
+        }
+        if (key === "distance") {
+          const raw = row.dataset.distance || "0";
+          return Number.parseFloat(raw) || 0;
+        }
+        return 0;
+      };
+      sortButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const key = btn.dataset.sortKey;
+          const current = btn.dataset.sortOrder || "desc";
+          const next = current === "desc" ? "asc" : "desc";
+          btn.dataset.sortOrder = next;
+          sortButtons.forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          const rows = Array.from(tbody.querySelectorAll("tr"));
+          rows.sort((a, b) => {
+            const va = getValue(a, key);
+            const vb = getValue(b, key);
+            return next === "asc" ? va - vb : vb - va;
+          });
+          rows.forEach((row) => tbody.appendChild(row));
+        });
+      });
+    </script>
   </body>
 </html>

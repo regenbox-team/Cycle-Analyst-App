@@ -128,9 +128,53 @@ def create_app() -> Flask:
         except Exception:
             return False
 
+    def _format_ago(ts: str | None, now: datetime) -> str:
+        if not ts:
+            return ""
+        try:
+            last = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return ""
+        delta = now - last
+        total_seconds = int(delta.total_seconds())
+        if total_seconds < 0:
+            total_seconds = 0
+        if total_seconds < 60:
+            return "less than a minute"
+        minutes, seconds = divmod(total_seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        days, hours = divmod(hours, 24)
+        if days == 0 and hours == 0 and minutes == 1:
+            return "1 minute ago"
+        parts = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        parts.append(f"{minutes}m")
+        parts.append(f"{seconds}s")
+        return " ".join(parts) + " ago"
+
+    def _format_dt(ts: str | None) -> str:
+        if not ts:
+            return ""
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                parsed = datetime.strptime(ts, fmt)
+                return parsed.strftime("%b %d, %Y %H:%M:%S")
+            except Exception:
+                continue
+        return ts
+
+    def _project_point(lat: float, lon: float, width: float = 1000, height: float = 500) -> tuple[float, float]:
+        x = (lon + 180.0) / 360.0 * width
+        y = (90.0 - lat) / 180.0 * height
+        return x, y
+
     @app.route("/")
     @_require_auth
     def index():
+        now_utc = datetime.utcnow()
         with _get_db() as conn:
             devices = conn.execute(
                 "SELECT device_id, last_seen, last_session, mode, test_mode FROM devices ORDER BY last_seen DESC"
@@ -139,18 +183,62 @@ def create_app() -> Flask:
                 """
                 SELECT device_id, session_id, mode, start_ts, end_ts, rows_count, distance_km, uploaded_at
                 FROM sessions
-                ORDER BY uploaded_at DESC
+                ORDER BY start_ts DESC
                 LIMIT 50
                 """
             ).fetchall()
-        devices = [
-            dict(d) | {"active": _is_active(d["last_seen"])}
-            for d in devices
+            session_points = []
+            for s in sessions:
+                point = conn.execute(
+                    """
+                    SELECT gps_lat, gps_lon
+                    FROM logs
+                    WHERE device_id = ? AND session_id = ? AND mode = ?
+                      AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
+                      AND gps_lat != 0 AND gps_lon != 0
+                    ORDER BY id ASC
+                    LIMIT 1
+                    """,
+                    (s["device_id"], s["session_id"], s["mode"]),
+                ).fetchone()
+                if not point:
+                    continue
+                lat = float(point["gps_lat"])
+                lon = float(point["gps_lon"])
+                x, y = _project_point(lat, lon)
+                session_points.append(
+                    {
+                        "lat": lat,
+                        "lon": lon,
+                        "x": x,
+                        "y": y,
+                        "device_id": s["device_id"],
+                        "session_id": s["session_id"],
+                    }
+                )
+        devices = []
+        for d in devices:
+            devices.append(
+                dict(d)
+                | {
+                    "active": _is_active(d["last_seen"]),
+                    "last_seen_ago": _format_ago(d["last_seen"], now_utc),
+                }
+            )
+        sessions = [
+            dict(s)
+            | {
+                "start_ts_fmt": _format_dt(s["start_ts"]),
+                "end_ts_fmt": _format_dt(s["end_ts"]),
+                "uploaded_at_fmt": _format_dt(s["uploaded_at"]),
+            }
+            for s in sessions
         ]
         return render_template(
             "index.html",
             devices=devices,
             sessions=sessions,
+            session_points=session_points,
             now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
 
