@@ -308,6 +308,75 @@ def create_app() -> Flask:
 
         return jsonify({"status": "ok"})
 
+    @app.route("/api/export_session")
+    @_require_auth
+    def export_session():
+        device_id = request.args.get("device_id")
+        session_id = request.args.get("session_id")
+        mode = request.args.get("mode", "default")
+        if not device_id or not session_id:
+            return jsonify({"error": "missing device_id or session_id"}), 400
+
+        with _get_db() as conn:
+            session_row = conn.execute(
+                """
+                SELECT metrics_json, start_ts, end_ts, rows_count, distance_km, uploaded_at
+                FROM sessions
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                """,
+                (device_id, session_id, mode),
+            ).fetchone()
+            rows = conn.execute(
+                """
+                SELECT timestamp, session_id, raw, user,
+                       gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop
+                FROM logs
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                ORDER BY id
+                """,
+                (device_id, session_id, mode),
+            ).fetchall()
+
+        metrics = None
+        if session_row and session_row["metrics_json"]:
+            try:
+                metrics = json.loads(session_row["metrics_json"])
+            except Exception:
+                metrics = None
+
+        return jsonify(
+            {
+                "device_id": device_id,
+                "session_id": session_id,
+                "mode": mode,
+                "meta": {
+                    "start_ts": session_row["start_ts"] if session_row else None,
+                    "end_ts": session_row["end_ts"] if session_row else None,
+                    "rows_count": session_row["rows_count"] if session_row else len(rows),
+                    "distance_km": session_row["distance_km"] if session_row else None,
+                    "uploaded_at": session_row["uploaded_at"] if session_row else None,
+                },
+                "metrics": metrics,
+                "logs": [
+                    {
+                        "timestamp": r[0],
+                        "session": r[1],
+                        "raw": r[2],
+                        "user": r[3],
+                        "gps_lat": r[4],
+                        "gps_lon": r[5],
+                        "gps_alt": r[6],
+                        "gps_speed_kph": r[7],
+                        "gps_track_deg": r[8],
+                        "gps_fix": r[9],
+                        "gps_sats": r[10],
+                        "gps_hdop": r[11],
+                    }
+                    for r in rows
+                ],
+            }
+        )
+
     return app
 
 

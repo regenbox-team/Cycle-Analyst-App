@@ -50,6 +50,7 @@
           <th>Device</th>
           <th>Session</th>
           <th>Mode</th>
+          <th>Download</th>
           <th>Start</th>
           <th>End</th>
           <th>Rows</th>
@@ -63,6 +64,9 @@
           <td>{{ s["device_id"] }}</td>
           <td>{{ s["session_id"] }}</td>
           <td>{{ s["mode"] }}</td>
+          <td>
+            <a href="/api/export_session?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}">download</a>
+          </td>
           <td>{{ s["start_ts"] or "" }}</td>
           <td>{{ s["end_ts"] or "" }}</td>
           <td>{{ s["rows_count"] or 0 }}</td>
