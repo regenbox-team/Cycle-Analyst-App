@@ -34,6 +34,7 @@ def _init_db() -> None:
                 last_seen TEXT,
                 last_ip TEXT,
                 last_session TEXT,
+                session_active INTEGER,
                 mode TEXT,
                 test_mode INTEGER
             )
@@ -85,6 +86,9 @@ def _init_db() -> None:
 
 def _migrate_db() -> None:
     with _get_db() as conn:
+        device_columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()}
+        if "session_active" not in device_columns:
+            conn.execute("ALTER TABLE devices ADD COLUMN session_active INTEGER")
         columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
         missing = {
             "duration_sec": "REAL",
@@ -223,7 +227,11 @@ def create_app() -> Flask:
         now_local = datetime.now()
         with _get_db() as conn:
             device_rows = conn.execute(
-                "SELECT device_id, last_seen, last_session, mode, test_mode FROM devices ORDER BY last_seen DESC"
+                """
+                SELECT device_id, last_seen, last_session, session_active, mode, test_mode
+                FROM devices
+                ORDER BY last_seen DESC
+                """
             ).fetchall()
             sessions = conn.execute(
                 """
@@ -385,12 +393,13 @@ def create_app() -> Flask:
         with _get_db() as conn:
             conn.execute(
                 """
-                INSERT INTO devices (device_id, last_seen, last_ip, last_session, mode, test_mode)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO devices (device_id, last_seen, last_ip, last_session, session_active, mode, test_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
                     last_seen = excluded.last_seen,
                     last_ip = excluded.last_ip,
                     last_session = excluded.last_session,
+                    session_active = excluded.session_active,
                     mode = excluded.mode,
                     test_mode = excluded.test_mode
                 """,
@@ -399,6 +408,7 @@ def create_app() -> Flask:
                     server_seen,
                     request.remote_addr,
                     data.get("session_id"),
+                    int(data.get("session_active") or 0),
                     data.get("mode"),
                     int(data.get("test_mode") or 0),
                 ),

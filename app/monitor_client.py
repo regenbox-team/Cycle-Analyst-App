@@ -142,6 +142,7 @@ def _send_heartbeat(url: str, device_id: str) -> None:
         "device_id": device_id,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "session_id": state.session_id,
+        "session_active": 1 if state.session_active else 0,
         "mode": _mode_from_db_path(current_db),
         "test_mode": 1 if is_test_mode() else 0,
     }

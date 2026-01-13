@@ -66,6 +66,17 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
+      .session-note {
+        display: inline-block;
+        margin-top: 6px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #ffe8cc;
+        color: #a16207;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
       .map-wrap { margin-top: 10px; }
       .map {
         width: 100%;
@@ -166,6 +177,7 @@
               <th>Status</th>
               <th>Last Seen</th>
               <th>Last Session</th>
+              <th>Session</th>
               <th>Test</th>
             </tr>
           </thead>
@@ -178,6 +190,13 @@
               </td>
               <td title="{{ d['last_seen'] or '' }}">{{ d["last_seen_ago"] or "" }}</td>
               <td>{{ d["last_session"] or "" }}</td>
+              <td>
+                {% if d["session_active"] and d["active"] %}
+                  <span class="session-note">session in progress</span>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
               <td>{{ "yes" if d["test_mode"] else "no" }}</td>
             </tr>
             {% endfor %}
