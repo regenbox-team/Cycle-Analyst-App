@@ -3,6 +3,12 @@
   <head>
     <meta charset="utf-8">
     <title>Cycle Monitor</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    >
     <style>
       :root {
         color-scheme: light;
@@ -67,11 +73,21 @@
         border-radius: 14px;
         background: linear-gradient(135deg, #f0ede7 0%, #fffaf2 100%);
         border: 1px dashed #dacfc1;
+        position: relative;
+        overflow: hidden;
       }
-      .map svg { width: 100%; height: 100%; display: block; }
-      .map-dot { fill: #0d9488; opacity: 0.8; }
-      .map-grid { stroke: #d7cec3; stroke-width: 1; opacity: 0.6; }
-      .map-label { font-size: 12px; fill: #6f665b; }
+      .map .leaflet-container { background: #f0ede7; }
+      .map-empty {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        padding: 4px 8px;
+        background: rgba(255, 250, 242, 0.9);
+        border-radius: 8px;
+        font-size: 12px;
+        color: #6f665b;
+        z-index: 400;
+      }
       .table-card { margin-top: 12px; }
       .link { color: #0f766e; text-decoration: none; font-weight: 600; }
       .link:hover { text-decoration: underline; }
@@ -208,21 +224,7 @@
       <div class="card">
         <div class="pill">Session starts</div>
         <div class="map-wrap">
-          <div class="map">
-            <svg viewBox="0 0 1000 500" role="img" aria-label="Recent session locations">
-              <line class="map-grid" x1="0" y1="250" x2="1000" y2="250"></line>
-              <line class="map-grid" x1="250" y1="0" x2="250" y2="500"></line>
-              <line class="map-grid" x1="500" y1="0" x2="500" y2="500"></line>
-              <line class="map-grid" x1="750" y1="0" x2="750" y2="500"></line>
-              {% if session_points %}
-              {% for p in session_points %}
-              <circle class="map-dot" cx="{{ "%.1f"|format(p["x"]) }}" cy="{{ "%.1f"|format(p["y"]) }}" r="5"></circle>
-              {% endfor %}
-              {% else %}
-              <text class="map-label" x="20" y="40">No location data yet.</text>
-              {% endif %}
-            </svg>
-          </div>
+          <div id="monitor-map" class="map" role="img" aria-label="Recent session locations"></div>
         </div>
       </div>
 
@@ -265,7 +267,44 @@
         </table>
       </div>
     </main>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
     <script>
+      const sessionPoints = {{ session_points | tojson }};
+      const mapEl = document.getElementById("monitor-map");
+      if (mapEl && typeof L !== "undefined") {
+        const map = L.map(mapEl, { zoomControl: false }).setView([20, 0], 2);
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: "© OpenStreetMap contributors"
+        }).addTo(map);
+        const bounds = [];
+        sessionPoints.forEach((p) => {
+          const lat = Number(p.lat);
+          const lon = Number(p.lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+          L.circleMarker([lat, lon], {
+            radius: 5,
+            color: "#0d9488",
+            weight: 2,
+            fillColor: "#0d9488",
+            fillOpacity: 0.8
+          }).addTo(map);
+          bounds.push([lat, lon]);
+        });
+        if (bounds.length) {
+          map.fitBounds(bounds, { padding: [20, 20] });
+        } else {
+          const label = document.createElement("div");
+          label.className = "map-empty";
+          label.textContent = "No location data yet.";
+          mapEl.appendChild(label);
+        }
+      }
+
       const sortButtons = document.querySelectorAll(".sort-btn");
       const tbody = document.getElementById("sessions-body");
       const getValue = (row, key) => {
