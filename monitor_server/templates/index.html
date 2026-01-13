@@ -136,6 +136,26 @@
       .sort-btn.active { color: var(--accent); }
       .download-arrow { font-size: 16px; color: #0f766e; text-decoration: none; }
       .download-arrow:hover { text-decoration: underline; }
+      .action-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: #fffaf2;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        text-decoration: none;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .action-link.primary {
+        background: var(--accent-soft);
+        color: #0f766e;
+        border-color: var(--accent);
+      }
       .summary-card {
         display: grid;
         grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
@@ -279,7 +299,7 @@
               <th>Device</th>
               <th>Session</th>
               <th>Mode</th>
-              <th>Download</th>
+              <th>Actions</th>
               <th>
                 Start
                 <button class="sort-btn" data-sort-key="start" data-sort-order="desc" aria-label="Sort by start time">↕</button>
@@ -299,7 +319,9 @@
               <td>{{ s["session_id"] }}</td>
               <td>{{ s["mode"] }}</td>
               <td>
-                <a class="download-arrow" href="/api/export_session?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}" aria-label="Download">↓</a>
+                <a class="download-arrow" href="/api/export_session?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}" aria-label="Download JSON">↓</a>
+                <a class="action-link primary" href="/api/export_gpx?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}">GPX</a>
+                <a class="action-link" href="/session_map?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}">Map</a>
               </td>
               <td>{{ s["start_ts_fmt"] or "" }}</td>
               <td>{{ s["rows_count"] or 0 }}</td>

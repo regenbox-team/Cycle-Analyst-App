@@ -6,8 +6,9 @@ import sqlite3
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Any
+from xml.sax.saxutils import escape
 
-from flask import Flask, jsonify, request, render_template, Response
+from flask import Flask, jsonify, request, render_template, Response, url_for
 
 
 def _db_path() -> str:
@@ -227,6 +228,12 @@ def create_app() -> Flask:
             except Exception:
                 continue
         return None
+
+    def _format_gpx_time(ts: str | None) -> str | None:
+        parsed = _parse_ts(ts)
+        if not parsed:
+            return None
+        return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _project_point(lat: float, lon: float, width: float = 1000, height: float = 500) -> tuple[float, float]:
         x = (lon + 180.0) / 360.0 * width
@@ -656,6 +663,143 @@ def create_app() -> Flask:
                     for r in rows
                 ],
             }
+        )
+
+    @app.route("/api/export_gpx")
+    @_require_auth
+    def export_gpx():
+        device_id = request.args.get("device_id")
+        session_id = request.args.get("session_id")
+        mode = request.args.get("mode", "default")
+        if not device_id or not session_id:
+            return jsonify({"error": "missing device_id or session_id"}), 400
+
+        with _get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT timestamp, gps_lat, gps_lon, gps_alt
+                FROM logs
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                  AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
+                  AND gps_lat != 0 AND gps_lon != 0
+                ORDER BY id
+                """,
+                (device_id, session_id, mode),
+            ).fetchall()
+
+        points = []
+        for row in rows:
+            try:
+                lat = float(row["gps_lat"])
+                lon = float(row["gps_lon"])
+            except Exception:
+                continue
+            alt = None
+            if row["gps_alt"] is not None:
+                try:
+                    alt = float(row["gps_alt"])
+                except Exception:
+                    alt = None
+            points.append(
+                {
+                    "lat": lat,
+                    "lon": lon,
+                    "alt": alt,
+                    "time": _format_gpx_time(row["timestamp"]),
+                }
+            )
+
+        session_label = escape(session_id)
+        creator = "Cycle Monitor"
+        gpx_lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            f'<gpx version="1.1" creator="{creator}" xmlns="http://www.topografix.com/GPX/1/1">',
+            f"<metadata><name>{session_label}</name></metadata>",
+            "<trk>",
+            f"<name>{session_label}</name>",
+            "<trkseg>",
+        ]
+        for p in points:
+            line = f'<trkpt lat="{p["lat"]:.7f}" lon="{p["lon"]:.7f}">'
+            if p["alt"] is not None:
+                line += f"<ele>{p['alt']:.1f}</ele>"
+            if p["time"]:
+                line += f"<time>{p['time']}</time>"
+            line += "</trkpt>"
+            gpx_lines.append(line)
+        gpx_lines.extend(["</trkseg>", "</trk>", "</gpx>"])
+        gpx_text = "\n".join(gpx_lines)
+        filename = f"{session_id}.gpx"
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "application/gpx+xml; charset=utf-8",
+        }
+        return Response(gpx_text, headers=headers)
+
+    @app.route("/session_map")
+    @_require_auth
+    def session_map():
+        device_id = request.args.get("device_id")
+        session_id = request.args.get("session_id")
+        mode = request.args.get("mode", "default")
+        if not device_id or not session_id:
+            return Response("missing device_id or session_id", 400)
+
+        with _get_db() as conn:
+            session_row = conn.execute(
+                """
+                SELECT start_ts, end_ts, distance_km, rows_count
+                FROM sessions
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                """,
+                (device_id, session_id, mode),
+            ).fetchone()
+            rows = conn.execute(
+                """
+                SELECT timestamp, gps_lat, gps_lon, gps_alt
+                FROM logs
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                  AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
+                  AND gps_lat != 0 AND gps_lon != 0
+                ORDER BY id
+                """,
+                (device_id, session_id, mode),
+            ).fetchall()
+
+        points = []
+        for row in rows:
+            try:
+                lat = float(row["gps_lat"])
+                lon = float(row["gps_lon"])
+            except Exception:
+                continue
+            point = {"lat": lat, "lon": lon}
+            if row["gps_alt"] is not None:
+                try:
+                    point["alt"] = float(row["gps_alt"])
+                except Exception:
+                    point["alt"] = None
+            time_str = _format_gpx_time(row["timestamp"])
+            if time_str:
+                point["time"] = time_str
+            points.append(point)
+
+        return render_template(
+            "session_map.html",
+            device_id=device_id,
+            session_id=session_id,
+            mode=mode,
+            points=points,
+            gpx_url=url_for(
+                "export_gpx",
+                device_id=device_id,
+                session_id=session_id,
+                mode=mode,
+            ),
+            start_ts=_format_dt(session_row["start_ts"]) if session_row else "",
+            end_ts=_format_dt(session_row["end_ts"]) if session_row else "",
+            distance_km=session_row["distance_km"] if session_row else None,
+            rows_count=session_row["rows_count"] if session_row else None,
         )
 
     return app
