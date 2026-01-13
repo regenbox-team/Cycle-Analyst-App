@@ -152,12 +152,15 @@ def create_app() -> Flask:
     _init_db()
     _migrate_db()
 
-    def _is_active(ts: str | None, window_sec: int = 120) -> bool:
+    def _is_active(ts: str | None, window_sec: int = 120, future_grace_sec: int = 10) -> bool:
         if not ts:
             return False
         try:
             last = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
-            return datetime.utcnow() - last <= timedelta(seconds=window_sec)
+            now = datetime.now()
+            if last - now > timedelta(seconds=future_grace_sec):
+                return False
+            return now - last <= timedelta(seconds=window_sec)
         except Exception:
             return False
 
@@ -171,7 +174,7 @@ def create_app() -> Flask:
         delta = now - last
         total_seconds = int(delta.total_seconds())
         if total_seconds < 0:
-            total_seconds = 0
+            return "clock skew"
         if total_seconds < 60:
             return "less than a minute"
         minutes, seconds = divmod(total_seconds, 60)
@@ -217,7 +220,7 @@ def create_app() -> Flask:
     @app.route("/")
     @_require_auth
     def index():
-        now_utc = datetime.utcnow()
+        now_local = datetime.now()
         with _get_db() as conn:
             device_rows = conn.execute(
                 "SELECT device_id, last_seen, last_session, mode, test_mode FROM devices ORDER BY last_seen DESC"
@@ -309,7 +312,7 @@ def create_app() -> Flask:
                 dict(d)
                 | {
                     "active": _is_active(d["last_seen"]),
-                    "last_seen_ago": _format_ago(d["last_seen"], now_utc),
+                    "last_seen_ago": _format_ago(d["last_seen"], now_local),
                 }
             )
         sessions = [
@@ -378,7 +381,7 @@ def create_app() -> Flask:
         device_id = data.get("device_id")
         if not device_id:
             return jsonify({"error": "missing device_id"}), 400
-        server_seen = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        server_seen = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with _get_db() as conn:
             conn.execute(
                 """
@@ -476,7 +479,7 @@ def create_app() -> Flask:
                     avg_speed_kph,
                     uphill_m,
                     metrics_json,
-                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 ),
             )
 
