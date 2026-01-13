@@ -378,6 +378,7 @@ def create_app() -> Flask:
         device_id = data.get("device_id")
         if not device_id:
             return jsonify({"error": "missing device_id"}), 400
+        server_seen = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         with _get_db() as conn:
             conn.execute(
                 """
@@ -392,7 +393,7 @@ def create_app() -> Flask:
                 """,
                 (
                     device_id,
-                    data.get("timestamp"),
+                    server_seen,
                     request.remote_addr,
                     data.get("session_id"),
                     data.get("mode"),

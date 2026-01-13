@@ -176,7 +176,7 @@
               <td>
                 <span class="status-dot {{ "status-online" if d["active"] else "status-offline" }}" title="{{ "online" if d["active"] else "offline" }}"></span>
               </td>
-              <td>{{ d["last_seen_ago"] or "" }}</td>
+              <td title="{{ d['last_seen'] or '' }}">{{ d["last_seen_ago"] or "" }}</td>
               <td>{{ d["last_session"] or "" }}</td>
               <td>{{ "yes" if d["test_mode"] else "no" }}</td>
             </tr>
