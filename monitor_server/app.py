@@ -219,7 +219,7 @@ def create_app() -> Flask:
     def index():
         now_utc = datetime.utcnow()
         with _get_db() as conn:
-            devices = conn.execute(
+            device_rows = conn.execute(
                 "SELECT device_id, last_seen, last_session, mode, test_mode FROM devices ORDER BY last_seen DESC"
             ).fetchall()
             sessions = conn.execute(
@@ -304,7 +304,7 @@ def create_app() -> Flask:
                     }
                 )
         devices = []
-        for d in devices:
+        for d in device_rows:
             devices.append(
                 dict(d)
                 | {
