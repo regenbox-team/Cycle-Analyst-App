@@ -53,6 +53,27 @@
       }
       .status-online { background: #22c55e; }
       .status-offline { background: #ef4444; }
+      .loc-cross {
+        width: 18px;
+        height: 18px;
+        border-radius: 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 13px;
+        border: 1px solid;
+      }
+      .loc-ready {
+        color: #16a34a;
+        border-color: #16a34a;
+        background: #dcfce7;
+      }
+      .loc-missing {
+        color: #9ca3af;
+        border-color: #d1d5db;
+        background: #f3f4f6;
+      }
       .pill {
         display: inline-flex;
         align-items: center;
@@ -179,6 +200,7 @@
               <th>Last Session</th>
               <th>Session</th>
               <th>Test</th>
+              <th>Localisation</th>
             </tr>
           </thead>
           <tbody>
@@ -198,6 +220,9 @@
                 {% endif %}
               </td>
               <td>{{ "yes" if d["test_mode"] else "no" }}</td>
+              <td>
+                <span class="loc-cross {{ "loc-ready" if d["gps_available"] else "loc-missing" }}" title="{{ "location available" if d["gps_available"] else "no location" }}">+</span>
+              </td>
             </tr>
             {% endfor %}
           </tbody>
@@ -293,6 +318,7 @@
     ></script>
     <script>
       const sessionPoints = {{ session_points | tojson }};
+      const deviceLocations = {{ device_locations | tojson }};
       const mapEl = document.getElementById("monitor-map");
       if (mapEl && typeof L !== "undefined") {
         const map = L.map(mapEl, { zoomControl: false }).setView([20, 0], 2);
@@ -301,6 +327,7 @@
           attribution: "© OpenStreetMap contributors"
         }).addTo(map);
         const bounds = [];
+        let markerCount = 0;
         sessionPoints.forEach((p) => {
           const lat = Number(p.lat);
           const lon = Number(p.lon);
@@ -313,8 +340,23 @@
             fillOpacity: 0.8
           }).addTo(map);
           bounds.push([lat, lon]);
+          markerCount += 1;
         });
-        if (bounds.length) {
+        deviceLocations.forEach((p) => {
+          const lat = Number(p.lat);
+          const lon = Number(p.lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+          L.circleMarker([lat, lon], {
+            radius: 7,
+            color: "#16a34a",
+            weight: 2,
+            fillColor: "#16a34a",
+            fillOpacity: 0.9
+          }).addTo(map).bindTooltip(p.device_id || "device");
+          bounds.push([lat, lon]);
+          markerCount += 1;
+        });
+        if (markerCount) {
           map.fitBounds(bounds, { padding: [20, 20] });
         } else {
           const label = document.createElement("div");

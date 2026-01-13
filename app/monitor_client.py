@@ -10,6 +10,7 @@ import urllib.request
 from typing import Any
 
 from .config import BASE_DIR, DB_FILE, SESSION_METRICS_DIR, get_db_file
+from .gps import get_status
 from .modes import is_test_mode
 from . import state
 
@@ -138,6 +139,13 @@ def _upload_session(url: str, payload: dict[str, Any]) -> bool:
 
 def _send_heartbeat(url: str, device_id: str) -> None:
     current_db = get_db_file()
+    gps = get_status()
+    gps_ok = (
+        bool(gps.get("has_fix"))
+        and not gps.get("stale")
+        and gps.get("lat") is not None
+        and gps.get("lon") is not None
+    )
     payload = {
         "device_id": device_id,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -145,6 +153,10 @@ def _send_heartbeat(url: str, device_id: str) -> None:
         "session_active": 1 if state.session_active else 0,
         "mode": _mode_from_db_path(current_db),
         "test_mode": 1 if is_test_mode() else 0,
+        "gps_available": 1 if gps_ok else 0,
+        "gps_lat": gps.get("lat") if gps_ok else None,
+        "gps_lon": gps.get("lon") if gps_ok else None,
+        "gps_timestamp_utc": gps.get("timestamp_utc") if gps_ok else None,
     }
     try:
         _request_json("POST", f"{url}/api/heartbeat", payload)

@@ -36,7 +36,11 @@ def _init_db() -> None:
                 last_session TEXT,
                 session_active INTEGER,
                 mode TEXT,
-                test_mode INTEGER
+                test_mode INTEGER,
+                last_gps_lat REAL,
+                last_gps_lon REAL,
+                last_gps_ts TEXT,
+                gps_available INTEGER
             )
             """
         )
@@ -89,6 +93,14 @@ def _migrate_db() -> None:
         device_columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()}
         if "session_active" not in device_columns:
             conn.execute("ALTER TABLE devices ADD COLUMN session_active INTEGER")
+        if "last_gps_lat" not in device_columns:
+            conn.execute("ALTER TABLE devices ADD COLUMN last_gps_lat REAL")
+        if "last_gps_lon" not in device_columns:
+            conn.execute("ALTER TABLE devices ADD COLUMN last_gps_lon REAL")
+        if "last_gps_ts" not in device_columns:
+            conn.execute("ALTER TABLE devices ADD COLUMN last_gps_ts TEXT")
+        if "gps_available" not in device_columns:
+            conn.execute("ALTER TABLE devices ADD COLUMN gps_available INTEGER")
         columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
         missing = {
             "duration_sec": "REAL",
@@ -228,7 +240,8 @@ def create_app() -> Flask:
         with _get_db() as conn:
             device_rows = conn.execute(
                 """
-                SELECT device_id, last_seen, last_session, session_active, mode, test_mode
+                SELECT device_id, last_seen, last_session, session_active, mode, test_mode,
+                       last_gps_lat, last_gps_lon, last_gps_ts, gps_available
                 FROM devices
                 ORDER BY last_seen DESC
                 """
@@ -315,12 +328,25 @@ def create_app() -> Flask:
                     }
                 )
         devices = []
+        device_locations = []
         for d in device_rows:
+            gps_available = bool(d["gps_available"])
+            lat = d["last_gps_lat"]
+            lon = d["last_gps_lon"]
+            if gps_available and lat is not None and lon is not None and lat != 0 and lon != 0:
+                device_locations.append(
+                    {
+                        "device_id": d["device_id"],
+                        "lat": float(lat),
+                        "lon": float(lon),
+                    }
+                )
             devices.append(
                 dict(d)
                 | {
                     "active": _is_active(d["last_seen"]),
                     "last_seen_ago": _format_ago(d["last_seen"], now_local),
+                    "gps_available": gps_available,
                 }
             )
         sessions = [
@@ -361,6 +387,7 @@ def create_app() -> Flask:
             avg_session_distance=avg_session_distance,
             avg_speed=avg_speed,
             now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            device_locations=device_locations,
         )
 
     @app.route("/api/health")
@@ -390,18 +417,29 @@ def create_app() -> Flask:
         if not device_id:
             return jsonify({"error": "missing device_id"}), 400
         server_seen = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        gps_available = 1 if data.get("gps_available") else 0
+        gps_lat = data.get("gps_lat") if gps_available else None
+        gps_lon = data.get("gps_lon") if gps_available else None
+        gps_ts = data.get("gps_timestamp_utc") if gps_available else None
         with _get_db() as conn:
             conn.execute(
                 """
-                INSERT INTO devices (device_id, last_seen, last_ip, last_session, session_active, mode, test_mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO devices (
+                    device_id, last_seen, last_ip, last_session, session_active, mode, test_mode,
+                    last_gps_lat, last_gps_lon, last_gps_ts, gps_available
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
                     last_seen = excluded.last_seen,
                     last_ip = excluded.last_ip,
                     last_session = excluded.last_session,
                     session_active = excluded.session_active,
                     mode = excluded.mode,
-                    test_mode = excluded.test_mode
+                    test_mode = excluded.test_mode,
+                    last_gps_lat = excluded.last_gps_lat,
+                    last_gps_lon = excluded.last_gps_lon,
+                    last_gps_ts = excluded.last_gps_ts,
+                    gps_available = excluded.gps_available
                 """,
                 (
                     device_id,
@@ -411,6 +449,10 @@ def create_app() -> Flask:
                     int(data.get("session_active") or 0),
                     data.get("mode"),
                     int(data.get("test_mode") or 0),
+                    gps_lat,
+                    gps_lon,
+                    gps_ts,
+                    gps_available,
                 ),
             )
             conn.commit()
