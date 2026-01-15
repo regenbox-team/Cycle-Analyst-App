@@ -44,6 +44,7 @@ dmypy.json
 # Logs
 logs/
 *.log
+var/
 
 # Monitor server DB
 monitor.db
