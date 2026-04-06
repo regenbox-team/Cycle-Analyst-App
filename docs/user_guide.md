@@ -79,9 +79,9 @@
   - `calculated_CA_values`:
     - Speed: `speed_avg`, `speed_max`
     - Power: `power_live`, `power_avg`, `power_max`, `power_min`
-    - Energy: `Wh_pos`, `Wh_regen`, `solar_Wh`, `net_Wh` (pos - regen - solar), `%_regen`, `%_solar`
+    - Energy: `Wh_pos`, `Wh_regen`, `human_Wh`, `solar_Wh`, `net_Wh` (pos - regen - human - solar), `%_regen`, `%_human`, `%_solar`
     - Efficiency: `net_Wh_per_km`, per‑km lists (`Wh_per_km_last`, `net_Wh_per_km_last`)
-    - Solar/regen per‑km %: `solar_pct_per_km_last`, `regen_pct_per_km_last`
+    - Human/solar/regen per‑km %: `human_pct_per_km_last`, `solar_pct_per_km_last`, `regen_pct_per_km_last`
     - Temperature: `temp_avg`, `temp_max`
     - Autonomy estimates: `autonomy.range_session_avg`, plus last km / 10km metrics when available
 - Staleness:
@@ -116,6 +116,13 @@
   - `APP_START_READER=1`: force reader thread to start under factory (not needed for test mode)
 - Serial:
   - `SERIAL_PORT_DEFAULT` in `app/config.py` (`/dev/ttyUSB0`)
+- Optional INA228 solar sensor on Raspberry Pi I2C:
+  - Enable with `APP_SOLAR_SENSOR=ina228`
+  - Bus with `APP_SOLAR_I2C_BUS=1`
+  - Address with `APP_SOLAR_I2C_ADDR=0x45` (`0x44` and `0x41` also supported by the board)
+  - Shunt with `APP_SOLAR_SHUNT_OHMS=0.0002`
+  - Invert sign if needed with `APP_SOLAR_INVERT_SIGN=true`
+  - Optional calibration trims: `APP_SOLAR_CURRENT_GAIN=1.0`, `APP_SOLAR_CURRENT_OFFSET=0.0`
 
 ## API Reference (Selected)
 - GET `/metrics`

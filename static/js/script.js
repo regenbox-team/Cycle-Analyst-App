@@ -8,6 +8,7 @@ const END_ANGLE = 126;
 let isLongRange = false;
 let metricsPaused = false;
 const solarHistory = [];
+const pvHistory = [];
 const maxSolarHistoryPoints = 1000;
 
 /* === AMP ARC CONFIG === */
@@ -219,16 +220,16 @@ function updateAmpArc(amps) {
   if (el) el.setAttribute("d", d);
 }
 
-function updateSolarMeter(live, avg, max) {
+function updateAuxMeter(prefix, live, avg, max) {
   const clampedLive = Math.max(0, num(live, 0));
   const clampedAvg = Math.max(0, num(avg, 0));
   const clampedMax = Math.max(0, num(max, 0));
 
-  setArcPath("solar-arc", clampedLive, 0, 300);
-  rotateNeedle("avg-solar-line", clampedAvg, 0, 300, clampedAvg.toFixed(0), "avg-solar-label", "blue");
-  rotateNeedle("max-solar-line", clampedMax, 0, 300, clampedMax.toFixed(0), "max-solar-label", "red");
-  document.getElementById("solar-number").textContent = clampedLive.toFixed(0);
-  document.getElementById("solar-unit").textContent = "W";
+  setArcPath(`${prefix}-arc`, clampedLive, 0, 300);
+  rotateNeedle(`avg-${prefix}-line`, clampedAvg, 0, 300, clampedAvg.toFixed(0), `avg-${prefix}-label`, "blue");
+  rotateNeedle(`max-${prefix}-line`, clampedMax, 0, 300, clampedMax.toFixed(0), `max-${prefix}-label`, "red");
+  document.getElementById(`${prefix}-number`).textContent = clampedLive.toFixed(0);
+  document.getElementById(`${prefix}-unit`).textContent = "W";
 }
 
 function updateTempBar(live, avg, max) {
@@ -304,8 +305,8 @@ function updateTempBar(live, avg, max) {
 }
 
 /* ====== CHARTS ====== */
-function updateSolarHistoryGraph(history) {
-  const svg = document.getElementById("solar-history-graph");
+function updatePowerHistoryGraph(svgId, history) {
+  const svg = document.getElementById(svgId);
   if (!svg) return;
 
   svg.innerHTML = '';
@@ -509,8 +510,8 @@ function updateWhPerKmChart(totalValues, netValues = [], liveTotal = 0, liveNet 
   }
 }
 
-function updateSolarPctChart(pctValues, livePct = 0, range = 10) {
-  const chart = document.getElementById("solar-pct-per-km-chart");
+function updatePctChart(chartId, pctValues, livePct = 0, range = 10, liveColor = "orange") {
+  const chart = document.getElementById(chartId);
   if (!chart) return;
 
   chart.innerHTML = '';
@@ -575,7 +576,7 @@ function updateSolarPctChart(pctValues, livePct = 0, range = 10) {
     rect.setAttribute("height", h);
     rect.setAttribute("rx", 2);
     rect.setAttribute("ry", 2);
-    rect.setAttribute("fill", i === totalBars - 1 ? "orange" : "#888");
+    rect.setAttribute("fill", i === totalBars - 1 ? liveColor : "#888");
     chart.appendChild(rect);
 
     if (range === 10) {
@@ -719,10 +720,11 @@ async function resetSession() {
 }
 
 /* ====== BACKGROUND ARCS & TICKS INIT ====== */
-["speed-bg", "power-bg", "solar-bg"].forEach(setBackgroundArc);
+["speed-bg", "power-bg", "solar-bg", "pv-bg"].forEach(setBackgroundArc);
 drawTicks("speed-ticks", 0, 50, 1, 5, 80, 70, 75);
 drawTicks("power-ticks", -2000, 4000, 100, 500, 80, 70, 75);
 drawTicks("solar-ticks", 0, 300, 5, 50, 80, 70, 75);
+drawTicks("pv-ticks", 0, 300, 5, 50, 80, 70, 75);
 
 /* ====== FETCH + RENDER LOOP ====== */
 async function fetchMetrics() {
@@ -764,23 +766,42 @@ async function fetchMetrics() {
       num(json.calculated_CA_values?.temp_max, 0)
     );
 
-    // Solar (human) power
-    let solarLive = Math.max(0, num(json.calculated_CA_values?.solar_power_live, 0));
-    updateSolarMeter(
+    // Human power
+    let solarLive = Math.max(0, num(json.calculated_CA_values?.human_power_live ?? json.calculated_CA_values?.solar_power_live, 0));
+    updateAuxMeter(
+      "solar",
       solarLive,
-      num(json.calculated_CA_values?.solar_power_avg, 0),
-      num(json.calculated_CA_values?.solar_power_max, 0)
+      num(json.calculated_CA_values?.human_power_avg ?? json.calculated_CA_values?.solar_power_avg, 0),
+      num(json.calculated_CA_values?.human_power_max ?? json.calculated_CA_values?.solar_power_max, 0)
     );
 
     solarHistory.push(solarLive);
     if (solarHistory.length > maxSolarHistoryPoints) {
       solarHistory.shift();
     }
-    updateSolarHistoryGraph(solarHistory);
+    updatePowerHistoryGraph("solar-history-graph", solarHistory);
 
     const powerLive = num(json.calculated_CA_values?.power_live, 0);
     const solarPercent = powerLive > 0 ? (100 * solarLive / powerLive) : 0;
     document.getElementById("solar-percent").textContent = `${solarPercent.toFixed(1)}`;
+
+    // Solar panel power
+    const pvLive = Math.max(0, num(json.calculated_CA_values?.solar_power_live, 0));
+    updateAuxMeter(
+      "pv",
+      pvLive,
+      num(json.calculated_CA_values?.solar_power_avg, 0),
+      num(json.calculated_CA_values?.solar_power_max, 0)
+    );
+
+    pvHistory.push(pvLive);
+    if (pvHistory.length > maxSolarHistoryPoints) {
+      pvHistory.shift();
+    }
+    updatePowerHistoryGraph("pv-history-graph", pvHistory);
+
+    const pvPercent = powerLive > 0 ? (100 * pvLive / powerLive) : 0;
+    document.getElementById("pv-percent").textContent = `${pvPercent.toFixed(1)}`;
 
     // Battery / Ah
     const rawAh = num(json.raw_CA_values?.[0], 0);
@@ -794,11 +815,16 @@ async function fetchMetrics() {
     const voltage = num(json.raw_CA_values?.[1], 0);
     document.getElementById('ah-voltage-value').innerText = `${voltage.toFixed(1)} V`;
 
-    // Solar cumulative & kcal
-    const solarWh = num(json.calculated_CA_values?.solar_Wh, 0);
+    // Human cumulative & kcal
+    const solarWh = num(json.calculated_CA_values?.human_Wh ?? json.calculated_CA_values?.solar_Wh, 0);
     document.getElementById("solar-cumulative").textContent = solarWh.toFixed(1);
-    const calories = num(json.calculated_CA_values?.calories_burned, 0);
+    const calories = num(json.calculated_CA_values?.human_calories_burned ?? json.calculated_CA_values?.calories_burned, 0);
     document.getElementById("solar-calories").textContent = calories.toFixed(0);
+
+    const pvWh = num(json.calculated_CA_values?.solar_Wh, 0);
+    document.getElementById("pv-cumulative").textContent = pvWh.toFixed(1);
+    const pvCurrent = num(json.calculated_CA_values?.solar_current_live, 0);
+    document.getElementById("pv-current").textContent = pvCurrent.toFixed(1);
 
     // Trip metrics
     const distKm = num(json.calculated_CA_values?.distance_km, 0);
@@ -830,10 +856,19 @@ async function fetchMetrics() {
       num(json.calculated_CA_values?.live_net_Wh_per_km, 0),
       range
     );
-    updateSolarPctChart(
-      json.calculated_CA_values?.solar_pct_per_km_last ?? [],
+    updatePctChart(
+      "human-pct-per-km-chart",
+      json.calculated_CA_values?.human_pct_per_km_last ?? [],
       solarPercent,
-      range
+      range,
+      "orange"
+    );
+    updatePctChart(
+      "solar-pct-per-km-chart",
+      json.calculated_CA_values?.solar_pct_per_km_last ?? [],
+      pvPercent,
+      range,
+      "#e0b400"
     );
     updateRegenPctChart(
       json.calculated_CA_values?.regen_pct_per_km_last ?? [],
@@ -1193,6 +1228,7 @@ window.addEventListener("DOMContentLoaded", () => {
   // Chart picker buttons
   const chartButtons = {
     "btn-wh": "wh-per-km-chart",
+    "btn-human": "human-pct-per-km-chart",
     "btn-solar": "solar-pct-per-km-chart",
     "btn-regen": "regen-pct-per-km-chart"
   };

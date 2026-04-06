@@ -127,7 +127,12 @@ def summary():
 
     with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         rows = conn.execute(
-            "SELECT user, timestamp, raw FROM logs WHERE session = ? ORDER BY id",
+            """
+            SELECT user, timestamp, raw, solar_current_a, solar_bus_v, solar_shunt_v
+            FROM logs
+            WHERE session = ?
+            ORDER BY id
+            """,
             (session_id,)
         ).fetchall()
 
@@ -143,36 +148,41 @@ def summary():
     user_data = defaultdict(list)
     timestamps = defaultdict(list)
 
-    for user, ts, raw in rows:
+    for user, ts, raw, solar_current_a, solar_bus_v, solar_shunt_v in rows:
         parsed = _parse_line(raw)
         if not parsed or not user:
             continue
-        user_data[user].append(parsed)
+        user_data[user].append((parsed, solar_current_a, solar_bus_v, solar_shunt_v))
         timestamps[user].append(ts)
 
     def compute_metrics(data, ts_list):
         m = {
             "speed_sum": 0, "speed_max": 0, "speed_count": 0,
             "power_sum": 0, "power_max": float('-inf'), "power_min": float('inf'),
+            "human_power_sum": 0, "human_power_max": 0, "human_power_count": 0,
             "solar_power_sum": 0, "solar_power_max": 0, "solar_power_count": 0,
-            "positive_Wh": 0, "regen_Wh": 0, "solar_Wh": 0,
+            "positive_Wh": 0, "regen_Wh": 0, "human_Wh": 0, "solar_Wh": 0,
             "temp_sum": 0, "temp_max": 0, "temp_count": 0,
             "distance_start": None, "distance_end": None,
             "Ah": 0
         }
 
         last_ts = None
-        for i, d in enumerate(data):
+        for i, item in enumerate(data):
             try:
+                d, solar_current_a, solar_bus_v, _solar_shunt_v = item
                 ah = d[0]
                 v = d[1]
                 a = d[2]
                 speed = d[3]
                 dist = d[4]
                 temp = d[5]
-                solar_a = d[13]
+                human_a = d[13]
+                solar_a = max(0.0, solar_current_a or 0.0)
+                solar_v = max(0.0, solar_bus_v or 0.0)
                 power = v * a
-                solar_power = v * solar_a
+                human_power = v * human_a
+                solar_power = solar_v * solar_a
 
                 if m["distance_start"] is None:
                     m["distance_start"] = dist
@@ -195,6 +205,9 @@ def summary():
                     m["power_sum"] += power
                     m["power_max"] = max(m["power_max"], power)
                     m["power_min"] = min(m["power_min"], power)
+                    m["human_power_sum"] += human_power
+                    m["human_power_count"] += 1
+                    m["human_power_max"] = max(m["human_power_max"], human_power)
                     m["solar_power_sum"] += solar_power
                     m["solar_power_count"] += 1
                     m["solar_power_max"] = max(m["solar_power_max"], solar_power)
@@ -207,6 +220,7 @@ def summary():
                     m["positive_Wh"] += power * dt / 3600
                 elif a < 0:
                     m["regen_Wh"] += abs(power) * dt / 3600
+                m["human_Wh"] += human_power * dt / 3600
                 m["solar_Wh"] += solar_power * dt / 3600
             except Exception:
                 pass
@@ -231,7 +245,7 @@ def summary():
         all_points = sum(all_user_data.values(), [])
         all_ts = sum(all_timestamps.values(), [])
         m = compute_metrics(all_points, all_ts)
-        distances = [p[4] for p in all_points if len(p) > 4]
+        distances = [item[0][4] for item in all_points if len(item[0]) > 4]
         if distances:
             m["distance"] = max(distances) - min(distances)
         return m
@@ -246,12 +260,12 @@ def summary():
     grouped_rows = [
         ("Duration & distance", [("Duration (min)", lambda m: m["duration"] / 60), ("Distance (km)", lambda m: m["distance"]) ]),
         ("Speed", [("Avg Speed (km/h)", lambda m: safe_div(m["speed_sum"], m["speed_count"])), ("Max Speed (km/h)", lambda m: m["speed_max"]) ]),
-        ("Power", [("Avg Power (W)", lambda m: safe_div(m["power_sum"], m["speed_count"])), ("Max Power (W)", lambda m: m["power_max"]), ("Min Power (W)", lambda m: m["power_min"]) ]),
-        ("Energy", [("Battery Used (Ah)", lambda m: m["Ah"]), ("Regen Energy (Wh)", lambda m: m["regen_Wh"]), ("Solar Energy (Wh)", lambda m: m["solar_Wh"]), ("Net Energy (Wh)", lambda m: m["positive_Wh"] - m["regen_Wh"] - m["solar_Wh"]) ]),
-        ("Efficiency", [("Total Wh/km", lambda m: safe_div(m["positive_Wh"], m["distance"])), ("Net Wh/km", lambda m: safe_div(m["positive_Wh"] - m["regen_Wh"] - m["solar_Wh"], m["distance"])) ]),
-        ("Percentages", [("Regen %", lambda m: 100 * safe_div(m["regen_Wh"], m["positive_Wh"] + m["regen_Wh"])), ("Solar %", lambda m: 100 * safe_div(m["solar_Wh"], m["positive_Wh"] + m["regen_Wh"])) ]),
+        ("Power", [("Avg Power (W)", lambda m: safe_div(m["power_sum"], m["speed_count"])), ("Max Power (W)", lambda m: m["power_max"]), ("Min Power (W)", lambda m: m["power_min"]), ("Avg Human Power (W)", lambda m: safe_div(m["human_power_sum"], m["human_power_count"])), ("Max Human Power (W)", lambda m: m["human_power_max"]), ("Avg Solar Power (W)", lambda m: safe_div(m["solar_power_sum"], m["solar_power_count"])), ("Max Solar Power (W)", lambda m: m["solar_power_max"]) ]),
+        ("Energy", [("Battery Used (Ah)", lambda m: m["Ah"]), ("Regen Energy (Wh)", lambda m: m["regen_Wh"]), ("Human Energy (Wh)", lambda m: m["human_Wh"]), ("Solar Energy (Wh)", lambda m: m["solar_Wh"]), ("Net Energy (Wh)", lambda m: m["positive_Wh"] - m["regen_Wh"] - m["human_Wh"] - m["solar_Wh"]) ]),
+        ("Efficiency", [("Total Wh/km", lambda m: safe_div(m["positive_Wh"], m["distance"])), ("Net Wh/km", lambda m: safe_div(m["positive_Wh"] - m["regen_Wh"] - m["human_Wh"] - m["solar_Wh"], m["distance"])) ]),
+        ("Percentages", [("Regen %", lambda m: 100 * safe_div(m["regen_Wh"], m["positive_Wh"] + m["regen_Wh"])), ("Human %", lambda m: 100 * safe_div(m["human_Wh"], m["positive_Wh"] + m["regen_Wh"])), ("Solar %", lambda m: 100 * safe_div(m["solar_Wh"], m["positive_Wh"] + m["regen_Wh"])) ]),
         ("Temperature", [("Avg Temp (°C)", lambda m: safe_div(m["temp_sum"], m["temp_count"])), ("Max Temp (°C)", lambda m: m["temp_max"]) ]),
-        ("Human effort", [("Calories Burned (kcal)", lambda m: m["positive_Wh"] * 0.086)])
+        ("Human effort", [("Calories Burned (kcal)", lambda m: m["human_Wh"] * 1.433)])
     ]
 
     table = [["Metric"] + all_users]

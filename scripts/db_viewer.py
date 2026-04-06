@@ -6,7 +6,7 @@ from app.config import get_db_file
 # Mapping of metric names to their index in parsed log lines
 METRICS = [
     "Ah", "Voltage", "Amps", "Speed", "Distance", "Temp",
-    "S6", "S7", "S8", "S9", "S10", "S11", "S12", "SolarCurrent"
+    "S6", "S7", "S8", "S9", "S10", "S11", "S12", "HumanCurrent"
 ]
 
 app = Flask(__name__)

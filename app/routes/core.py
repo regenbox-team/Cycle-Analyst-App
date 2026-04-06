@@ -11,7 +11,7 @@ from app.metrics import update_metrics  # re-export compatibility
 def _get_metrics_payload():
     sm = state.session_metrics
     total_Wh = sm["positive_Wh"] + sm["regen_Wh"]
-    net_Wh = sm["positive_Wh"] - sm["regen_Wh"] - sm["solar_Wh"]
+    net_Wh = sm["positive_Wh"] - sm["regen_Wh"] - sm["human_Wh"] - sm["solar_Wh"]
     distance = max(sm["distance_km"], 0.001)
 
     base_ah = (state.latest_raw_values[0] if state.latest_raw_values else 0)
@@ -38,6 +38,7 @@ def _get_metrics_payload():
         "battery_capacity_ah": capacity_ah,
         "ca_reset_detected": sm.get("ca_reset_detected", False),
         "ca_reset_prompt": sm.get("ca_reset_prompt", False),
+        "solar_sensor": state.solar_sensor,
         "calculated_CA_values": {
             "speed_avg": sm["speed_sum"] / max(1, sm["speed_count"]),
             "speed_max": sm["speed_max"],
@@ -48,12 +49,21 @@ def _get_metrics_payload():
             "Wh_pos": sm["positive_Wh"],
             "Wh_regen": sm["regen_Wh"],
             "%_regen": sm["regen_Wh"] / max(1e-6, total_Wh),
-            "solar_power_live": state.latest_raw_values[1] * state.latest_raw_values[13] if state.latest_raw_values else 0,
+            "solar_current_live": state.solar_sensor.get("current_a", 0.0),
+            "solar_voltage_live": state.solar_sensor.get("bus_v", 0.0),
+            "solar_power_live": state.solar_sensor.get("current_a", 0.0) * state.solar_sensor.get("bus_v", 0.0),
             "solar_Wh": sm["solar_Wh"],
-            "calories_burned": sm.get("calories_burned", 0),
             "solar_power_max": sm["solar_power_max"],
             "solar_power_avg": sm["solar_power_sum"] / max(1, sm["solar_power_count"]),
             "%_solar": sm["solar_Wh"] / max(1e-6, total_Wh),
+            "human_current_live": state.latest_raw_values[13] if state.latest_raw_values else 0,
+            "human_power_live": state.latest_raw_values[1] * state.latest_raw_values[13] if state.latest_raw_values else 0,
+            "human_Wh": sm["human_Wh"],
+            "human_power_max": sm["human_power_max"],
+            "human_power_avg": sm["human_power_sum"] / max(1, sm["human_power_count"]),
+            "human_calories_burned": sm.get("calories_burned", 0),
+            "calories_burned": sm.get("calories_burned", 0),
+            "%_human": sm["human_Wh"] / max(1e-6, total_Wh),
             "net_Wh": net_Wh,
             "distance_km": sm["distance_km"],
             "net_Wh_per_km": session_avg_net,
@@ -62,13 +72,14 @@ def _get_metrics_payload():
                 if state.latest_raw_values and state.latest_raw_values[3] >= 1 else 0
             ),
             "live_net_Wh_per_km": (
-                ((state.latest_raw_values[1] * state.latest_raw_values[2]) - (state.latest_raw_values[1] * state.latest_raw_values[13]))
+                ((state.latest_raw_values[1] * state.latest_raw_values[2]) - (state.latest_raw_values[1] * state.latest_raw_values[13]) - (state.solar_sensor.get("current_a", 0.0) * state.solar_sensor.get("bus_v", 0.0)))
                 / max(0.1, state.latest_raw_values[3])
                 if state.latest_raw_values and state.latest_raw_values[3] >= 1 else 0
             ),
             "regen_power_live": abs(state.latest_raw_values[1] * state.latest_raw_values[2]) if state.latest_raw_values and state.latest_raw_values[2] < 0 else 0,
             "Wh_per_km_last": sm.get("Wh_per_km_last", []),
             "net_Wh_per_km_last": sm.get("net_Wh_per_km_last", []),
+            "human_pct_per_km_last": sm.get("human_pct_per_km_last", []),
             "solar_pct_per_km_last": sm.get("solar_pct_per_km_last", []),
             "regen_pct_per_km_last": sm.get("regen_pct_per_km_last", []),
             "temp_avg": sm["temp_sum"] / max(1, sm["temp_count"]),

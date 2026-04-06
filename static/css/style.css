@@ -281,6 +281,8 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 
 .speed-box        { grid-column: 1; }
 .power-box        { grid-column: 2; }
+.human-graph-box  { grid-column: 1; }
+.human-box        { grid-column: 2; }
 .solar-graph-box  { grid-column: 1; }
 .solar-box        { grid-column: 2; }
 .bar-box, .chart-box, .range-box {
@@ -390,7 +392,7 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 }
 
 /* SVG Meters */
-.speedometer, .power-meter, .solar-meter {
+.speedometer, .power-meter, .human-meter, .solar-meter {
   width: 100%;
   max-width: 98%;
   padding-top: 0.5rem;
@@ -423,8 +425,9 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   opacity: 0.8;
 }
 
-/* Solar Graph */
-#solar-history-graph {
+/* Power history graphs */
+#solar-history-graph,
+#pv-history-graph {
   width: 100%;
   height: auto;
   max-width: 100%;

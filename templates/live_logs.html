@@ -23,6 +23,10 @@
           <div id="calc-list" class="kv"></div>
         </div>
       </div>
+      <div style="margin-top: 1rem;">
+        <div class="subtitle muted">Solar Sensor</div>
+        <div id="solar-sensor-list" class="kv"></div>
+      </div>
     </div>
   </div>
 
@@ -40,8 +44,8 @@
       'unused10',
       'unused11',
       'unused12',
-      'Solar Ah',
-      'Solar A (pedal current)',
+      'Human Ah (legacy slot)',
+      'Human A (pedal/generator current)',
       'Flags',
     ];
 
@@ -73,6 +77,7 @@
         const data = await res.json();
         renderKV(document.getElementById('raw-list'), toRawMap(data.raw_CA_values));
         renderKV(document.getElementById('calc-list'), data.calculated_CA_values);
+        renderKV(document.getElementById('solar-sensor-list'), data.solar_sensor);
       } catch (err) {
         console.error('Failed to load /metrics:', err);
       }

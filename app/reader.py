@@ -12,6 +12,7 @@ from .modes import is_test_mode
 from .metrics import update_metrics
 from . import state
 from .modes import vehicle_mode
+from .solar_sensor import read_solar_sample
 
 
 def parse_line(line: str):
@@ -72,6 +73,8 @@ def read_serial():
     ser = None
     proc = None
     last_port = None
+    solar_sensor = None
+    solar_failure_backoff_until = 0.0
 
     while True:
         time.sleep(0.1)
@@ -103,7 +106,6 @@ def read_serial():
 
         if is_test_mode():
             data = generate_fake_data()
-            state.latest_raw_values = data
             last_data_time = time.time()
         else:
             try:
@@ -138,7 +140,6 @@ def read_serial():
                 if not data or len(data) != 15:
                     continue
 
-                state.latest_raw_values = data
                 last_data_time = time.time()
             except Exception:
                 # brief backoff on source error
@@ -149,11 +150,35 @@ def read_serial():
                 # don't continue immediately; allow stale-clear check next loop
                 continue
 
+        solar_sample, solar_failure_backoff_until, solar_sensor = read_solar_sample(
+            solar_sensor,
+            solar_failure_backoff_until,
+        )
+        if solar_sample is not None:
+            state.solar_sensor.update({
+                "enabled": True,
+                "source": solar_sample.source,
+                "current_a": solar_sample.current_a,
+                "bus_v": solar_sample.bus_v,
+                "shunt_v": solar_sample.shunt_v,
+                "last_update": time.time(),
+            })
+        else:
+            state.solar_sensor.update({
+                "enabled": False,
+                "source": None,
+                "current_a": 0.0,
+                "bus_v": 0.0,
+                "shunt_v": 0.0,
+            })
+
+        state.latest_raw_values = data
+
         if not state.session_active:
             continue
 
         now = time.time()
-        update_metrics(data, now)
+        update_metrics(data, now, solar_sample=solar_sample)
 
         if now - last_db_write_time >= 1:
             last_db_write_time = now
@@ -168,8 +193,9 @@ def read_serial():
                         """
                         INSERT INTO logs (
                             timestamp, session, raw, user,
-                            gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+                            solar_current_a, solar_bus_v, solar_shunt_v
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             timestamp,
@@ -184,6 +210,9 @@ def read_serial():
                             1 if gps.get("has_fix") else 0,
                             gps.get("sats"),
                             gps.get("hdop"),
+                            state.solar_sensor.get("current_a"),
+                            state.solar_sensor.get("bus_v"),
+                            state.solar_sensor.get("shunt_v"),
                         ),
                     )
             except Exception:

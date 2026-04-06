@@ -31,6 +31,16 @@ gps_state = {
     "last_update": 0.0,
 }
 
+# Optional external solar sensor state.
+solar_sensor = {
+    "enabled": False,
+    "source": None,
+    "current_a": 0.0,
+    "bus_v": 0.0,
+    "shunt_v": 0.0,
+    "last_update": 0.0,
+}
+
 # Core session metrics store
 session_metrics = {
     "speed_max": 0,
@@ -39,6 +49,9 @@ session_metrics = {
     "power_sum": 0,
     "power_max": float('-inf'),
     "power_min": float('inf'),
+    "human_power_max": 0,
+    "human_power_sum": 0,
+    "human_power_count": 0,
     "solar_power_max": 0,
     "solar_power_sum": 0,
     "solar_power_count": 0,
@@ -47,7 +60,9 @@ session_metrics = {
     "temp_count": 0,
     "positive_Wh": 0,
     "regen_Wh": 0,
+    "human_Wh": 0,
     "solar_Wh": 0,
+    "calories_burned": 0,
     "distance_km": 0,
     "distance_start": None,
     "last_km_checkpoints": [0],
@@ -59,6 +74,7 @@ session_metrics = {
     "ah_offset": 0.0,
     "Wh_per_km_last": [],
     "net_Wh_per_km_last": [],
+    "human_pct_per_km_last": [],
     "solar_pct_per_km_last": [],
     "last_regen_checkpoint": 0,
     "regen_pct_per_km_last": []

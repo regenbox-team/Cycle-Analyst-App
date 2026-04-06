@@ -135,7 +135,7 @@
       const res = await fetch('/metrics', { cache: 'no-store' });
       const data = await res.json();
       const c = data && data.calculated_CA_values;
-      const p = c ? Number(c.solar_power_live || 0) : 0;
+      const p = c ? Number((c.human_power_live ?? c.solar_power_live) || 0) : 0;
       power = isFinite(p) ? Math.max(0, Math.min(200, p)) : 0;
       hudPower.textContent = Math.round(power);
     } catch (e) {
@@ -209,4 +209,3 @@
 
   requestAnimationFrame((t) => { lastTick = t; tick(t); });
 })();
-
