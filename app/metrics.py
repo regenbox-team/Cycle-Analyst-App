@@ -7,6 +7,10 @@ from .state import session_metrics
 
 
 def _migrate_legacy_metrics(store: dict) -> None:
+    if "human_Ah" not in store:
+        store["human_Ah"] = 0
+    if "solar_Ah" not in store:
+        store["solar_Ah"] = 0
     if "human_Wh" not in store:
         store["human_Wh"] = store.get("solar_Wh", 0)
         store["solar_Wh"] = 0
@@ -43,6 +47,8 @@ def reset_session_state():
         "temp_count": 0,
         "positive_Wh": 0,
         "regen_Wh": 0,
+        "human_Ah": 0,
+        "solar_Ah": 0,
         "human_Wh": 0,
         "solar_Wh": 0,
         "calories_burned": 0,
@@ -120,6 +126,8 @@ def update_metrics(data, now=None, solar_sample=None):
         elif a < 0:
             session_metrics["regen_Wh"] += abs(power) * dt / 3600
 
+    session_metrics["human_Ah"] += max(0.0, human_a) * dt / 3600
+    session_metrics["solar_Ah"] += max(0.0, solar_a) * dt / 3600
     session_metrics["human_Wh"] += (v * human_a) * dt / 3600
     session_metrics["solar_Wh"] += (solar_v * solar_a) * dt / 3600
     session_metrics["calories_burned"] = session_metrics["human_Wh"] * 1.433

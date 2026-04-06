@@ -804,13 +804,17 @@ async function fetchMetrics() {
     document.getElementById("pv-percent").textContent = `${pvPercent.toFixed(1)}`;
 
     // Battery / Ah
-    const rawAh = num(json.raw_CA_values?.[0], 0);
-    const ahOffset = num(json.calculated_CA_values?.ah_offset, 0);
-    const ahConsumed = rawAh + ahOffset;
+    const ahConsumed = num(
+      json.calculated_CA_values?.battery_ah_used_net ?? json.battery_ah_used_net,
+      0
+    );
     const capacityAh = Number(json.battery_capacity_ah ?? 64);
     const pctRemaining = Math.max(0, Math.min(1, 1 - (capacityAh > 0 ? (ahConsumed / capacityAh) : 0)));
     document.getElementById('ah-bar').style.width = `${pctRemaining * 100}%`;
     document.getElementById('ah-bar-value').innerText = `${ahConsumed.toFixed(1)} Ah`;
+    const grossAh = num(json.calculated_CA_values?.battery_ah_used_gross, ahConsumed);
+    const recoveredAh = num(json.calculated_CA_values?.battery_ah_recovered, 0);
+    document.getElementById('ah-bar-detail').innerText = `gross ${grossAh.toFixed(1)} Ah / recovered ${recoveredAh.toFixed(1)} Ah`;
 
     const voltage = num(json.raw_CA_values?.[1], 0);
     document.getElementById('ah-voltage-value').innerText = `${voltage.toFixed(1)} V`;

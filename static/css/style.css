@@ -435,6 +435,13 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 }
 
 /* Battery Bar */
+.bar-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
 .bar-content {
   display: flex;
   align-items: center;
@@ -469,6 +476,15 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 .bar-voltage {
   font-size: var(--font-small);
   color: var(--text-dark);
+}
+
+.bar-detail {
+  margin-top: -0.25rem;
+  font-size: 0.62rem;
+  line-height: 1.1;
+  color: #666;
+  text-align: center;
+  opacity: 0.9;
 }
 
 /* Efficiency Section */

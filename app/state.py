@@ -60,6 +60,8 @@ session_metrics = {
     "temp_count": 0,
     "positive_Wh": 0,
     "regen_Wh": 0,
+    "human_Ah": 0,
+    "solar_Ah": 0,
     "human_Wh": 0,
     "solar_Wh": 0,
     "calories_burned": 0,

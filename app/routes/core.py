@@ -15,7 +15,9 @@ def _get_metrics_payload():
     distance = max(sm["distance_km"], 0.001)
 
     base_ah = (state.latest_raw_values[0] if state.latest_raw_values else 0)
-    ah_used = base_ah + sm.get("ah_offset", 0.0)
+    ah_used_gross = base_ah + sm.get("ah_offset", 0.0)
+    ah_recovered = sm.get("human_Ah", 0.0) + sm.get("solar_Ah", 0.0)
+    ah_used = max(0.0, ah_used_gross - ah_recovered)
     voltage = state.latest_raw_values[1] if state.latest_raw_values else 0
     capacity_ah = VEHICLE_CONFIGS.get(vehicle_mode, {}).get("battery_capacity_ah", 64)
     Wh_remaining = (capacity_ah - ah_used) * voltage
@@ -39,6 +41,8 @@ def _get_metrics_payload():
         "ca_reset_detected": sm.get("ca_reset_detected", False),
         "ca_reset_prompt": sm.get("ca_reset_prompt", False),
         "solar_sensor": state.solar_sensor,
+        "battery_ah_used_gross": ah_used_gross,
+        "battery_ah_used_net": ah_used,
         "calculated_CA_values": {
             "speed_avg": sm["speed_sum"] / max(1, sm["speed_count"]),
             "speed_max": sm["speed_max"],
@@ -59,11 +63,13 @@ def _get_metrics_payload():
             "human_current_live": state.latest_raw_values[13] if state.latest_raw_values else 0,
             "human_power_live": state.latest_raw_values[1] * state.latest_raw_values[13] if state.latest_raw_values else 0,
             "human_Wh": sm["human_Wh"],
+            "human_Ah": sm["human_Ah"],
             "human_power_max": sm["human_power_max"],
             "human_power_avg": sm["human_power_sum"] / max(1, sm["human_power_count"]),
             "human_calories_burned": sm.get("calories_burned", 0),
             "calories_burned": sm.get("calories_burned", 0),
             "%_human": sm["human_Wh"] / max(1e-6, total_Wh),
+            "solar_Ah": sm["solar_Ah"],
             "net_Wh": net_Wh,
             "distance_km": sm["distance_km"],
             "net_Wh_per_km": session_avg_net,
@@ -85,7 +91,11 @@ def _get_metrics_payload():
             "temp_avg": sm["temp_sum"] / max(1, sm["temp_count"]),
             "temp_max": sm["temp_max"],
             "autonomy": autonomy,
-            "ah_offset": sm.get("ah_offset", 0.0)
+            "ah_offset": sm.get("ah_offset", 0.0),
+            "battery_ah_used_gross": ah_used_gross,
+            "battery_ah_used_net": ah_used,
+            "battery_ah_recovered": ah_recovered,
+            "battery_Wh_remaining": Wh_remaining
         }
     }
 
