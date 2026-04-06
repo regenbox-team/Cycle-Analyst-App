@@ -7,9 +7,12 @@ const END_ANGLE = 126;
 
 let isLongRange = false;
 let metricsPaused = false;
-const solarHistory = [];
-const pvHistory = [];
-const maxSolarHistoryPoints = 1000;
+const powerHistoryState = {
+  motor: true,
+  human: true,
+  solar: true,
+  points: []
+};
 
 /* === AMP ARC CONFIG === */
 const AMP_MIN = -50;   // A
@@ -305,94 +308,178 @@ function updateTempBar(live, avg, max) {
 }
 
 /* ====== CHARTS ====== */
-function updatePowerHistoryGraph(svgId, history) {
-  const svg = document.getElementById(svgId);
-  if (!svg) return;
+function renderPowerHistoryChart() {
+  const canvas = document.getElementById("power-history-chart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
 
-  svg.innerHTML = '';
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(320, canvas.clientWidth || 320);
+  const height = Math.max(180, canvas.clientHeight || 180);
+  if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
 
-  const fullWidth = 300;
-  const fullHeight = 200;
-  const margin = { top: 4, right: 4, bottom: 14, left: 28 };
-  const width = fullWidth - margin.left - margin.right;
-  const height = fullHeight - margin.top - margin.bottom;
+  const points = Array.isArray(powerHistoryState.points) ? powerHistoryState.points : [];
+  const enabled = {
+    motor: powerHistoryState.motor,
+    human: powerHistoryState.human,
+    solar: powerHistoryState.solar
+  };
 
-  const n = history.length;
-  const maxVal = Math.max(...history.map(v => num(v, 0)), 1);
-
-  const stepX = width / (maxSolarHistoryPoints - 1);
-  const axisColor = "#888";
-
-  const yAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  yAxis.setAttribute("x1", margin.left);
-  yAxis.setAttribute("y1", margin.top);
-  yAxis.setAttribute("x2", margin.left);
-  yAxis.setAttribute("y2", fullHeight - margin.bottom);
-  yAxis.setAttribute("stroke", axisColor);
-  yAxis.setAttribute("stroke-width", "1");
-  svg.appendChild(yAxis);
-
-  for (let val = 0; val <= maxVal; val += 50) {
-    const y = fullHeight - margin.bottom - (val / maxVal) * height;
-
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", margin.left - 3);
-    tick.setAttribute("x2", margin.left);
-    tick.setAttribute("y1", y);
-    tick.setAttribute("y2", y);
-    tick.setAttribute("stroke", axisColor);
-    svg.appendChild(tick);
-
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", margin.left - 5);
-    label.setAttribute("y", y + 3);
-    label.setAttribute("text-anchor", "end");
-    label.setAttribute("font-size", "8");
-    label.setAttribute("fill", "#444");
-    label.textContent = val.toString();
-    svg.appendChild(label);
+  if (!points.length) {
+    ctx.fillStyle = "#666";
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Awaiting power history", width / 2, height / 2);
+    return;
   }
 
-  const xAxisY = fullHeight - margin.bottom;
-  const xAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  xAxis.setAttribute("x1", margin.left);
-  xAxis.setAttribute("x2", fullWidth - margin.right);
-  xAxis.setAttribute("y1", xAxisY);
-  xAxis.setAttribute("y2", xAxisY);
-  xAxis.setAttribute("stroke", axisColor);
-  xAxis.setAttribute("stroke-width", "1");
-  svg.appendChild(xAxis);
+  const series = [
+    { key: "motor_power", enabled: enabled.motor, color: "#d1492e" },
+    { key: "human_power", enabled: enabled.human, color: "#f08a24" },
+    { key: "solar_power", enabled: enabled.solar, color: "#c7b600" }
+  ];
+  const activeSeries = series.filter(s => s.enabled);
 
-  for (let i = 0; i < maxSolarHistoryPoints; i += 20) {
-    const x = margin.left + i * stepX;
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", x);
-    tick.setAttribute("x2", x);
-    tick.setAttribute("y1", xAxisY);
-    tick.setAttribute("y2", xAxisY + 3);
-    tick.setAttribute("stroke", axisColor);
-    svg.appendChild(tick);
+  if (!activeSeries.length) {
+    ctx.fillStyle = "#666";
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("All curves hidden", width / 2, height / 2);
+    return;
   }
 
-  const path = history.map((val, i) => {
-    const v = num(val, 0);
-    const x = margin.left + i * stepX;
-    const y = fullHeight - margin.bottom - (v / maxVal) * height;
-    return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-  }).join(' ');
+  const margin = { top: 10, right: 12, bottom: 22, left: 42 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
 
-  const fillPath = `${path} L ${margin.left + Math.max(0, n - 1) * stepX} ${fullHeight - margin.bottom} L ${margin.left} ${fullHeight - margin.bottom} Z`;
-  const fill = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  fill.setAttribute("d", fillPath);
-  fill.setAttribute("fill", "orange");
-  svg.appendChild(fill);
+  let minVal = 0;
+  let maxVal = 100;
+  activeSeries.forEach(seriesDef => {
+    points.forEach(point => {
+      const value = num(point[seriesDef.key], 0);
+      minVal = Math.min(minVal, value);
+      maxVal = Math.max(maxVal, value);
+    });
+  });
 
-  const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  line.setAttribute("d", path);
-  line.setAttribute("stroke", "orange");
-  line.setAttribute("stroke-width", "2");
-  line.setAttribute("fill", "none");
-  svg.appendChild(line);
+  const pad = Math.max(50, (maxVal - minVal) * 0.1);
+  minVal = Math.min(0, Math.floor((minVal - pad) / 50) * 50);
+  maxVal = Math.max(100, Math.ceil((maxVal + pad) / 50) * 50);
+  if (maxVal <= minVal) maxVal = minVal + 100;
+
+  const xForIndex = (index) => margin.left + (plotWidth * index) / Math.max(1, points.length - 1);
+  const yForValue = (value) => margin.top + (maxVal - value) * plotHeight / (maxVal - minVal);
+  const zeroY = yForValue(0);
+
+  ctx.strokeStyle = "#d0d0d0";
+  ctx.lineWidth = 1;
+  ctx.fillStyle = "#666";
+  ctx.font = "10px sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+
+  const gridSteps = 5;
+  for (let i = 0; i <= gridSteps; i++) {
+    const value = minVal + (i * (maxVal - minVal)) / gridSteps;
+    const y = yForValue(value);
+    ctx.beginPath();
+    ctx.moveTo(margin.left, y);
+    ctx.lineTo(width - margin.right, y);
+    ctx.stroke();
+    ctx.fillText(`${Math.round(value)}`, margin.left - 6, y);
+  }
+
+  ctx.strokeStyle = "#999";
+  ctx.beginPath();
+  ctx.moveTo(margin.left, margin.top);
+  ctx.lineTo(margin.left, height - margin.bottom);
+  ctx.lineTo(width - margin.right, height - margin.bottom);
+  ctx.stroke();
+
+  if (zeroY >= margin.top && zeroY <= height - margin.bottom) {
+    ctx.strokeStyle = "#b5b5b5";
+    ctx.beginPath();
+    ctx.moveTo(margin.left, zeroY);
+    ctx.lineTo(width - margin.right, zeroY);
+    ctx.stroke();
+  }
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  const xTicks = [
+    { index: 0, label: "-3m" },
+    { index: Math.max(0, Math.floor((points.length - 1) / 3)), label: "-2m" },
+    { index: Math.max(0, Math.floor((2 * (points.length - 1)) / 3)), label: "-1m" },
+    { index: Math.max(0, points.length - 1), label: "now" }
+  ];
+  xTicks.forEach(tick => {
+    const x = xForIndex(tick.index);
+    ctx.strokeStyle = "#999";
+    ctx.beginPath();
+    ctx.moveTo(x, height - margin.bottom);
+    ctx.lineTo(x, height - margin.bottom + 4);
+    ctx.stroke();
+    ctx.fillStyle = "#666";
+    ctx.fillText(tick.label, x, height - margin.bottom + 6);
+  });
+
+  activeSeries.forEach(seriesDef => {
+    ctx.strokeStyle = seriesDef.color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    const coords = points.map((point, index) => ({
+      x: xForIndex(index),
+      y: yForValue(num(point[seriesDef.key], 0))
+    }));
+    if (coords.length === 1) {
+      ctx.moveTo(coords[0].x, coords[0].y);
+      ctx.lineTo(coords[0].x + 0.01, coords[0].y);
+    } else {
+      ctx.moveTo(coords[0].x, coords[0].y);
+      for (let i = 0; i < coords.length - 1; i++) {
+        const current = coords[i];
+        const next = coords[i + 1];
+        const xc = (current.x + next.x) / 2;
+        const yc = (current.y + next.y) / 2;
+        ctx.quadraticCurveTo(current.x, current.y, xc, yc);
+      }
+      const last = coords[coords.length - 1];
+      ctx.lineTo(last.x, last.y);
+    }
+    ctx.stroke();
+  });
+}
+
+function setPowerSeriesButtonState() {
+  [
+    ["power-series-motor", powerHistoryState.motor],
+    ["power-series-human", powerHistoryState.human],
+    ["power-series-solar", powerHistoryState.solar]
+  ].forEach(([id, enabled]) => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    button.classList.toggle("active-chart", enabled);
+  });
+}
+
+async function fetchPowerHistory() {
+  if (document.body.classList.contains('edit-mode')) return;
+  try {
+    const res = await fetch('/power_history', { cache: 'no-store' });
+    const json = await res.json();
+    powerHistoryState.points = Array.isArray(json.points) ? json.points : [];
+    renderPowerHistoryChart();
+  } catch (err) {
+    console.error('Error fetching power history:', err);
+  }
 }
 
 function updateWhPerKmChart(totalValues, netValues = [], liveTotal = 0, liveNet = 0, range = 10) {
@@ -775,12 +862,6 @@ async function fetchMetrics() {
       num(json.calculated_CA_values?.human_power_max ?? json.calculated_CA_values?.solar_power_max, 0)
     );
 
-    solarHistory.push(solarLive);
-    if (solarHistory.length > maxSolarHistoryPoints) {
-      solarHistory.shift();
-    }
-    updatePowerHistoryGraph("solar-history-graph", solarHistory);
-
     const powerLive = num(json.calculated_CA_values?.power_live, 0);
     const solarPercent = powerLive > 0 ? (100 * solarLive / powerLive) : 0;
     document.getElementById("solar-percent").textContent = `${solarPercent.toFixed(1)}`;
@@ -793,12 +874,6 @@ async function fetchMetrics() {
       num(json.calculated_CA_values?.solar_power_avg, 0),
       num(json.calculated_CA_values?.solar_power_max, 0)
     );
-
-    pvHistory.push(pvLive);
-    if (pvHistory.length > maxSolarHistoryPoints) {
-      pvHistory.shift();
-    }
-    updatePowerHistoryGraph("pv-history-graph", pvHistory);
 
     const pvPercent = powerLive > 0 ? (100 * pvLive / powerLive) : 0;
     document.getElementById("pv-percent").textContent = `${pvPercent.toFixed(1)}`;
@@ -1255,6 +1330,22 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  [
+    ["power-series-motor", "motor"],
+    ["power-series-human", "human"],
+    ["power-series-solar", "solar"]
+  ].forEach(([id, key]) => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    button.addEventListener("click", () => {
+      powerHistoryState[key] = !powerHistoryState[key];
+      setPowerSeriesButtonState();
+      renderPowerHistoryChart();
+    });
+  });
+  setPowerSeriesButtonState();
+  window.addEventListener("resize", renderPowerHistoryChart);
+
   // Restart service button
   const restartBtn = document.getElementById('restart-service-button');
   const restartStatus = document.getElementById('restart-status');
@@ -1279,4 +1370,6 @@ window.addEventListener("DOMContentLoaded", () => {
   // Start metrics loop
   fetchMetrics();
   setInterval(fetchMetrics, 100);
+  fetchPowerHistory();
+  setInterval(fetchPowerHistory, 1000);
 });

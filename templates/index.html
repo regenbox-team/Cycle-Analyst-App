@@ -96,15 +96,8 @@
       
     </div>
 
-    <!-- Human Power History Graph -->
-    <div class="box human-graph-box">
-    <div class="box-title">Human Power Graph</div>
-      <svg id="solar-history-graph" viewBox="0 0 300 200" preserveAspectRatio="xMidYMid meet"></svg>
-    </div>
-
-    <!-- Human Power Meter -->
     <div class="box human-box">
-    <div class="box-title">Human Power</div>
+      <div class="box-title">Human Power</div>
       <svg class="human-meter" viewBox="0 0 200 200">
         <path id="solar-bg" fill="none" stroke="#ccc" stroke-width="18" stroke-linecap="round"/>
         <path id="solar-arc" fill="none" stroke="orange" stroke-width="18" stroke-linecap="round"/>
@@ -118,7 +111,7 @@
         <text x="100" y="135" text-anchor="middle">
           <tspan id="solar-percent" class="tspan-number-s">0</tspan>
           <tspan id="solar-percent" class="tspan-unit">%</tspan>
-        </text>        
+        </text>
         <text x="100" y="155" text-anchor="middle" fill="#000">
           <tspan id="solar-cumulative" class="tspan-number-s">0</tspan>
           <tspan class="tspan-unit">Wh</tspan>
@@ -127,19 +120,11 @@
           <tspan id="solar-calories" class="tspan-number-s">0</tspan>
           <tspan class="tspan-unit">kcal</tspan>
         </text>
-
       </svg>
     </div>
 
-    <!-- Solar Power History Graph -->
-    <div class="box solar-graph-box">
-    <div class="box-title">Solar Power Graph</div>
-      <svg id="pv-history-graph" viewBox="0 0 300 200" preserveAspectRatio="xMidYMid meet"></svg>
-    </div>
-
-    <!-- Solar Power Meter -->
     <div class="box solar-box">
-    <div class="box-title">Solar Power</div>
+      <div class="box-title">Solar Power</div>
       <svg class="solar-meter" viewBox="0 0 200 200">
         <path id="pv-bg" fill="none" stroke="#ccc" stroke-width="18" stroke-linecap="round"/>
         <path id="pv-arc" fill="none" stroke="orange" stroke-width="18" stroke-linecap="round"/>
@@ -162,8 +147,19 @@
           <tspan id="pv-current" class="tspan-number-s">0</tspan>
           <tspan class="tspan-unit">A</tspan>
         </text>
-
       </svg>
+    </div>
+
+    <div class="box power-history-box">
+      <div class="box-title">Power Trends</div>
+      <div class="power-trends-controls">
+        <button id="power-series-motor" class="dashboard-button active-chart">Motor</button>
+        <button id="power-series-human" class="dashboard-button active-chart">Human</button>
+        <button id="power-series-solar" class="dashboard-button active-chart">Solar</button>
+      </div>
+      <div class="power-history-canvas-wrap">
+        <canvas id="power-history-chart"></canvas>
+      </div>
     </div>
 
 

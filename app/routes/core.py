@@ -6,6 +6,7 @@ from app.config import get_db_file, VEHICLE_CONFIGS
 from app.modes import vehicle_mode
 from app import state
 from app.metrics import update_metrics  # re-export compatibility
+from app.reader import parse_line
 
 
 def _get_metrics_payload():
@@ -104,6 +105,72 @@ def metrics():
     return jsonify(_get_metrics_payload())
 
 
+def power_history():
+    if not state.session_id:
+        return jsonify({"points": []})
+
+    try:
+        with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
+            rows = conn.execute(
+                """
+                SELECT timestamp, raw, solar_current_a, solar_bus_v
+                FROM logs
+                WHERE session = ?
+                ORDER BY id DESC
+                LIMIT 180
+                """,
+                (state.session_id,),
+            ).fetchall()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    rows.reverse()
+    points = []
+    for timestamp, raw, solar_current_a, solar_bus_v in rows:
+        parsed = parse_line(raw)
+        if not parsed:
+            continue
+        voltage = parsed[1]
+        motor_power = voltage * parsed[2]
+        human_power = max(0.0, voltage * parsed[13])
+        solar_power = max(0.0, (solar_current_a or 0.0) * (solar_bus_v or 0.0))
+        points.append({
+            "timestamp": timestamp,
+            "motor_power": round(motor_power, 3),
+            "human_power": round(human_power, 3),
+            "solar_power": round(solar_power, 3),
+        })
+
+    smoothed = _smooth_power_points(points, window=5)
+    return jsonify({"points": smoothed})
+
+
+def _smooth_power_points(points, window: int = 5):
+    if not points:
+        return []
+
+    out = []
+    motor_values = []
+    human_values = []
+    solar_values = []
+
+    for point in points:
+        motor_values.append(point["motor_power"])
+        human_values.append(point["human_power"])
+        solar_values.append(point["solar_power"])
+        if len(motor_values) > window:
+            motor_values.pop(0)
+            human_values.pop(0)
+            solar_values.pop(0)
+        out.append({
+            "timestamp": point["timestamp"],
+            "motor_power": round(sum(motor_values) / len(motor_values), 3),
+            "human_power": round(sum(human_values) / len(human_values), 3),
+            "solar_power": round(sum(solar_values) / len(solar_values), 3),
+        })
+    return out
+
+
 def logs():
     try:
         with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
@@ -146,6 +213,7 @@ def create_blueprint():
     from flask import Blueprint
     bp = Blueprint("core", __name__)
     bp.add_url_rule("/metrics", view_func=metrics)
+    bp.add_url_rule("/power_history", view_func=power_history)
     bp.add_url_rule("/logs", view_func=logs)
     bp.add_url_rule("/sessions", view_func=list_sessions)
     bp.add_url_rule("/", view_func=root)
@@ -156,6 +224,7 @@ def create_blueprint():
 
 def register(app):
     app.add_url_rule("/metrics", view_func=metrics)
+    app.add_url_rule("/power_history", view_func=power_history)
     app.add_url_rule("/logs", view_func=logs)
     app.add_url_rule("/sessions", view_func=list_sessions)
     app.add_url_rule("/", view_func=root)
