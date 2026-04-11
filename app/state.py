@@ -35,9 +35,14 @@ gps_state = {
 solar_sensor = {
     "enabled": False,
     "source": None,
+    "address": None,
+    "manufacturer_id": None,
+    "device_id": None,
     "current_a": 0.0,
     "bus_v": 0.0,
     "shunt_v": 0.0,
+    "power_w": 0.0,
+    "temperature_c": 0.0,
     "last_update": 0.0,
 }
 
