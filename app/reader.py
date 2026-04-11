@@ -9,7 +9,7 @@ from datetime import datetime
 
 from .config import BAUDRATE, get_db_file, VEHICLE_CONFIGS
 from .modes import is_test_mode
-from .metrics import update_metrics
+from .metrics import update_metrics, update_solar_only_metrics
 from . import state
 from .modes import vehicle_mode
 from .solar_sensor import read_solar_sample
@@ -78,12 +78,45 @@ def read_serial():
 
     while True:
         time.sleep(0.1)
+        data = None
 
         # Clear stale values regardless of source errors
         now_ts = time.time()
         if now_ts - last_data_time > 3:
             if state.latest_raw_values is not None:
                 state.latest_raw_values = None
+
+        solar_sample, solar_failure_backoff_until, solar_sensor = read_solar_sample(
+            solar_sensor,
+            solar_failure_backoff_until,
+        )
+        if solar_sample is not None:
+            state.solar_sensor.update({
+                "enabled": True,
+                "source": solar_sample.source,
+                "address": getattr(solar_sensor, "address", None),
+                "manufacturer_id": getattr(solar_sensor, "manufacturer_id", None),
+                "device_id": getattr(solar_sensor, "device_id", None),
+                "current_a": solar_sample.current_a,
+                "bus_v": solar_sample.bus_v,
+                "shunt_v": solar_sample.shunt_v,
+                "power_w": getattr(solar_sample, "power_w", 0.0),
+                "temperature_c": getattr(solar_sample, "temperature_c", 0.0),
+                "last_update": now_ts,
+            })
+        else:
+            state.solar_sensor.update({
+                "enabled": False,
+                "source": None,
+                "address": None,
+                "manufacturer_id": None,
+                "device_id": None,
+                "current_a": 0.0,
+                "bus_v": 0.0,
+                "shunt_v": 0.0,
+                "power_w": 0.0,
+                "temperature_c": 0.0,
+            })
 
         # Reopen if port changed
         from . import modes as _modes
@@ -134,66 +167,38 @@ def read_serial():
                         line = str(raw)
 
                 if not line:
-                    continue
+                    data = None
+                else:
+                    data = parse_line(line.strip())
+                    if not data or len(data) != 15:
+                        data = None
 
-                data = parse_line(line.strip())
-                if not data or len(data) != 15:
-                    continue
-
-                last_data_time = time.time()
+                if data is not None:
+                    last_data_time = time.time()
             except Exception:
                 # brief backoff on source error
                 time.sleep(0.3)
                 serial_port_opened = False
                 proc = None
                 ser = None
-                # don't continue immediately; allow stale-clear check next loop
-                continue
+                data = None
 
-        solar_sample, solar_failure_backoff_until, solar_sensor = read_solar_sample(
-            solar_sensor,
-            solar_failure_backoff_until,
-        )
-        if solar_sample is not None:
-            state.solar_sensor.update({
-                "enabled": True,
-                "source": solar_sample.source,
-                "address": getattr(solar_sensor, "address", None),
-                "manufacturer_id": getattr(solar_sensor, "manufacturer_id", None),
-                "device_id": getattr(solar_sensor, "device_id", None),
-                "current_a": solar_sample.current_a,
-                "bus_v": solar_sample.bus_v,
-                "shunt_v": solar_sample.shunt_v,
-                "power_w": getattr(solar_sample, "power_w", 0.0),
-                "temperature_c": getattr(solar_sample, "temperature_c", 0.0),
-                "last_update": time.time(),
-            })
-        else:
-            state.solar_sensor.update({
-                "enabled": False,
-                "source": None,
-                "address": None,
-                "manufacturer_id": None,
-                "device_id": None,
-                "current_a": 0.0,
-                "bus_v": 0.0,
-                "shunt_v": 0.0,
-                "power_w": 0.0,
-                "temperature_c": 0.0,
-            })
-
-        state.latest_raw_values = data
+        if data is not None:
+            state.latest_raw_values = data
 
         if not state.session_active:
             continue
 
         now = time.time()
-        update_metrics(data, now, solar_sample=solar_sample)
+        if data is not None:
+            update_metrics(data, now, solar_sample=solar_sample)
+        elif solar_sample is not None:
+            update_solar_only_metrics(solar_sample, now)
 
-        if now - last_db_write_time >= 1:
+        if now - last_db_write_time >= 1 and (data is not None or solar_sample is not None):
             last_db_write_time = now
             state.save_session_metrics_to_file()
-            raw_line = " ".join(map(str, data))
+            raw_line = " ".join(map(str, data)) if data is not None else None
             timestamp = datetime.utcnow().isoformat()
             # Snapshot GPS at the same tick
             gps = getattr(state, 'gps_state', {}) or {}

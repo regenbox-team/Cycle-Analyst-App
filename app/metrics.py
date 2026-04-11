@@ -5,6 +5,8 @@ import time
 import json
 from .state import session_metrics
 
+MAX_METRICS_DT_SECONDS = 2.0
+
 
 def _migrate_legacy_metrics(store: dict) -> None:
     if "human_Ah" not in store:
@@ -92,8 +94,8 @@ def update_metrics(data, now=None, solar_sample=None):
     session_metrics["ca_reset_prompt"] = 53 <= v <= 54.6 and distance > 1
 
     if not hasattr(update_metrics, "last_time"):
-        update_metrics.last_time = now
-    dt = now - update_metrics.last_time
+        update_metrics.last_time = None
+    dt = _bounded_dt(update_metrics.last_time, now)
     update_metrics.last_time = now
 
     if speed >= 1:
@@ -187,6 +189,40 @@ def update_metrics(data, now=None, solar_sample=None):
         session_metrics["human_pct_per_km_last"] = session_metrics["human_pct_per_km_last"][-60:]
         session_metrics["solar_pct_per_km_last"] = session_metrics["solar_pct_per_km_last"][-60:]
         session_metrics["regen_pct_per_km_last"] = session_metrics["regen_pct_per_km_last"][-60:]
+
+
+def update_solar_only_metrics(solar_sample, now=None):
+    import time as _time
+
+    if solar_sample is None:
+        return
+
+    solar_a = max(0.0, getattr(solar_sample, "current_a", 0.0) or 0.0)
+    solar_v = max(0.0, getattr(solar_sample, "bus_v", 0.0) or 0.0)
+    solar_power = solar_v * solar_a
+
+    if now is None:
+        now = _time.time()
+
+    if not hasattr(update_solar_only_metrics, "last_time"):
+        update_solar_only_metrics.last_time = None
+    dt = _bounded_dt(update_solar_only_metrics.last_time, now)
+    update_solar_only_metrics.last_time = now
+
+    session_metrics["solar_power_sum"] += solar_power
+    session_metrics["solar_power_count"] += 1
+    session_metrics["solar_power_max"] = max(session_metrics["solar_power_max"], solar_power)
+    session_metrics["solar_Ah"] += solar_a * dt / 3600
+    session_metrics["solar_Wh"] += solar_power * dt / 3600
+
+
+def _bounded_dt(last_time, now):
+    if last_time is None:
+        return 0.0
+    dt = now - last_time
+    if dt < 0 or dt > MAX_METRICS_DT_SECONDS:
+        return 0.0
+    return dt
 
 
 def restore_session_metrics(session_id: str, db_file: str, parse_line_func):
