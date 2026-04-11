@@ -183,8 +183,44 @@ def read_serial():
                 ser = None
                 data = None
 
+<<<<<<< HEAD
         if data is not None:
             state.latest_raw_values = data
+=======
+        solar_sample, solar_failure_backoff_until, solar_sensor = read_solar_sample(
+            solar_sensor,
+            solar_failure_backoff_until,
+        )
+        if solar_sample is not None:
+            state.solar_sensor.update({
+                "enabled": True,
+                "source": solar_sample.source,
+                "address": getattr(solar_sensor, "address", None),
+                "manufacturer_id": getattr(solar_sensor, "manufacturer_id", None),
+                "device_id": getattr(solar_sensor, "device_id", None),
+                "current_a": solar_sample.current_a,
+                "bus_v": solar_sample.bus_v,
+                "shunt_v": solar_sample.shunt_v,
+                "power_w": getattr(solar_sample, "power_w", 0.0),
+                "temperature_c": getattr(solar_sample, "temperature_c", 0.0),
+                "last_update": time.time(),
+            })
+        else:
+            state.solar_sensor.update({
+                "enabled": False,
+                "source": None,
+                "address": None,
+                "manufacturer_id": None,
+                "device_id": None,
+                "current_a": 0.0,
+                "bus_v": 0.0,
+                "shunt_v": 0.0,
+                "power_w": 0.0,
+                "temperature_c": 0.0,
+            })
+
+        state.latest_raw_values = data
+>>>>>>> 5a7fb2297e8ccdb9f35019a1beddcef657b3f71d
 
         if not state.session_active:
             continue
