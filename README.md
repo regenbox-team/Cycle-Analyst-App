@@ -48,4 +48,4 @@ Run via: `python scripts/<tool>.py ...`
 
 - Tests importing `update_metrics`, `reset_session_state`, and `session_metrics` from `cycle_server` keep working; these symbols are re-exported.
 - To switch runtime storage location, set `APP_VAR_DIR` before starting the app.
-- Optional Raspberry Pi INA228 integration can add solar telemetry alongside the Cycle Analyst human-power metric by setting `APP_SOLAR_SENSOR=ina228`.
+- Optional Raspberry Pi INA228 integration can add solar telemetry alongside the Cycle Analyst human-power metric by setting `APP_SOLAR_SENSOR=ina228`. The reader now follows the same INA228 calibration path as ArduPilot (`SHUNT_CAL` + `CURRENT` register), and `python scripts/ina228_debug.py --addr 0` prints raw/debug data directly on the Pi.

@@ -119,10 +119,12 @@
 - Optional INA228 solar sensor on Raspberry Pi I2C:
   - Enable with `APP_SOLAR_SENSOR=ina228`
   - Bus with `APP_SOLAR_I2C_BUS=1`
-  - Address with `APP_SOLAR_I2C_ADDR=0x45` (`0x44` and `0x41` also supported by the board)
+  - Address with `APP_SOLAR_I2C_ADDR=0x45` (`0x44` and `0x41` also supported by the board, `0` probes them)
   - Shunt with `APP_SOLAR_SHUNT_OHMS=0.0002`
+  - Full-scale current with `APP_SOLAR_MAX_AMPS=204.8`
   - Invert sign if needed with `APP_SOLAR_INVERT_SIGN=true`
   - Optional calibration trims: `APP_SOLAR_CURRENT_GAIN=1.0`, `APP_SOLAR_CURRENT_OFFSET=0.0`
+  - Debug with `python scripts/ina228_debug.py --addr 0 --interval 1`
 
 ## API Reference (Selected)
 - GET `/metrics`
