@@ -124,6 +124,7 @@
   - Full-scale current with `APP_SOLAR_MAX_AMPS=204.8`
   - Invert sign if needed with `APP_SOLAR_INVERT_SIGN=true`
   - Optional calibration trims: `APP_SOLAR_CURRENT_GAIN=1.0`, `APP_SOLAR_CURRENT_OFFSET=0.0`
+  - Small-current deadband with `APP_SOLAR_CURRENT_DEADBAND_A=0.15` (default: values below this are treated as `0 A` in the app/DB/UI)
   - Debug with `python scripts/ina228_debug.py --addr 0 --interval 1`
 
 ## API Reference (Selected)

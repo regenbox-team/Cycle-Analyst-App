@@ -82,6 +82,7 @@ class INA228Sensor:
         self.max_amps = float(os.getenv("APP_SOLAR_MAX_AMPS", "204.8"))
         self.current_gain = float(os.getenv("APP_SOLAR_CURRENT_GAIN", "1.0"))
         self.current_offset = float(os.getenv("APP_SOLAR_CURRENT_OFFSET", "0.0"))
+        self.current_deadband_a = float(os.getenv("APP_SOLAR_CURRENT_DEADBAND_A", "0.15"))
         self.current_sign = -1.0 if os.getenv("APP_SOLAR_INVERT_SIGN", "").strip().lower() in {"1", "true", "yes", "on"} else 1.0
         self.current_lsb = self.max_amps / INA228_CURRENT_LSB_DIVISOR
         self.expected_shunt_cal = int(INA228_CALIBRATION_FACTOR * self.current_lsb * self.shunt_ohms) & 0x7FFF
@@ -100,11 +101,13 @@ class INA228Sensor:
 
     def read_sample(self) -> SolarSample:
         debug = self.read_debug_sample()
+        current_a = 0.0 if abs(debug.current_a) < self.current_deadband_a else debug.current_a
+        power_w = 0.0 if current_a == 0.0 else debug.bus_v * current_a
         return SolarSample(
-            current_a=debug.current_a,
+            current_a=current_a,
             bus_v=debug.bus_v,
             shunt_v=debug.shunt_v,
-            power_w=debug.power_calc_w,
+            power_w=power_w,
             temperature_c=debug.die_temp_c,
         )
 
