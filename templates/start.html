@@ -61,6 +61,25 @@
                 <button class="dashboard-button" id="gpx-upload-start" type="button">Upload GPX</button>
               </div>
             </div>
+            <div class="kv" style="grid-template-columns: auto 1fr auto auto; align-items:center; gap:0.8rem;">
+              <div class="kv-key">Live Photos:</div>
+              <div class="kv-val">
+                <label><input type="checkbox" id="photo-capture-enabled" name="photo_capture_enabled"> Enable webcam capture</label>
+              </div>
+              <div class="kv-key">Every</div>
+              <div class="kv-val" style="display:flex; align-items:center; gap:0.5rem;">
+                <input
+                  type="number"
+                  id="photo-capture-interval"
+                  name="photo_capture_interval_km"
+                  min="0.1"
+                  step="0.1"
+                  value="1.0"
+                  style="width:6rem; padding:0.35rem 0.45rem;"
+                />
+                <span>km</span>
+              </div>
+            </div>
             <div style="margin-top:0.6rem;">
               <button class="start-button start-button-large" type="submit" id="start-btn" disabled>Start Session</button>
             </div>

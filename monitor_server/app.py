@@ -8,7 +8,7 @@ from functools import wraps
 from typing import Any
 from xml.sax.saxutils import escape
 
-from flask import Flask, jsonify, request, render_template, Response, url_for
+from flask import Flask, jsonify, request, render_template, Response, send_from_directory, url_for
 
 
 def _db_path() -> str:
@@ -24,6 +24,13 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(_db_path())
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _media_dir() -> str:
+    path = os.getenv("MONITOR_MEDIA_DIR", os.path.join(os.path.dirname(__file__), "media"))
+    path = os.path.expanduser(path)
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def _init_db() -> None:
@@ -86,6 +93,25 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS photos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT,
+                session_id TEXT,
+                mode TEXT,
+                captured_at TEXT,
+                distance_km REAL,
+                interval_km REAL,
+                filename TEXT,
+                mime_type TEXT,
+                relative_path TEXT,
+                uploaded_at TEXT,
+                test_mode INTEGER DEFAULT 0,
+                is_public INTEGER DEFAULT 1
+            )
+            """
+        )
         conn.commit()
 
 
@@ -111,6 +137,14 @@ def _migrate_db() -> None:
         for name, col_type in missing.items():
             if name not in columns:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {col_type}")
+        photo_columns = {row[1] for row in conn.execute("PRAGMA table_info(photos)").fetchall()}
+        photo_missing = {
+            "test_mode": "INTEGER DEFAULT 0",
+            "is_public": "INTEGER DEFAULT 1",
+        }
+        for name, col_type in photo_missing.items():
+            if name not in photo_columns:
+                conn.execute(f"ALTER TABLE photos ADD COLUMN {name} {col_type}")
         conn.execute(
             """
             UPDATE sessions
@@ -162,6 +196,14 @@ def _parse_distance_km(raw: str | None) -> float | None:
         return float(parts[4])
     except Exception:
         return None
+
+
+def _photo_extension(filename: str | None, mime_type: str | None) -> str:
+    filename = (filename or "").lower()
+    mime_type = (mime_type or "").lower()
+    if filename.endswith(".png") or mime_type == "image/png":
+        return ".png"
+    return ".jpg"
 
 
 def create_app() -> Flask:
@@ -305,6 +347,14 @@ def create_app() -> Flask:
                 FROM sessions
                 """
             ).fetchone()
+            latest_photo = conn.execute(
+                """
+                SELECT device_id, session_id, mode, captured_at, distance_km, interval_km, relative_path
+                FROM photos
+                ORDER BY captured_at DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
             session_points = []
             for s in sessions:
                 point = conn.execute(
@@ -382,6 +432,17 @@ def create_app() -> Flask:
             total_distance = float(avg_speed_row["total_distance_km"] or 0)
             if total_duration > 0:
                 avg_speed = total_distance / (total_duration / 3600)
+        latest_photo_payload = None
+        if latest_photo:
+            latest_photo_payload = {
+                "device_id": latest_photo["device_id"],
+                "session_id": latest_photo["session_id"],
+                "mode": latest_photo["mode"],
+                "captured_at": latest_photo["captured_at"],
+                "distance_km": latest_photo["distance_km"],
+                "interval_km": latest_photo["interval_km"],
+                "image_url": url_for("photo_file", filename=latest_photo["relative_path"]),
+            }
         return render_template(
             "index.html",
             devices=devices,
@@ -393,6 +454,7 @@ def create_app() -> Flask:
             total_uphill_30=total_uphill_30,
             avg_session_distance=avg_session_distance,
             avg_speed=avg_speed,
+            latest_photo=latest_photo_payload,
             now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             device_locations=device_locations,
         )
@@ -596,6 +658,74 @@ def create_app() -> Flask:
 
         return jsonify({"status": "ok"})
 
+    @app.route("/api/upload_photo", methods=["POST"])
+    @_require_auth
+    def upload_photo():
+        data = request.get_json(force=True) or {}
+        device_id = data.get("device_id")
+        session_id = data.get("session_id")
+        if not device_id or not session_id:
+            return jsonify({"error": "missing device_id or session_id"}), 400
+
+        image_b64 = data.get("image_b64")
+        if not image_b64:
+            return jsonify({"error": "missing image_b64"}), 400
+
+        try:
+            raw_bytes = base64.b64decode(image_b64)
+        except Exception:
+            return jsonify({"error": "invalid image_b64"}), 400
+
+        captured_at = data.get("captured_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ext = _photo_extension(data.get("filename"), data.get("mime_type"))
+        safe_device = str(device_id).replace("/", "_")
+        safe_session = str(session_id).replace("/", "_")
+        file_name = f"{captured_at.replace(':', '-').replace(' ', '_')}{ext}"
+        relative_dir = os.path.join("photos", safe_device, safe_session)
+        absolute_dir = os.path.join(_media_dir(), relative_dir)
+        os.makedirs(absolute_dir, exist_ok=True)
+        relative_path = os.path.join(relative_dir, file_name)
+        absolute_path = os.path.join(_media_dir(), relative_path)
+
+        with open(absolute_path, "wb") as f:
+            f.write(raw_bytes)
+
+        uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with _get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO photos (
+                    device_id, session_id, mode, captured_at, distance_km, interval_km,
+                    filename, mime_type, relative_path, uploaded_at, test_mode, is_public
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    device_id,
+                    session_id,
+                    data.get("mode", "default"),
+                    captured_at,
+                    data.get("distance_km"),
+                    data.get("interval_km"),
+                    data.get("filename"),
+                    data.get("mime_type") or "image/jpeg",
+                    relative_path,
+                    uploaded_at,
+                    int(data.get("test_mode") or 0),
+                    1,
+                ),
+            )
+            conn.commit()
+
+        return jsonify(
+            {
+                "status": "ok",
+                "image_url": url_for("photo_file", filename=relative_path, _external=True),
+                "public_latest_url": url_for("public_latest_photo", _external=True),
+                "public_latest_image_url": url_for("public_latest_photo_jpg", _external=True),
+                "uploaded_at": uploaded_at,
+            }
+        )
+
     @app.route("/api/export_session")
     @_require_auth
     def export_session():
@@ -735,6 +865,99 @@ def create_app() -> Flask:
             "Content-Type": "application/gpx+xml; charset=utf-8",
         }
         return Response(gpx_text, headers=headers)
+
+    @app.route("/media/photos/<path:filename>")
+    def photo_file(filename: str):
+        return send_from_directory(_media_dir(), filename)
+
+    @app.route("/public/latest_photo")
+    def public_latest_photo():
+        device_id = request.args.get("device_id")
+        query = """
+            SELECT device_id, session_id, mode, captured_at, distance_km, interval_km, relative_path
+            FROM photos
+            WHERE is_public = 1
+        """
+        params: list[Any] = []
+        if device_id:
+            query += " AND device_id = ?"
+            params.append(device_id)
+        query += " ORDER BY captured_at DESC, id DESC LIMIT 1"
+
+        with _get_db() as conn:
+            row = conn.execute(query, params).fetchone()
+
+        if not row:
+            return jsonify({"error": "no photo found"}), 404
+
+        return jsonify(
+            {
+                "device_id": row["device_id"],
+                "session_id": row["session_id"],
+                "mode": row["mode"],
+                "captured_at": row["captured_at"],
+                "distance_km": row["distance_km"],
+                "interval_km": row["interval_km"],
+                "image_url": url_for("photo_file", filename=row["relative_path"], _external=True),
+            }
+        )
+
+    @app.route("/public/photos.json")
+    def public_photo_feed():
+        limit = max(1, min(100, int(request.args.get("limit", 20))))
+        device_id = request.args.get("device_id")
+        query = """
+            SELECT device_id, session_id, mode, captured_at, distance_km, interval_km, relative_path
+            FROM photos
+            WHERE is_public = 1
+        """
+        params: list[Any] = []
+        if device_id:
+            query += " AND device_id = ?"
+            params.append(device_id)
+        query += " ORDER BY captured_at DESC, id DESC LIMIT ?"
+        params.append(limit)
+
+        with _get_db() as conn:
+            rows = conn.execute(query, params).fetchall()
+
+        return jsonify(
+            {
+                "photos": [
+                    {
+                        "device_id": row["device_id"],
+                        "session_id": row["session_id"],
+                        "mode": row["mode"],
+                        "captured_at": row["captured_at"],
+                        "distance_km": row["distance_km"],
+                        "interval_km": row["interval_km"],
+                        "image_url": url_for("photo_file", filename=row["relative_path"], _external=True),
+                    }
+                    for row in rows
+                ]
+            }
+        )
+
+    @app.route("/public/latest_photo.jpg")
+    def public_latest_photo_jpg():
+        device_id = request.args.get("device_id")
+        query = """
+            SELECT relative_path
+            FROM photos
+            WHERE is_public = 1
+        """
+        params: list[Any] = []
+        if device_id:
+            query += " AND device_id = ?"
+            params.append(device_id)
+        query += " ORDER BY captured_at DESC, id DESC LIMIT 1"
+
+        with _get_db() as conn:
+            row = conn.execute(query, params).fetchone()
+
+        if not row:
+            return Response("No photo found", 404)
+        return send_from_directory(_media_dir(), row["relative_path"])
 
     @app.route("/session_map")
     @_require_auth

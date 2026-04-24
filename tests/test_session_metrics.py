@@ -11,6 +11,12 @@ def _dummy(*a, **k):
     return None
 
 class DummyApp:
+    def add_url_rule(self, *args, **kwargs):
+        pass
+
+    def register_blueprint(self, *args, **kwargs):
+        pass
+
     def route(self, *args, **kwargs):
         def decorator(func):
             return func
@@ -19,11 +25,25 @@ class DummyApp:
     def run(self, *args, **kwargs):
         pass
 
+
+class DummyBlueprint:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def add_url_rule(self, *args, **kwargs):
+        pass
+
 flask_stub.Flask = lambda *a, **k: DummyApp()
+flask_stub.Blueprint = DummyBlueprint
+flask_stub.Response = _dummy
+flask_stub.abort = _dummy
 flask_stub.render_template = _dummy
 flask_stub.jsonify = _dummy
 flask_stub.request = None
 flask_stub.redirect = _dummy
+flask_stub.send_file = _dummy
+flask_stub.send_from_directory = _dummy
+flask_stub.url_for = _dummy
 sys.modules['flask'] = flask_stub
 
 serial_stub = types.ModuleType("serial")

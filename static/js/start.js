@@ -108,6 +108,14 @@ window.onclick = function(event) {
 window.addEventListener("DOMContentLoaded", () => {
   const superEl = document.getElementById('vehicle-supercycle');
   const testToggle = document.getElementById('test-mode-toggle');
+  const photoToggle = document.getElementById('photo-capture-enabled');
+  const photoInterval = document.getElementById('photo-capture-interval');
+
+  const syncPhotoInputs = () => {
+    if (!photoToggle || !photoInterval) return;
+    photoInterval.disabled = !photoToggle.checked;
+    photoInterval.style.opacity = photoToggle.checked ? 1 : 0.5;
+  };
 
   if (superEl) superEl.addEventListener('click', () => {
     selectedVehicle = 'supercycle';
@@ -118,10 +126,12 @@ window.addEventListener("DOMContentLoaded", () => {
     isTest = !!testToggle.checked;
     setVehicleMode(deriveMode(selectedVehicle, isTest));
   });
+  if (photoToggle) photoToggle.addEventListener('change', syncPhotoInputs);
 
   fetchVehicleMode();
   checkConnection();
   setInterval(checkConnection, 1000);
+  syncPhotoInputs();
 });
 
 function updateLinksForMode(mode) {

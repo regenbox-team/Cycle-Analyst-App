@@ -10,6 +10,7 @@ from datetime import datetime
 from .config import BAUDRATE, get_db_file, VEHICLE_CONFIGS
 from .modes import is_test_mode
 from .metrics import update_metrics, update_solar_only_metrics
+from .photo_capture import maybe_schedule_photo_capture
 from . import state
 from .modes import vehicle_mode
 from .solar_sensor import read_solar_sample
@@ -192,6 +193,7 @@ def read_serial():
         now = time.time()
         if data is not None:
             update_metrics(data, now, solar_sample=solar_sample)
+            maybe_schedule_photo_capture(state.session_metrics.get("distance_km"))
         elif solar_sample is not None:
             update_solar_only_metrics(solar_sample, now)
 

@@ -137,6 +137,37 @@ def _upload_session(url: str, payload: dict[str, Any]) -> bool:
         return False
 
 
+def monitor_upload_photo(
+    *,
+    image_bytes: bytes,
+    filename: str,
+    mime_type: str,
+    captured_at: str,
+    distance_km: float,
+    interval_km: float,
+) -> dict[str, Any]:
+    url = _monitor_url()
+    if not url:
+        raise RuntimeError("MONITOR_URL is not configured")
+
+    payload = {
+        "device_id": _device_id(),
+        "session_id": state.session_id,
+        "mode": _mode_from_db_path(get_db_file()),
+        "test_mode": 1 if is_test_mode() else 0,
+        "captured_at": captured_at,
+        "distance_km": distance_km,
+        "interval_km": interval_km,
+        "filename": filename,
+        "mime_type": mime_type,
+        "image_b64": base64.b64encode(image_bytes).decode("ascii"),
+    }
+    resp = _request_json("POST", f"{url}/api/upload_photo", payload, timeout=20)
+    if resp.get("status") != "ok":
+        raise RuntimeError(resp.get("error") or "photo upload failed")
+    return resp
+
+
 def _send_heartbeat(url: str, device_id: str) -> None:
     current_db = get_db_file()
     gps = get_status()

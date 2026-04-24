@@ -46,6 +46,19 @@ solar_sensor = {
     "last_update": 0.0,
 }
 
+
+def default_photo_capture_settings() -> dict:
+    return {
+        "enabled": False,
+        "interval_km": 1.0,
+        "last_trigger_distance_km": 0.0,
+        "capture_count": 0,
+        "last_uploaded_at": None,
+        "latest_public_url": None,
+        "last_error": None,
+    }
+
+
 # Core session metrics store
 session_metrics = {
     "speed_max": 0,
@@ -84,7 +97,8 @@ session_metrics = {
     "human_pct_per_km_last": [],
     "solar_pct_per_km_last": [],
     "last_regen_checkpoint": 0,
-    "regen_pct_per_km_last": []
+    "regen_pct_per_km_last": [],
+    "photo_capture": default_photo_capture_settings(),
 }
 
 

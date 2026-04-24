@@ -8,6 +8,7 @@ from app.config import get_db_file, SESSION_METRICS_DIR
 from app import state
 from app.reader import parse_line
 from app.metrics import reset_session_state, restore_session_metrics
+from app.photo_capture import configure_session_photo_capture, normalize_interval_km
 
 
 def start_page():
@@ -20,6 +21,8 @@ def start_page():
 def start_session():
     selected_user = request.form.get("user", "JD").strip()
     state.current_user = selected_user if selected_user in ("JD", "LL") else "JD"
+    photo_enabled = request.form.get("photo_capture_enabled") == "on"
+    photo_interval_km = normalize_interval_km(request.form.get("photo_capture_interval_km"), default=1.0)
 
     state.session_id = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d_%H-%M-%S")
     state.save_session_id(state.session_id)
@@ -27,6 +30,8 @@ def start_session():
     state.session_start_time = datetime.now().timestamp()
 
     reset_session_state()
+    configure_session_photo_capture(photo_enabled, photo_interval_km)
+    state.save_session_metrics_to_file()
 
     state.session_active = True
     state.save_session_active(True)

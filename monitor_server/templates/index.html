@@ -197,10 +197,38 @@
       #distance-chart { width: 100%; height: 160px; }
       .chart-bg { fill: #fffaf2; }
       .chart-bar { fill: #0d9488; opacity: 0.85; }
+      .photo-card {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+        gap: 16px;
+        align-items: stretch;
+      }
+      .photo-meta {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .photo-tile {
+        background: #faf6ef;
+        border: 1px solid #efe3d5;
+        border-radius: 12px;
+        padding: 12px 14px;
+      }
+      .photo-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+      .photo-value { font-size: 18px; font-weight: 700; margin-top: 6px; }
+      .photo-preview {
+        width: 100%;
+        height: 260px;
+        object-fit: cover;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: #f3ecdf;
+      }
       @media (max-width: 720px) {
         main { padding: 24px 16px 40px; }
         table { font-size: 13px; }
         .summary-card { grid-template-columns: 1fr; }
+        .photo-card { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -247,6 +275,35 @@
             {% endfor %}
           </tbody>
         </table>
+      </div>
+
+      <h2>Latest Photo</h2>
+      <div class="card photo-card">
+        {% if latest_photo %}
+          <div class="photo-meta">
+            <div class="photo-tile">
+              <div class="photo-label">Device</div>
+              <div class="photo-value">{{ latest_photo["device_id"] }}</div>
+            </div>
+            <div class="photo-tile">
+              <div class="photo-label">Session</div>
+              <div class="photo-value">{{ latest_photo["session_id"] }}</div>
+            </div>
+            <div class="photo-tile">
+              <div class="photo-label">Captured At</div>
+              <div class="photo-value">{{ latest_photo["captured_at"] }}</div>
+            </div>
+            <div class="photo-tile">
+              <div class="photo-label">Distance</div>
+              <div class="photo-value">{{ "%.2f"|format(latest_photo["distance_km"] or 0) }} km</div>
+            </div>
+          </div>
+          <div>
+            <img class="photo-preview" src="{{ latest_photo['image_url'] }}" alt="Latest ride photo" />
+          </div>
+        {% else %}
+          <div class="muted">No live photo uploaded yet.</div>
+        {% endif %}
       </div>
 
       <h2>Summary</h2>

@@ -3,7 +3,7 @@ import sqlite3
 import os
 import time
 import json
-from .state import session_metrics
+from .state import default_photo_capture_settings, session_metrics
 
 MAX_METRICS_DT_SECONDS = 2.0
 
@@ -28,6 +28,13 @@ def _migrate_legacy_metrics(store: dict) -> None:
         store["solar_pct_per_km_last"] = []
     if "calories_burned" not in store:
         store["calories_burned"] = store.get("human_Wh", 0) * 1.433
+    photo_capture = store.get("photo_capture")
+    defaults = default_photo_capture_settings()
+    if not isinstance(photo_capture, dict):
+        store["photo_capture"] = defaults
+    else:
+        defaults.update(photo_capture)
+        store["photo_capture"] = defaults
 
 
 def reset_session_state():
@@ -68,7 +75,8 @@ def reset_session_state():
         "human_pct_per_km_last": [],
         "solar_pct_per_km_last": [],
         "last_regen_checkpoint": 0,
-        "regen_pct_per_km_last": []
+        "regen_pct_per_km_last": [],
+        "photo_capture": default_photo_capture_settings(),
     })
 
     # Ensure at least one checkpoint exists
