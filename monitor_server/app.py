@@ -11,6 +11,9 @@ from xml.sax.saxutils import escape
 from flask import Flask, jsonify, request, render_template, Response, send_from_directory, url_for
 
 
+TELEMETRY_TABLE = "telemetry_samples"
+
+
 def _db_path() -> str:
     path = os.getenv("MONITOR_DB", os.path.join(os.path.dirname(__file__), "monitor.db"))
     path = os.path.expanduser(path)
@@ -31,6 +34,21 @@ def _media_dir() -> str:
     path = os.path.expanduser(path)
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
+def _table_columns(conn: sqlite3.Connection, name: str) -> set[str]:
+    try:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({name})").fetchall()}
+    except Exception:
+        return set()
 
 
 def _init_db() -> None:
@@ -74,7 +92,7 @@ def _init_db() -> None:
         )
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS logs (
+            CREATE TABLE IF NOT EXISTS telemetry_samples (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 device_id TEXT,
                 session_id TEXT,
@@ -89,7 +107,12 @@ def _init_db() -> None:
                 gps_track_deg REAL,
                 gps_fix INTEGER,
                 gps_sats INTEGER,
-                gps_hdop REAL
+                gps_hdop REAL,
+                solar_current_a REAL,
+                solar_bus_v REAL,
+                solar_shunt_v REAL,
+                solar_power_w REAL,
+                solar_temperature_c REAL
             )
             """
         )
@@ -137,6 +160,55 @@ def _migrate_db() -> None:
         for name, col_type in missing.items():
             if name not in columns:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {col_type}")
+
+        telemetry_columns = _table_columns(conn, TELEMETRY_TABLE)
+        telemetry_missing = {
+            "solar_current_a": "REAL",
+            "solar_bus_v": "REAL",
+            "solar_shunt_v": "REAL",
+            "solar_power_w": "REAL",
+            "solar_temperature_c": "REAL",
+        }
+        for name, col_type in telemetry_missing.items():
+            if name not in telemetry_columns:
+                conn.execute(f"ALTER TABLE {TELEMETRY_TABLE} ADD COLUMN {name} {col_type}")
+
+        if _table_exists(conn, "logs"):
+            legacy_columns = _table_columns(conn, "logs")
+            sample_columns = [
+                "id",
+                "device_id",
+                "session_id",
+                "mode",
+                "timestamp",
+                "raw",
+                "user",
+                "gps_lat",
+                "gps_lon",
+                "gps_alt",
+                "gps_speed_kph",
+                "gps_track_deg",
+                "gps_fix",
+                "gps_sats",
+                "gps_hdop",
+                "solar_current_a",
+                "solar_bus_v",
+                "solar_shunt_v",
+                "solar_power_w",
+                "solar_temperature_c",
+            ]
+            source_columns = [
+                name if name in legacy_columns else f"NULL AS {name}"
+                for name in sample_columns
+            ]
+            conn.execute(
+                f"""
+                INSERT OR IGNORE INTO {TELEMETRY_TABLE} ({", ".join(sample_columns)})
+                SELECT {", ".join(source_columns)}
+                FROM logs
+                """
+            )
+
         photo_columns = {row[1] for row in conn.execute("PRAGMA table_info(photos)").fetchall()}
         photo_missing = {
             "test_mode": "INTEGER DEFAULT 0",
@@ -158,6 +230,12 @@ def _migrate_db() -> None:
             SET avg_speed_kph = distance_km / (duration_sec / 3600.0)
             WHERE avg_speed_kph IS NULL AND duration_sec IS NOT NULL AND duration_sec > 0
               AND distance_km IS NOT NULL
+            """
+        )
+        conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_{TELEMETRY_TABLE}_device_session_mode
+            ON {TELEMETRY_TABLE}(device_id, session_id, mode, timestamp)
             """
         )
         conn.commit()
@@ -358,9 +436,9 @@ def create_app() -> Flask:
             session_points = []
             for s in sessions:
                 point = conn.execute(
-                    """
+                    f"""
                     SELECT gps_lat, gps_lon
-                    FROM logs
+                    FROM {TELEMETRY_TABLE}
                     WHERE device_id = ? AND session_id = ? AND mode = ?
                       AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
                       AND gps_lat != 0 AND gps_lon != 0
@@ -545,11 +623,11 @@ def create_app() -> Flask:
             if existing:
                 return jsonify({"status": "exists"})
 
-            logs = data.get("logs") or []
-            rows_count = len(logs)
-            start_ts = logs[0].get("timestamp") if logs else None
-            end_ts = logs[-1].get("timestamp") if logs else None
-            distance_km = _parse_distance_km(logs[-1].get("raw") if logs else None)
+            samples = data.get("telemetry_samples") or data.get("logs") or []
+            rows_count = len(samples)
+            start_ts = samples[0].get("timestamp") if samples else None
+            end_ts = samples[-1].get("timestamp") if samples else None
+            distance_km = _parse_distance_km(samples[-1].get("raw") if samples else None)
             if distance_km is None and isinstance(data.get("metrics"), dict):
                 distance_km = data.get("metrics", {}).get("distance_km")
             duration_sec = None
@@ -560,7 +638,7 @@ def create_app() -> Flask:
                 duration_sec = max(0.0, (end_dt - start_dt).total_seconds())
             prev_alt = None
             total_uphill = 0.0
-            for row in logs:
+            for row in samples:
                 alt = row.get("gps_alt")
                 if alt is None:
                     continue
@@ -604,13 +682,14 @@ def create_app() -> Flask:
                 ),
             )
 
-            if logs:
+            if samples:
                 conn.executemany(
-                    """
-                    INSERT INTO logs (
+                    f"""
+                    INSERT INTO {TELEMETRY_TABLE} (
                         device_id, session_id, mode, timestamp, raw, user,
-                        gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+                        solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -628,8 +707,13 @@ def create_app() -> Flask:
                             row.get("gps_fix"),
                             row.get("gps_sats"),
                             row.get("gps_hdop"),
+                            row.get("solar_current_a"),
+                            row.get("solar_bus_v"),
+                            row.get("solar_shunt_v"),
+                            row.get("solar_power_w"),
+                            row.get("solar_temperature_c"),
                         )
-                        for row in logs
+                        for row in samples
                     ],
                 )
             conn.commit()
@@ -745,10 +829,11 @@ def create_app() -> Flask:
                 (device_id, session_id, mode),
             ).fetchone()
             rows = conn.execute(
-                """
+                f"""
                 SELECT timestamp, session_id, raw, user,
-                       gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop
-                FROM logs
+                       gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+                       solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c
+                FROM {TELEMETRY_TABLE}
                 WHERE device_id = ? AND session_id = ? AND mode = ?
                 ORDER BY id
                 """,
@@ -761,6 +846,29 @@ def create_app() -> Flask:
                 metrics = json.loads(session_row["metrics_json"])
             except Exception:
                 metrics = None
+
+        samples = [
+            {
+                "timestamp": r[0],
+                "session": r[1],
+                "raw": r[2],
+                "user": r[3],
+                "gps_lat": r[4],
+                "gps_lon": r[5],
+                "gps_alt": r[6],
+                "gps_speed_kph": r[7],
+                "gps_track_deg": r[8],
+                "gps_fix": r[9],
+                "gps_sats": r[10],
+                "gps_hdop": r[11],
+                "solar_current_a": r[12],
+                "solar_bus_v": r[13],
+                "solar_shunt_v": r[14],
+                "solar_power_w": r[15],
+                "solar_temperature_c": r[16],
+            }
+            for r in rows
+        ]
 
         return jsonify(
             {
@@ -775,23 +883,8 @@ def create_app() -> Flask:
                     "uploaded_at": session_row["uploaded_at"] if session_row else None,
                 },
                 "metrics": metrics,
-                "logs": [
-                    {
-                        "timestamp": r[0],
-                        "session": r[1],
-                        "raw": r[2],
-                        "user": r[3],
-                        "gps_lat": r[4],
-                        "gps_lon": r[5],
-                        "gps_alt": r[6],
-                        "gps_speed_kph": r[7],
-                        "gps_track_deg": r[8],
-                        "gps_fix": r[9],
-                        "gps_sats": r[10],
-                        "gps_hdop": r[11],
-                    }
-                    for r in rows
-                ],
+                "telemetry_samples": samples,
+                "logs": samples,
             }
         )
 
@@ -806,9 +899,9 @@ def create_app() -> Flask:
 
         with _get_db() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT timestamp, gps_lat, gps_lon, gps_alt
-                FROM logs
+                FROM {TELEMETRY_TABLE}
                 WHERE device_id = ? AND session_id = ? AND mode = ?
                   AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
                   AND gps_lat != 0 AND gps_lon != 0
@@ -978,9 +1071,9 @@ def create_app() -> Flask:
                 (device_id, session_id, mode),
             ).fetchone()
             rows = conn.execute(
-                """
+                f"""
                 SELECT timestamp, gps_lat, gps_lon, gps_alt
-                FROM logs
+                FROM {TELEMETRY_TABLE}
                 WHERE device_id = ? AND session_id = ? AND mode = ?
                   AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
                   AND gps_lat != 0 AND gps_lon != 0

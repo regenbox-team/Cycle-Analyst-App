@@ -90,10 +90,19 @@ def _fetch_session_rows(db_path: str, session_id: str) -> list[dict[str, Any]]:
     try:
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 1000")
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(logs)").fetchall()}
+
+            def col(name: str) -> str:
+                return name if name in cols else f"NULL AS {name}"
+
             rows = conn.execute(
-                """
+                f"""
                 SELECT timestamp, session, raw, user,
-                       gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop
+                       {col("gps_lat")}, {col("gps_lon")}, {col("gps_alt")},
+                       {col("gps_speed_kph")}, {col("gps_track_deg")}, {col("gps_fix")},
+                       {col("gps_sats")}, {col("gps_hdop")},
+                       {col("solar_current_a")}, {col("solar_bus_v")}, {col("solar_shunt_v")},
+                       {col("solar_power_w")}, {col("solar_temperature_c")}
                 FROM logs
                 WHERE session = ?
                 ORDER BY id
@@ -114,6 +123,11 @@ def _fetch_session_rows(db_path: str, session_id: str) -> list[dict[str, Any]]:
                 "gps_fix": r[9],
                 "gps_sats": r[10],
                 "gps_hdop": r[11],
+                "solar_current_a": r[12],
+                "solar_bus_v": r[13],
+                "solar_shunt_v": r[14],
+                "solar_power_w": r[15],
+                "solar_temperature_c": r[16],
             }
             for r in rows
         ]
@@ -221,7 +235,7 @@ def _sync_once() -> None:
                 "session_id": sid,
                 "mode": mode,
                 "test_mode": 1 if is_test_mode() else 0,
-                "logs": rows,
+                "telemetry_samples": rows,
                 "metrics": _metrics_for_session(sid),
             }
             if not _upload_session(url, payload):

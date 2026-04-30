@@ -21,6 +21,8 @@ def _ensure_log_gps_columns(conn: sqlite3.Connection) -> None:
         ("solar_current_a", "REAL"),
         ("solar_bus_v", "REAL"),
         ("solar_shunt_v", "REAL"),
+        ("solar_power_w", "REAL"),
+        ("solar_temperature_c", "REAL"),
     ]
     for name, typ in desired:
         if name not in cols:

@@ -211,8 +211,8 @@ def read_serial():
                         INSERT INTO logs (
                             timestamp, session, raw, user,
                             gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
-                            solar_current_a, solar_bus_v, solar_shunt_v
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             timestamp,
@@ -230,6 +230,8 @@ def read_serial():
                             state.solar_sensor.get("current_a"),
                             state.solar_sensor.get("bus_v"),
                             state.solar_sensor.get("shunt_v"),
+                            state.solar_sensor.get("power_w"),
+                            state.solar_sensor.get("temperature_c"),
                         ),
                     )
             except Exception:
