@@ -58,14 +58,18 @@
       }
 
       .topbar {
-        display: flex;
-        justify-content: space-between;
-        gap: 18px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) max-content;
+        grid-template-rows: auto auto;
+        column-gap: 18px;
+        row-gap: 12px;
         align-items: flex-start;
         padding: 8px 0 18px;
       }
 
       .title-block {
+        grid-column: 1;
+        grid-row: 1;
         min-width: 0;
       }
 
@@ -85,15 +89,30 @@
         line-height: 1;
       }
 
+      .brand-caption {
+        grid-column: 1;
+        grid-row: 2;
+        max-width: 720px;
+        margin: 0;
+        color: var(--muted);
+        font-size: clamp(14px, 1.35vw, 18px);
+        font-weight: 400;
+        line-height: 1.28;
+      }
+
       .frame-container {
-        flex: none;
-        height: clamp(96px, 12vw, 160px);
+        grid-column: 2;
+        grid-row: 1 / 3;
+        align-self: stretch;
+        aspect-ratio: 1400 / 800;
+        min-height: clamp(132px, 16vw, 220px);
         display: flex;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-end;
       }
 
       .frame-mask {
+        width: 100%;
         height: 100%;
         aspect-ratio: 1400 / 800;
         overflow: hidden;
@@ -104,6 +123,7 @@
         display: block;
         width: 100%;
         height: 100%;
+        max-width: 450px;
       }
 
       .hero {
@@ -258,6 +278,104 @@
         font-weight: 750;
       }
 
+      .action-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .link-button {
+        appearance: none;
+        display: inline-flex;
+        align-items: center;
+        min-height: 46px;
+        padding: 12px 18px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+        font-size: 15px;
+        font-weight: 750;
+        line-height: 1;
+        text-decoration: none;
+        cursor: pointer;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.06);
+      }
+
+      .link-button:hover,
+      .link-button:focus-visible {
+        border-color: var(--ink);
+        background: var(--ink);
+        color: var(--panel);
+        outline: none;
+      }
+
+      .link-button.is-disabled {
+        color: var(--muted);
+        cursor: default;
+        opacity: 0.58;
+      }
+
+      .link-button.is-disabled:hover {
+        border-color: var(--line);
+        background: var(--panel);
+        color: var(--muted);
+      }
+
+      .project-info {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: clamp(18px, 4vw, 48px);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .project-info h2,
+      .project-info h3 {
+        margin: 0;
+        line-height: 0.95;
+        letter-spacing: 0;
+      }
+
+      .project-info h2 {
+        font-size: clamp(34px, 7vw, 90px);
+        font-weight: 800;
+      }
+
+      .project-info h3 {
+        margin-top: clamp(28px, 5vw, 56px);
+        font-size: clamp(24px, 4vw, 52px);
+        font-weight: 800;
+      }
+
+      .project-kicker {
+        margin: 10px 0 clamp(24px, 4vw, 42px);
+        color: var(--muted);
+        font-size: clamp(24px, 4vw, 56px);
+        font-weight: 400;
+        line-height: 1;
+      }
+
+      .project-copy {
+        max-width: 920px;
+      }
+
+      .project-copy p {
+        margin: 0 0 18px;
+        color: var(--ink);
+        font-size: clamp(17px, 2vw, 24px);
+        line-height: 1.22;
+      }
+
+      .project-copy .small-copy {
+        max-width: 760px;
+        color: var(--muted);
+        font-size: clamp(15px, 1.45vw, 18px);
+        line-height: 1.42;
+      }
+
       .empty {
         display: grid;
         place-items: center;
@@ -290,14 +408,21 @@
         .metrics {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+        .project-info {
+          padding: 18px;
+        }
       }
 
       @media (max-width: 560px) {
         .topbar {
-          display: grid;
           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          grid-template-rows: auto auto;
           gap: 12px;
           align-items: center;
+        }
+        .title-block {
+          grid-column: 1;
+          grid-row: 1;
         }
         .brand {
           font-size: clamp(34px, 11vw, 54px);
@@ -305,14 +430,25 @@
         .brand-sub {
           font-size: clamp(24px, 7vw, 38px);
         }
+        .brand-caption {
+          grid-column: 1 / -1;
+          grid-row: 2;
+          max-width: none;
+          font-size: 12px;
+          line-height: 1.2;
+        }
         .frame-container {
+          grid-column: 2;
+          grid-row: 1;
+          align-self: center;
           width: 100%;
           height: auto;
+          min-height: 0;
           justify-content: flex-end;
         }
         .frame-mask {
           width: 100%;
-          height: auto;
+          height: 100%;
         }
         .metrics {
           grid-template-columns: 1fr;
@@ -329,6 +465,14 @@
           flex-direction: column;
           gap: 4px;
         }
+        .action-links {
+          align-items: stretch;
+          flex-direction: column;
+        }
+        .link-button {
+          justify-content: center;
+          width: 100%;
+        }
       }
     </style>
   </head>
@@ -344,6 +488,9 @@
             <canvas id="supercycle3D-canvas"></canvas>
           </div>
         </div>
+        <p class="brand-caption">
+          Pendant l'expédition Sun Trip 2026, du 4 mai à Laayoune (Maroc) au 4 juin 2026 à St-Jean-de-Luz (France), une photo est envoyée tous les kilomètres par un des deux Supercycles, quand le réseau le permet. Vivez l'expérience avec nous, en quasi direct.
+        </p>
       </header>
       <section id="content" class="hero" hidden>
         <div class="media-grid">
@@ -389,6 +536,61 @@
           <div class="metric">
             <div class="metric-label">Production solaire de la journée</div>
             <div class="metric-value"><span id="solar-total">--</span><span class="metric-unit">Wh</span></div>
+          </div>
+        </section>
+
+        <nav class="action-links" aria-label="Liens utiles">
+          <a class="link-button" href="https://supercycle.bike/">vers le site supercycle.bike</a>
+          <a class="link-button" href="mailto:hello@supercycle.bike">nous contacter</a>
+          <a class="link-button" href="https://www.papayoux.com/fr/cagnotte/sun-trip-2026-supercycle">nous soutenir</a>
+          <a class="link-button" href="https://www.thesuntrip.com/">Le Sun Trip</a>
+          <button class="link-button" id="project-info-toggle" type="button" aria-controls="project-info" aria-expanded="false">
+            en savoir plus sur le projet
+          </button>
+        </nav>
+
+        <section id="project-info" class="project-info" hidden>
+          <div class="project-copy">
+            <h2>L’aventure</h2>
+            <p class="project-kicker">Cette incroyable course solaire, c’est le Sun Trip 2026.</p>
+
+            <p>A l’initiative de Florian Bailly, elle rassemble chaque année une quinzaine de voyageurs du monde entier, prêts à mesurer leurs roues et leur endurance. Cette année, la course est prévue au Maroc : de Laayoune à Rabat, nous allons rouler tous les quatre dans des conditions extrêmes, à la force de nos jambes et grâce à l’énergie du soleil, à bord de deux Supercycles.</p>
+
+            <p>Le Sun Trip Maroc est un défi inédit pour nous quatre, et aussi pour le Supercycle qui n’a jamais roulé sur les routes africaines.</p>
+
+            <p>Mais rassurez-vous, nous n’en sommes pas à notre coup d’essai : Jean a déjà organisé une résidence itinérante de près de 5000 kilomètres en 2024. Accompagné de Loïse, ils ont aussi réalisé un périple Pays Basque → Auvergne, puis un Marseille → Genève cette année, sur un Acticycle cette fois.</p>
+
+            <p>Ce voyage sans carburant, nous allons aussi le documenter par différents médiums comme la photo, le dessin et l’écriture. Notre objectif est de vivre pleinement cette aventure et de pouvoir vous la partager ensuite, peut-être avec un livre si nous trouvons un éditeur et un petit documentaire si on a un diffuseur…</p>
+
+            <p>Avec le matériel, la préparation, le trajet jusqu’à la ligne de départ - en Supercycle depuis la France aller-retour, le budget est important.</p>
+
+            <p>Pour accomplir le Sun Trip Maroc 2026, on a grand besoin de votre soutien : un immense MERCI à chacun d’entre vous et à nos futures entreprises mécènes !</p>
+
+            <h3>Loïse Lyonnet</h3>
+            <p class="small-copy">Après cinq ans d’expérience au sein d’institutions politiques (Sénat, Assemblée nationale, cabinet ministériel) autour des enjeux de développement territorial et d’ancrage local, j’ai créé le média Culture Au Coeur où j’interview les acteurs de la scène artistique contemporaine. Autrice d’un premier livre, Nos Maisons, paru en octobre 2025 et voyageuse en véhicules intermédiaires avec Jean, j’aurai à cœur de témoigner du Sun Trip par l’écrit.</p>
+
+            <h3>Jean Dard</h3>
+            <p class="small-copy">Designer, porteur du projet Supercycle et passionné de mobilités légères depuis mes études aux Arts Décoratifs, je suis aujourd’hui impliqué dans plusieurs projets de développement de véhicules intermédiaires (vélis). Je suis notamment intéressé par la dimension culturelle de notre projet Sun Trip et le fait de contribuer à de nouveaux imaginaires de mobilité. J’ai réalisé plusieurs longs voyages en France à bord de vélis, mais le Sun Trip est le premier défi du Supercycle sur le continent africain.</p>
+
+            <h3>Fabien Ariano</h3>
+            <p class="small-copy">Je suis ingénieur généraliste et low tech / designer en herbe. Mon truc, c’est de transformer des idées improbables en solutions concrètes. Je suis prêt à explorer, ensemble des façons de vivre, de fabriquer, de se déplacer et de voyager, là où chaque idée porte un peu d'utopie et beaucoup de sens. Le Sun Trip sera l’occasion d’expérimenter une nouvelle forme de voyage et de vivre une belle aventure tous les quatre.</p>
+
+            <h3>Le véhicule</h3>
+            <p>Les Supercycles, nos bolides pour le Sun Trip, sont des véhicules intermédiaires (mi vélo-mi voiture électrique) dont le designer est Jean. Ils seront surmontés de panneaux solaires pour profiter de chaque rayon du soleil marocain et réussir à parcourir des étapes quotidiennes de 200km. En savoir plus sur les véhicules...</p>
+
+            <h3>L’approche culturelle</h3>
+            <p>Le projet Supercycle est né de l’envie d’explorer de nouveaux imaginaires. Cela passe par le design de l’objet, d’une part, mais aussi par des projets d’aventures comme celle-ci.</p>
+
+            <p>Parmi les aventures précédentes en Supercycle, il y a notamment la résidence mobile à l’été 2024, financée par l’Ademe, et qui a donné lieu à une exposition ainsi qu’un court-métrage documentaire. Cette exposition est le fruit du travail d’une quinzaine d’artistes qui ont toutes et tous roulé en Supercycle, et documenté leur expérience. En automne 2025, l’exposition a été présentée au Technocentre de Renault.</p>
+
+            <p>Cette démarche se poursuit à l’occasion du SunTrip 2026. À bord des deux véhicules Supercycle, chaque participant va documenter la course par le ou les médiums de son choix. Photos, vidéos, écrits, enregistrements sonores, cartes ... Toutes les productions seront réunies et visibles sur le site supercycle.bike ainsi que lors d’évènements au sein d’institutions partenaires.</p>
+
+            <p>Le moment du voyage fera en lui même l’objet d’une performance qu’il sera possible de suivre via les réseaux sociaux et le site. Il sera effectivement possible de suivre les voyageurs grâce à leur carnet de bord publié en direct.</p>
+
+            <h3>Toute aide est la bienvenue !</h3>
+            <p>Vous êtes une entreprise et notre projet fait écho à vos valeurs ? Devenez notre mécène, en échange d’une série de contreparties sur-mesure, bâties en lien direct avec vous, en fonction de votre secteur d’activité, votre taille et vos enjeux. Contactez-nous !</p>
+
+            <p>Vous êtes une maison d’édition, une institution, un établissement d’enseignement supérieur ou un média, et vous souhaitez en savoir plus ? Nous serons ravis de vous présenter notre périple ainsi que les créations (photo, vidéo, écrit) qui en découleront !</p>
           </div>
         </section>
       </section>
@@ -518,6 +720,20 @@
         if (el) el.textContent = value;
       }
 
+      function initProjectInfoToggle() {
+        const button = document.getElementById("project-info-toggle");
+        const section = document.getElementById("project-info");
+        if (!button || !section) return;
+
+        button.addEventListener("click", () => {
+          const shouldOpen = section.hidden;
+          section.hidden = !shouldOpen;
+          button.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+          button.textContent = shouldOpen ? "masquer les infos du projet" : "en savoir plus sur le projet";
+          if (shouldOpen) section.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
+
       function initMap() {
         if (map) return;
         map = L.map("suntrip-map", {
@@ -571,7 +787,8 @@
         }
 
         setText("captured-at", latest.captured_at || "Dernière capture");
-        setText("time-since", formatAge(data.seconds_since_latest));
+        const photoAge = formatAge(data.seconds_since_latest);
+        setText("time-since", photoAge === "--" ? "Dernière photo prise : --" : `Dernière photo prise ${photoAge}`);
         setText("session-label", `${latest.device_id || ""} · ${latest.session_id || ""}`);
 
         const metrics = latest.metrics || {};
@@ -585,6 +802,7 @@
       }
 
       initFrameCanvas();
+      initProjectInfoToggle();
       loadSuntrip();
       setInterval(loadSuntrip, 30000);
     </script>
