@@ -346,7 +346,11 @@ def _photo_extension(filename: str | None, mime_type: str | None) -> str:
 
 
 def create_app() -> Flask:
-    app = Flask(__name__)
+    app = Flask(
+        __name__,
+        static_folder=os.path.join(REPO_ROOT, "static"),
+        static_url_path="/static",
+    )
     _init_db()
     _migrate_db()
 
