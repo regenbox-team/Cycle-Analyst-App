@@ -263,7 +263,6 @@
   </head>
   <body>
     <main class="page">
-      <div id="empty" class="empty" hidden>Aucune photo publique pour le moment.</div>
       <header id="topbar" class="topbar" hidden>
         <h1 class="brand">Supercycle<br>Sun Trip</h1>
         <div class="status-block">
@@ -393,7 +392,6 @@
         const res = await fetch("/public/suntrip.json", { cache: "no-store" });
         const data = await res.json();
         const latest = data.latest;
-        document.getElementById("empty").hidden = !!latest;
         document.getElementById("content").hidden = !latest;
         document.getElementById("topbar").hidden = !latest;
         if (!latest) return;
