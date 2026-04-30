@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Supercycle Sun Trip</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    >
+    <style>
+      :root {
+        --bg: #f4f7f1;
+        --ink: #102014;
+        --muted: #607064;
+        --panel: #ffffff;
+        --line: #d8e2d4;
+        --green: #20b15a;
+        --green-dark: #087a38;
+        --sun: #f5b51b;
+        --shadow: 0 18px 45px rgba(16, 32, 20, 0.12);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        background:
+          linear-gradient(180deg, rgba(244, 247, 241, 0.96), rgba(224, 235, 219, 0.96)),
+          repeating-linear-gradient(90deg, rgba(16, 32, 20, 0.04) 0 1px, transparent 1px 72px);
+        font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
+      }
+
+      .page {
+        width: min(1440px, 100%);
+        margin: 0 auto;
+        padding: 18px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.18fr) minmax(360px, 0.82fr);
+        gap: 18px;
+        min-height: calc(100vh - 36px);
+      }
+
+      .photo-panel,
+      .map-panel,
+      .metric {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow);
+      }
+
+      .photo-panel {
+        position: relative;
+        min-height: 560px;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .photo-panel img {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+        background: #dfe7dd;
+      }
+
+      .photo-overlay {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: end;
+        padding: 22px;
+        color: #fff;
+        background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.66));
+      }
+
+      .brand {
+        margin: 0;
+        font-size: clamp(28px, 4vw, 58px);
+        line-height: 0.94;
+        font-weight: 850;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin-top: 8px;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.86);
+      }
+
+      .time-pill {
+        flex: none;
+        border: 1px solid rgba(255, 255, 255, 0.38);
+        background: rgba(16, 32, 20, 0.68);
+        backdrop-filter: blur(10px);
+        border-radius: 999px;
+        padding: 10px 14px;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        min-width: 0;
+      }
+
+      .map-panel {
+        border-radius: 8px;
+        overflow: hidden;
+        min-height: 420px;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .panel-title {
+        font-size: 13px;
+        color: var(--muted);
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .session {
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 750;
+        text-align: right;
+      }
+
+      #suntrip-map {
+        width: 100%;
+        min-height: 360px;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .metric {
+        border-radius: 8px;
+        padding: 14px 16px;
+        min-height: 92px;
+      }
+
+      .metric-label {
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 800;
+      }
+
+      .metric-value {
+        margin-top: 8px;
+        font-size: clamp(24px, 3.4vw, 42px);
+        line-height: 1;
+        font-weight: 850;
+      }
+
+      .metric-unit {
+        margin-left: 4px;
+        font-size: 14px;
+        color: var(--muted);
+        font-weight: 750;
+      }
+
+      .empty {
+        display: grid;
+        place-items: center;
+        min-height: 60vh;
+        color: var(--muted);
+        font-weight: 750;
+      }
+
+      .leaflet-control-attribution {
+        font-size: 10px;
+      }
+
+      @media (max-width: 980px) {
+        .page { padding: 12px; }
+        .hero {
+          grid-template-columns: 1fr;
+          min-height: 0;
+        }
+        .photo-panel {
+          min-height: 58vh;
+        }
+        .photo-overlay {
+          align-items: start;
+          flex-direction: column;
+        }
+        .map-panel {
+          min-height: 380px;
+        }
+        #suntrip-map {
+          min-height: 310px;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .metrics {
+          grid-template-columns: 1fr;
+        }
+        .photo-panel {
+          min-height: 62vh;
+        }
+        .panel-head {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .session {
+          text-align: left;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div id="empty" class="empty" hidden>Aucune photo publique pour le moment.</div>
+      <section id="content" class="hero" hidden>
+        <article class="photo-panel">
+          <img id="latest-photo" alt="Dernière photo du Supercycle">
+          <div class="photo-overlay">
+            <div>
+              <h1 class="brand">Supercycle<br>Sun Trip</h1>
+              <div class="subtitle" id="captured-at">Dernière capture</div>
+            </div>
+            <div class="time-pill" id="time-since">--</div>
+          </div>
+        </article>
+
+        <aside class="side">
+          <section class="map-panel">
+            <div class="panel-head">
+              <div class="panel-title">Position des photos</div>
+              <div class="session" id="session-label">--</div>
+            </div>
+            <div id="suntrip-map"></div>
+          </section>
+
+          <section class="metrics" aria-label="Métriques de session">
+            <div class="metric">
+              <div class="metric-label">Vitesse</div>
+              <div class="metric-value"><span id="speed">--</span><span class="metric-unit">km/h</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Distance session</div>
+              <div class="metric-value"><span id="distance">--</span><span class="metric-unit">km</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Dénivelé +</div>
+              <div class="metric-value"><span id="uphill">--</span><span class="metric-unit">m</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Solaire instantané</div>
+              <div class="metric-value"><span id="solar-power">--</span><span class="metric-unit">W</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Génératrice instantanée</div>
+              <div class="metric-value"><span id="generator-power">--</span><span class="metric-unit">W</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Solaire session</div>
+              <div class="metric-value"><span id="solar-total">--</span><span class="metric-unit">Wh</span></div>
+            </div>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      let map;
+      let markers = [];
+      let latestImageUrl = "";
+
+      function formatAge(seconds) {
+        if (seconds == null) return "--";
+        if (seconds < 60) return `il y a ${seconds}s`;
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `il y a ${minutes} min`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `il y a ${hours} h ${minutes % 60} min`;
+        const days = Math.floor(hours / 24);
+        return `il y a ${days} j ${hours % 24} h`;
+      }
+
+      function formatNumber(value, decimals = 0) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return "--";
+        return n.toLocaleString("fr-FR", {
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals
+        });
+      }
+
+      function setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+      }
+
+      function initMap() {
+        if (map) return;
+        map = L.map("suntrip-map", {
+          scrollWheelZoom: false,
+          zoomControl: true
+        }).setView([46.8, 2.4], 5);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 18,
+          attribution: "&copy; OpenStreetMap"
+        }).addTo(map);
+      }
+
+      function renderMarkers(points) {
+        initMap();
+        markers.forEach(marker => marker.remove());
+        markers = [];
+
+        const bounds = [];
+        points.forEach(point => {
+          const marker = L.circleMarker([point.lat, point.lon], {
+            radius: point.latest ? 12 : 6,
+            color: point.latest ? "#087a38" : "#20b15a",
+            weight: point.latest ? 3 : 1,
+            fillColor: "#20b15a",
+            fillOpacity: point.latest ? 0.95 : 0.34,
+            opacity: point.latest ? 1 : 0.55
+          }).addTo(map);
+          marker.bindPopup(point.latest ? "Dernière photo" : point.captured_at);
+          markers.push(marker);
+          bounds.push([point.lat, point.lon]);
+        });
+
+        if (bounds.length === 1) {
+          map.setView(bounds[0], 13);
+        } else if (bounds.length > 1) {
+          map.fitBounds(bounds, { padding: [28, 28], maxZoom: 13 });
+        }
+      }
+
+      async function loadSuntrip() {
+        const res = await fetch("/public/suntrip.json", { cache: "no-store" });
+        const data = await res.json();
+        const latest = data.latest;
+        document.getElementById("empty").hidden = !!latest;
+        document.getElementById("content").hidden = !latest;
+        if (!latest) return;
+
+        if (latest.image_url !== latestImageUrl) {
+          latestImageUrl = latest.image_url;
+          document.getElementById("latest-photo").src = `${latest.image_url}?t=${encodeURIComponent(latest.uploaded_at || latest.captured_at || Date.now())}`;
+        }
+
+        setText("captured-at", latest.captured_at || "Dernière capture");
+        setText("time-since", formatAge(data.seconds_since_latest));
+        setText("session-label", `${latest.device_id || ""} · ${latest.session_id || ""}`);
+
+        const metrics = latest.metrics || {};
+        setText("speed", formatNumber(metrics.speed_kph, 1));
+        setText("distance", formatNumber(metrics.distance_km, 1));
+        setText("uphill", formatNumber(metrics.gps_uphill_m, 0));
+        setText("solar-power", formatNumber(metrics.solar_power_w, 0));
+        setText("generator-power", formatNumber(metrics.generator_power_w, 0));
+        setText("solar-total", formatNumber(metrics.solar_wh, 1));
+        renderMarkers(Array.isArray(data.points) ? data.points : []);
+      }
+
+      loadSuntrip();
+      setInterval(loadSuntrip, 30000);
+    </script>
+  </body>
+</html>

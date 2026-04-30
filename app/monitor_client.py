@@ -164,6 +164,26 @@ def monitor_upload_photo(
     if not url:
         raise RuntimeError("MONITOR_URL is not configured")
 
+    gps = get_status()
+    gps_ok = (
+        bool(gps.get("has_fix"))
+        and not gps.get("stale")
+        and gps.get("lat") is not None
+        and gps.get("lon") is not None
+    )
+    raw_values = state.latest_raw_values if isinstance(state.latest_raw_values, list) else []
+    voltage = _safe_float(raw_values[1] if len(raw_values) > 1 else None)
+    speed_kph = _safe_float(raw_values[3] if len(raw_values) > 3 else None)
+    generator_current_a = _safe_float(raw_values[13] if len(raw_values) > 13 else None)
+    generator_power_w = None
+    if voltage is not None and generator_current_a is not None:
+        generator_power_w = max(0.0, voltage * generator_current_a)
+    solar_power_w = _safe_float(state.solar_sensor.get("power_w"))
+    if solar_power_w is None:
+        solar_current_a = _safe_float(state.solar_sensor.get("current_a")) or 0.0
+        solar_bus_v = _safe_float(state.solar_sensor.get("bus_v")) or 0.0
+        solar_power_w = max(0.0, solar_current_a * solar_bus_v)
+    metrics = state.session_metrics
     payload = {
         "device_id": _device_id(),
         "session_id": state.session_id,
@@ -175,11 +195,43 @@ def monitor_upload_photo(
         "filename": filename,
         "mime_type": mime_type,
         "image_b64": base64.b64encode(image_bytes).decode("ascii"),
+        "gps_available": 1 if gps_ok else 0,
+        "gps_lat": gps.get("lat") if gps_ok else None,
+        "gps_lon": gps.get("lon") if gps_ok else None,
+        "gps_alt": gps.get("alt") if gps_ok else None,
+        "gps_speed_kph": gps.get("speed_kph") if gps_ok else None,
+        "gps_track_deg": gps.get("track_deg") if gps_ok else None,
+        "gps_fix": 1 if gps_ok else 0,
+        "gps_sats": gps.get("sats") if gps_ok else None,
+        "gps_hdop": gps.get("hdop") if gps_ok else None,
+        "speed_kph": speed_kph,
+        "session_distance_km": metrics.get("distance_km"),
+        "gps_uphill_m": metrics.get("gps_uphill_m"),
+        "solar_power_w": solar_power_w,
+        "generator_power_w": generator_power_w,
+        "solar_wh": metrics.get("solar_Wh"),
+        "metrics": {
+            "distance_km": metrics.get("distance_km"),
+            "gps_uphill_m": metrics.get("gps_uphill_m"),
+            "solar_Wh": metrics.get("solar_Wh"),
+            "speed_kph": speed_kph,
+            "solar_power_w": solar_power_w,
+            "generator_power_w": generator_power_w,
+        },
     }
     resp = _request_json("POST", f"{url}/api/upload_photo", payload, timeout=20)
     if resp.get("status") != "ok":
         raise RuntimeError(resp.get("error") or "photo upload failed")
     return resp
+
+
+def _safe_float(value) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
 
 
 def _send_heartbeat(url: str, device_id: str) -> None:

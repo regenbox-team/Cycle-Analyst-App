@@ -139,7 +139,22 @@ def _init_db() -> None:
                 relative_path TEXT,
                 uploaded_at TEXT,
                 test_mode INTEGER DEFAULT 0,
-                is_public INTEGER DEFAULT 1
+                is_public INTEGER DEFAULT 1,
+                gps_lat REAL,
+                gps_lon REAL,
+                gps_alt REAL,
+                gps_speed_kph REAL,
+                gps_track_deg REAL,
+                gps_fix INTEGER,
+                gps_sats INTEGER,
+                gps_hdop REAL,
+                speed_kph REAL,
+                session_distance_km REAL,
+                gps_uphill_m REAL,
+                solar_power_w REAL,
+                generator_power_w REAL,
+                solar_wh REAL,
+                metrics_json TEXT
             )
             """
         )
@@ -221,6 +236,21 @@ def _migrate_db() -> None:
         photo_missing = {
             "test_mode": "INTEGER DEFAULT 0",
             "is_public": "INTEGER DEFAULT 1",
+            "gps_lat": "REAL",
+            "gps_lon": "REAL",
+            "gps_alt": "REAL",
+            "gps_speed_kph": "REAL",
+            "gps_track_deg": "REAL",
+            "gps_fix": "INTEGER",
+            "gps_sats": "INTEGER",
+            "gps_hdop": "REAL",
+            "speed_kph": "REAL",
+            "session_distance_km": "REAL",
+            "gps_uphill_m": "REAL",
+            "solar_power_w": "REAL",
+            "generator_power_w": "REAL",
+            "solar_wh": "REAL",
+            "metrics_json": "TEXT",
         }
         for name, col_type in photo_missing.items():
             if name not in photo_columns:
@@ -385,6 +415,22 @@ def create_app() -> Flask:
         if not parsed:
             return None
         return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _safe_float(value) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    def _safe_int(value) -> int | None:
+        try:
+            if value is None:
+                return None
+            return int(value)
+        except Exception:
+            return None
 
     def _project_point(lat: float, lon: float, width: float = 1000, height: float = 500) -> tuple[float, float]:
         x = (lon + 180.0) / 360.0 * width
@@ -807,12 +853,21 @@ def create_app() -> Flask:
 
         uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with _get_db() as conn:
+            metrics_json = None
+            if data.get("metrics") is not None:
+                try:
+                    metrics_json = json.dumps(data.get("metrics"))
+                except Exception:
+                    metrics_json = None
             conn.execute(
                 """
                 INSERT INTO photos (
                     device_id, session_id, mode, captured_at, distance_km, interval_km,
-                    filename, mime_type, relative_path, uploaded_at, test_mode, is_public
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    filename, mime_type, relative_path, uploaded_at, test_mode, is_public,
+                    gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+                    speed_kph, session_distance_km, gps_uphill_m, solar_power_w, generator_power_w, solar_wh,
+                    metrics_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     device_id,
@@ -827,6 +882,21 @@ def create_app() -> Flask:
                     uploaded_at,
                     int(data.get("test_mode") or 0),
                     1,
+                    _safe_float(data.get("gps_lat")),
+                    _safe_float(data.get("gps_lon")),
+                    _safe_float(data.get("gps_alt")),
+                    _safe_float(data.get("gps_speed_kph")),
+                    _safe_float(data.get("gps_track_deg")),
+                    _safe_int(data.get("gps_fix")),
+                    _safe_int(data.get("gps_sats")),
+                    _safe_float(data.get("gps_hdop")),
+                    _safe_float(data.get("speed_kph")),
+                    _safe_float(data.get("session_distance_km")),
+                    _safe_float(data.get("gps_uphill_m")),
+                    _safe_float(data.get("solar_power_w")),
+                    _safe_float(data.get("generator_power_w")),
+                    _safe_float(data.get("solar_wh")),
+                    metrics_json,
                 ),
             )
             conn.commit()
@@ -989,6 +1059,101 @@ def create_app() -> Flask:
             "Content-Type": "application/gpx+xml; charset=utf-8",
         }
         return Response(gpx_text, headers=headers)
+
+    def _suntrip_photo_payload(row) -> dict[str, Any]:
+        image_url = url_for("photo_file", filename=row["relative_path"])
+        distance_km = row["session_distance_km"] if row["session_distance_km"] is not None else row["distance_km"]
+        speed_kph = row["speed_kph"] if row["speed_kph"] is not None else row["gps_speed_kph"]
+        return {
+            "id": row["id"],
+            "device_id": row["device_id"],
+            "session_id": row["session_id"],
+            "mode": row["mode"],
+            "captured_at": row["captured_at"],
+            "uploaded_at": row["uploaded_at"],
+            "distance_km": distance_km,
+            "capture_distance_km": row["distance_km"],
+            "interval_km": row["interval_km"],
+            "image_url": image_url,
+            "gps": {
+                "lat": row["gps_lat"],
+                "lon": row["gps_lon"],
+                "alt": row["gps_alt"],
+                "speed_kph": row["gps_speed_kph"],
+                "track_deg": row["gps_track_deg"],
+                "fix": bool(row["gps_fix"]),
+                "sats": row["gps_sats"],
+                "hdop": row["gps_hdop"],
+            },
+            "metrics": {
+                "speed_kph": speed_kph,
+                "distance_km": distance_km,
+                "gps_uphill_m": row["gps_uphill_m"],
+                "solar_power_w": row["solar_power_w"],
+                "generator_power_w": row["generator_power_w"],
+                "solar_wh": row["solar_wh"],
+            },
+        }
+
+    def _suntrip_payload(device_id: str | None = None) -> dict[str, Any]:
+        query = """
+            SELECT id, device_id, session_id, mode, captured_at, distance_km, interval_km,
+                   relative_path, uploaded_at, gps_lat, gps_lon, gps_alt, gps_speed_kph,
+                   gps_track_deg, gps_fix, gps_sats, gps_hdop, speed_kph, session_distance_km,
+                   gps_uphill_m, solar_power_w, generator_power_w, solar_wh
+            FROM photos
+            WHERE is_public = 1
+        """
+        params: list[Any] = []
+        if device_id:
+            query += " AND device_id = ?"
+            params.append(device_id)
+        query += " ORDER BY captured_at DESC, id DESC LIMIT 250"
+
+        with _get_db() as conn:
+            rows = conn.execute(query, params).fetchall()
+
+        photos = [_suntrip_photo_payload(row) for row in rows]
+        latest = photos[0] if photos else None
+        points = []
+        for photo in photos:
+            gps = photo["gps"]
+            lat = _safe_float(gps.get("lat"))
+            lon = _safe_float(gps.get("lon"))
+            if lat is None or lon is None or lat == 0 or lon == 0:
+                continue
+            points.append(
+                {
+                    "id": photo["id"],
+                    "lat": lat,
+                    "lon": lon,
+                    "captured_at": photo["captured_at"],
+                    "image_url": photo["image_url"],
+                    "latest": bool(latest and photo["id"] == latest["id"]),
+                }
+            )
+
+        seconds_since_latest = None
+        if latest:
+            latest_dt = _parse_ts(latest.get("uploaded_at"))
+            if latest_dt:
+                seconds_since_latest = max(0, int((datetime.now() - latest_dt).total_seconds()))
+
+        return {
+            "latest": latest,
+            "points": points,
+            "seconds_since_latest": seconds_since_latest,
+            "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    @app.route("/suntrip")
+    @app.route("/public/suntrip")
+    def public_suntrip_page():
+        return render_template("suntrip.html")
+
+    @app.route("/public/suntrip.json")
+    def public_suntrip_data():
+        return jsonify(_suntrip_payload(request.args.get("device_id")))
 
     @app.route("/media/photos/<path:filename>")
     def photo_file(filename: str):

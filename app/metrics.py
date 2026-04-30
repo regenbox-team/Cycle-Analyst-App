@@ -28,6 +28,10 @@ def _migrate_legacy_metrics(store: dict) -> None:
         store["solar_pct_per_km_last"] = []
     if "calories_burned" not in store:
         store["calories_burned"] = store.get("human_Wh", 0) * 1.433
+    if "gps_uphill_m" not in store:
+        store["gps_uphill_m"] = 0.0
+    if "last_gps_alt_m" not in store:
+        store["last_gps_alt_m"] = None
     photo_capture = store.get("photo_capture")
     defaults = default_photo_capture_settings()
     if not isinstance(photo_capture, dict):
@@ -76,6 +80,8 @@ def reset_session_state():
         "solar_pct_per_km_last": [],
         "last_regen_checkpoint": 0,
         "regen_pct_per_km_last": [],
+        "gps_uphill_m": 0.0,
+        "last_gps_alt_m": None,
         "photo_capture": default_photo_capture_settings(),
     })
 

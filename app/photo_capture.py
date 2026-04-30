@@ -163,6 +163,13 @@ def _capture_image() -> str:
             stderr=subprocess.DEVNULL,
             timeout=30,
         )
+    except FileNotFoundError as exc:
+        try:
+            os.remove(output_path)
+        except Exception:
+            pass
+        cmd_name = command[0] if command else "unknown"
+        raise RuntimeError(f"camera command not found: {cmd_name}") from exc
     except Exception:
         try:
             os.remove(output_path)
@@ -180,7 +187,11 @@ def _resolve_capture_command(output_path: str) -> list[str]:
         rendered = custom.format(output=output_path)
         if "{output}" not in custom:
             rendered = f"{rendered} {shlex.quote(output_path)}"
-        return shlex.split(rendered)
+        command = shlex.split(rendered)
+        if not command:
+            raise RuntimeError("APP_CAMERA_COMMAND is empty after parsing")
+        _validate_capture_command(command, source="APP_CAMERA_COMMAND")
+        return command
 
     libcamera = shutil.which("libcamera-still")
     if libcamera:
@@ -211,3 +222,13 @@ def _resolve_capture_command(output_path: str) -> list[str]:
         ]
 
     raise RuntimeError("no supported camera command found; set APP_CAMERA_COMMAND")
+
+
+def _validate_capture_command(command: list[str], source: str) -> None:
+    executable = command[0]
+    if os.path.sep in executable:
+        if not os.path.exists(executable):
+            raise RuntimeError(f"{source} points to missing executable: {executable}")
+        return
+    if not shutil.which(executable):
+        raise RuntimeError(f"{source} points to missing executable: {executable}")

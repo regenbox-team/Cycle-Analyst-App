@@ -67,6 +67,30 @@ def generate_fake_data():
     ]
 
 
+def _update_live_gps_climb() -> None:
+    gps = getattr(state, "gps_state", {}) or {}
+    if not gps.get("has_fix"):
+        return
+    alt = gps.get("alt")
+    if alt is None:
+        return
+    try:
+        alt_m = float(alt)
+    except Exception:
+        return
+
+    last_alt = state.session_metrics.get("last_gps_alt_m")
+    state.session_metrics["last_gps_alt_m"] = alt_m
+    if last_alt is None:
+        return
+    try:
+        diff = alt_m - float(last_alt)
+    except Exception:
+        return
+    if diff > 1.0:
+        state.session_metrics["gps_uphill_m"] = float(state.session_metrics.get("gps_uphill_m") or 0.0) + diff
+
+
 def read_serial():
     last_db_write_time = time.time()
     last_data_time = time.time()
@@ -193,6 +217,7 @@ def read_serial():
         now = time.time()
         if data is not None:
             update_metrics(data, now, solar_sample=solar_sample)
+            _update_live_gps_climb()
             maybe_schedule_photo_capture(state.session_metrics.get("distance_km"))
         elif solar_sample is not None:
             update_solar_only_metrics(solar_sample, now)
