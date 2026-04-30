@@ -49,6 +49,7 @@ var/
 # Monitor server DB
 monitor.db
 monitor_server/monitor.db
+monitor_server/media/
 
 # Local env files
 .env

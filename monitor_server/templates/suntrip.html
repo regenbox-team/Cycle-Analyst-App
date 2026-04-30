@@ -61,35 +61,66 @@
         display: flex;
         justify-content: space-between;
         gap: 18px;
-        align-items: flex-end;
+        align-items: flex-start;
         padding: 8px 0 18px;
+      }
+
+      .title-block {
+        min-width: 0;
       }
 
       .brand {
         margin: 0;
-        font-size: clamp(36px, 7vw, 92px);
+        font-size: clamp(36px, 6.5vw, 92px);
         line-height: 0.9;
         font-weight: 800;
         letter-spacing: 0;
       }
 
-      .status-block {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 8px;
+      .brand-sub {
+        margin-top: 8px;
         color: var(--muted);
-        font-size: 14px;
-        text-align: right;
+        font-size: clamp(24px, 3.6vw, 52px);
+        font-weight: 400;
+        line-height: 1;
+      }
+
+      .frame-container {
+        flex: none;
+        height: clamp(96px, 12vw, 160px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .frame-mask {
+        height: 100%;
+        aspect-ratio: 1400 / 800;
+        overflow: hidden;
+        background: transparent;
+      }
+
+      #supercycle3D-canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
       }
 
       .hero {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+
+      .media-grid {
         display: grid;
         grid-template-columns: minmax(0, 1.18fr) minmax(360px, 0.82fr);
         gap: 18px;
         align-items: start;
+        --media-height: 560px;
       }
 
+      .live-picture,
       .photo-panel,
       .map-panel,
       .metric {
@@ -98,19 +129,41 @@
         box-shadow: var(--shadow);
       }
 
-      .photo-panel {
-        position: relative;
+      .live-picture {
         border-radius: 8px;
         overflow: hidden;
       }
 
+      .photo-panel {
+        position: relative;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        overflow: hidden;
+        height: var(--media-height);
+        aspect-ratio: 640 / 480;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #dedede;
+      }
+
       .photo-panel img {
         width: 100%;
-        height: auto;
+        height: 100%;
         display: block;
         object-fit: contain;
-        background: #dedede;
-        filter: saturate(0);
+      }
+
+      .picture-strip {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        align-items: center;
+        min-height: 38px;
+        padding: 8px 12px;
+        border-top: 1px solid var(--line);
+        background: var(--panel);
       }
 
       .subtitle {
@@ -120,26 +173,15 @@
 
       .time-pill {
         flex: none;
-        border: 1px solid var(--ink);
-        background: var(--ink);
-        color: #fff;
-        border-radius: 999px;
-        padding: 10px 14px;
+        color: var(--ink);
         font-size: 14px;
         font-weight: 800;
-      }
-
-      .side {
-        display: flex;
-        flex-direction: column;
-        gap: 18px;
-        min-width: 0;
       }
 
       .map-panel {
         border-radius: 8px;
         overflow: hidden;
-        min-height: 420px;
+        height: calc(var(--media-height) + 39px);
         display: grid;
         grid-template-rows: auto 1fr;
         background: var(--paper);
@@ -171,12 +213,12 @@
 
       #suntrip-map {
         width: 100%;
-        min-height: 360px;
+        min-height: 0;
       }
 
       .metrics {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: 12px;
       }
 
@@ -185,6 +227,10 @@
         padding: 14px 16px;
         min-height: 92px;
         background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 12px;
       }
 
       .metric-label {
@@ -221,33 +267,48 @@
         font-size: 10px;
       }
 
-      .leaflet-tile-pane {
-        filter: grayscale(1) contrast(0.92) brightness(1.04);
-      }
-
       @media (max-width: 980px) {
         .page { padding: 12px; }
         .topbar {
           align-items: flex-start;
-          flex-direction: column;
         }
-        .status-block {
-          align-items: flex-start;
-          text-align: left;
+        .frame-container {
+          height: clamp(84px, 22vw, 132px);
         }
-        .hero {
+        .media-grid {
           grid-template-columns: 1fr;
-          min-height: 0;
+          --media-height: auto;
+        }
+        .photo-panel {
+          height: auto;
+        }
+        .photo-panel img {
+          height: auto;
         }
         .map-panel {
+          height: auto;
           min-height: 380px;
         }
         #suntrip-map {
           min-height: 310px;
         }
+        .metrics {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
 
       @media (max-width: 560px) {
+        .topbar {
+          flex-direction: column;
+        }
+        .frame-container {
+          width: 100%;
+          height: auto;
+        }
+        .frame-mask {
+          width: min(100%, 360px);
+          height: auto;
+        }
         .metrics {
           grid-template-columns: 1fr;
         }
@@ -258,24 +319,38 @@
         .session {
           text-align: left;
         }
+        .picture-strip {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 4px;
+        }
       }
     </style>
   </head>
   <body>
     <main class="page">
       <header id="topbar" class="topbar" hidden>
-        <h1 class="brand">Supercycle<br>Sun Trip</h1>
-        <div class="status-block">
-          <div class="time-pill" id="time-since">--</div>
-          <div class="subtitle" id="captured-at">Dernière capture</div>
+        <div class="title-block">
+          <h1 class="brand">Sun Trip 2026</h1>
+          <div class="brand-sub">Supercycle</div>
+        </div>
+        <div id="supercycle3D-container" class="frame-container" aria-label="Animation Supercycle">
+          <div id="supercycle3D-mask" class="frame-mask">
+            <canvas id="supercycle3D-canvas"></canvas>
+          </div>
         </div>
       </header>
       <section id="content" class="hero" hidden>
-        <article class="photo-panel">
-          <img id="latest-photo" alt="Dernière photo du Supercycle">
-        </article>
-
-        <aside class="side">
+        <div class="media-grid">
+          <article class="live-picture">
+            <div class="photo-panel">
+              <img id="latest-photo" alt="Dernière photo du Supercycle">
+            </div>
+            <div class="picture-strip">
+              <div class="subtitle" id="captured-at">Dernière capture</div>
+              <div class="time-pill" id="time-since">--</div>
+            </div>
+          </article>
           <section class="map-panel">
             <div class="panel-head">
               <div class="panel-title">Position des photos</div>
@@ -283,34 +358,34 @@
             </div>
             <div id="suntrip-map"></div>
           </section>
+        </div>
 
-          <section class="metrics" aria-label="Métriques de session">
-            <div class="metric">
-              <div class="metric-label">Vitesse actuelle</div>
-              <div class="metric-value"><span id="speed">--</span><span class="metric-unit">km/h</span></div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">Distance parcourue aujourd'hui</div>
-              <div class="metric-value"><span id="distance">--</span><span class="metric-unit">km</span></div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">Dénivelé du jour</div>
-              <div class="metric-value"><span id="uphill">--</span><span class="metric-unit">m</span></div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">Puissance solaire</div>
-              <div class="metric-value"><span id="solar-power">--</span><span class="metric-unit">W</span></div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">Puissance musculaire</div>
-              <div class="metric-value"><span id="generator-power">--</span><span class="metric-unit">W</span></div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">Production solaire de la journée</div>
-              <div class="metric-value"><span id="solar-total">--</span><span class="metric-unit">Wh</span></div>
-            </div>
-          </section>
-        </aside>
+        <section class="metrics" aria-label="Métriques de session">
+          <div class="metric">
+            <div class="metric-label">Vitesse actuelle</div>
+            <div class="metric-value"><span id="speed">--</span><span class="metric-unit">km/h</span></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Distance parcourue aujourd'hui</div>
+            <div class="metric-value"><span id="distance">--</span><span class="metric-unit">km</span></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Dénivelé du jour</div>
+            <div class="metric-value"><span id="uphill">--</span><span class="metric-unit">m</span></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Puissance solaire</div>
+            <div class="metric-value"><span id="solar-power">--</span><span class="metric-unit">W</span></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Puissance musculaire</div>
+            <div class="metric-value"><span id="generator-power">--</span><span class="metric-unit">W</span></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Production solaire de la journée</div>
+            <div class="metric-value"><span id="solar-total">--</span><span class="metric-unit">Wh</span></div>
+          </div>
+        </section>
       </section>
     </main>
 
@@ -323,6 +398,64 @@
       let map;
       let markers = [];
       let latestImageUrl = "";
+
+      function initFrameCanvas() {
+        const totalFrames = 20;
+        const baseURL = "/static/img/monitor/";
+        const ext = ".webp";
+        const canvas = document.getElementById("supercycle3D-canvas");
+        const mask = document.getElementById("supercycle3D-mask");
+        if (!canvas || !mask) return;
+        const ctx = canvas.getContext("2d");
+        const frames = [];
+        let currentFrame = 0;
+
+        function pad(n) {
+          return n.toString().padStart(4, "0");
+        }
+
+        function resizeCanvas() {
+          const rect = mask.getBoundingClientRect();
+          const dpr = window.devicePixelRatio || 1;
+          canvas.width = Math.max(1, Math.round(rect.width * dpr));
+          canvas.height = Math.max(1, Math.round(rect.height * dpr));
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          drawFrame(currentFrame);
+        }
+
+        function drawFrame(index) {
+          currentFrame = Math.max(0, Math.min(totalFrames - 1, index));
+          const img = frames[currentFrame];
+          if (!img || !img.complete || !img.naturalWidth) return;
+
+          const width = canvas.width / (window.devicePixelRatio || 1);
+          const height = canvas.height / (window.devicePixelRatio || 1);
+          ctx.clearRect(0, 0, width, height);
+
+          const scale = Math.max(width / img.naturalWidth, height / img.naturalHeight);
+          const drawWidth = img.naturalWidth * scale;
+          const drawHeight = img.naturalHeight * scale;
+          const offsetX = (width - drawWidth) / 2;
+          const offsetY = (height - drawHeight) / 2;
+          ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+        }
+
+        for (let i = 1; i <= totalFrames; i++) {
+          const img = new Image();
+          img.src = `${baseURL}${pad(i)}${ext}`;
+          frames.push(img);
+        }
+
+        mask.addEventListener("pointermove", event => {
+          const rect = mask.getBoundingClientRect();
+          const percent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+          drawFrame(Math.floor(percent * totalFrames));
+        });
+
+        frames[0].onload = () => drawFrame(0);
+        resizeCanvas();
+        window.addEventListener("resize", resizeCanvas);
+      }
 
       function formatAge(seconds) {
         if (seconds == null) return "--";
@@ -415,6 +548,7 @@
         renderMarkers(Array.isArray(data.points) ? data.points : []);
       }
 
+      initFrameCanvas();
       loadSuntrip();
       setInterval(loadSuntrip, 30000);
     </script>
