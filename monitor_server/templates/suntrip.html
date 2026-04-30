@@ -47,9 +47,7 @@
         margin: 0;
         min-height: 100vh;
         color: var(--ink);
-        background:
-          linear-gradient(180deg, rgba(250, 250, 250, 0.96), rgba(228, 228, 228, 0.96)),
-          repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.035) 0 1px, transparent 1px 72px);
+        background: var(--bg);
         font-family: "Apfel Grotesk", "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
       }
 
@@ -59,12 +57,37 @@
         padding: 18px;
       }
 
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        align-items: flex-end;
+        padding: 8px 0 18px;
+      }
+
+      .brand {
+        margin: 0;
+        font-size: clamp(36px, 7vw, 92px);
+        line-height: 0.9;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .status-block {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 14px;
+        text-align: right;
+      }
+
       .hero {
         display: grid;
         grid-template-columns: minmax(0, 1.18fr) minmax(360px, 0.82fr);
         gap: 18px;
-        min-height: calc(100vh - 36px);
-        align-items: stretch;
+        align-items: start;
       }
 
       .photo-panel,
@@ -77,53 +100,29 @@
 
       .photo-panel {
         position: relative;
-        min-height: 560px;
         border-radius: 8px;
         overflow: hidden;
       }
 
       .photo-panel img {
         width: 100%;
-        height: 100%;
+        height: auto;
         display: block;
-        object-fit: cover;
+        object-fit: contain;
         background: #dedede;
         filter: saturate(0);
       }
 
-      .photo-overlay {
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        display: flex;
-        justify-content: space-between;
-        gap: 16px;
-        align-items: end;
-        padding: 22px;
-        color: #fff;
-        background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.66));
-      }
-
-      .brand {
-        margin: 0;
-        font-size: clamp(28px, 4vw, 58px);
-        line-height: 0.94;
-        font-weight: 800;
-        letter-spacing: 0;
-      }
-
       .subtitle {
-        margin-top: 8px;
         font-size: 14px;
-        color: rgba(255, 255, 255, 0.86);
+        color: var(--muted);
       }
 
       .time-pill {
         flex: none;
-        border: 1px solid rgba(255, 255, 255, 0.38);
-        background: rgba(18, 18, 18, 0.72);
-        backdrop-filter: blur(10px);
+        border: 1px solid var(--ink);
+        background: var(--ink);
+        color: #fff;
         border-radius: 999px;
         padding: 10px 14px;
         font-size: 14px;
@@ -185,7 +184,7 @@
         border-radius: 8px;
         padding: 14px 16px;
         min-height: 92px;
-        background: linear-gradient(180deg, #fff, var(--panel-soft));
+        background: var(--panel);
       }
 
       .metric-label {
@@ -228,16 +227,17 @@
 
       @media (max-width: 980px) {
         .page { padding: 12px; }
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .status-block {
+          align-items: flex-start;
+          text-align: left;
+        }
         .hero {
           grid-template-columns: 1fr;
           min-height: 0;
-        }
-        .photo-panel {
-          min-height: 58vh;
-        }
-        .photo-overlay {
-          align-items: start;
-          flex-direction: column;
         }
         .map-panel {
           min-height: 380px;
@@ -250,9 +250,6 @@
       @media (max-width: 560px) {
         .metrics {
           grid-template-columns: 1fr;
-        }
-        .photo-panel {
-          min-height: 62vh;
         }
         .panel-head {
           align-items: flex-start;
@@ -267,16 +264,16 @@
   <body>
     <main class="page">
       <div id="empty" class="empty" hidden>Aucune photo publique pour le moment.</div>
+      <header id="topbar" class="topbar" hidden>
+        <h1 class="brand">Supercycle<br>Sun Trip</h1>
+        <div class="status-block">
+          <div class="time-pill" id="time-since">--</div>
+          <div class="subtitle" id="captured-at">Dernière capture</div>
+        </div>
+      </header>
       <section id="content" class="hero" hidden>
         <article class="photo-panel">
           <img id="latest-photo" alt="Dernière photo du Supercycle">
-          <div class="photo-overlay">
-            <div>
-              <h1 class="brand">Supercycle<br>Sun Trip</h1>
-              <div class="subtitle" id="captured-at">Dernière capture</div>
-            </div>
-            <div class="time-pill" id="time-since">--</div>
-          </div>
         </article>
 
         <aside class="side">
@@ -290,27 +287,27 @@
 
           <section class="metrics" aria-label="Métriques de session">
             <div class="metric">
-              <div class="metric-label">Vitesse</div>
+              <div class="metric-label">Vitesse actuelle</div>
               <div class="metric-value"><span id="speed">--</span><span class="metric-unit">km/h</span></div>
             </div>
             <div class="metric">
-              <div class="metric-label">Distance session</div>
+              <div class="metric-label">Distance parcourue aujourd'hui</div>
               <div class="metric-value"><span id="distance">--</span><span class="metric-unit">km</span></div>
             </div>
             <div class="metric">
-              <div class="metric-label">Dénivelé +</div>
+              <div class="metric-label">Dénivelé du jour</div>
               <div class="metric-value"><span id="uphill">--</span><span class="metric-unit">m</span></div>
             </div>
             <div class="metric">
-              <div class="metric-label">Solaire instantané</div>
+              <div class="metric-label">Puissance solaire</div>
               <div class="metric-value"><span id="solar-power">--</span><span class="metric-unit">W</span></div>
             </div>
             <div class="metric">
-              <div class="metric-label">Génératrice instantanée</div>
+              <div class="metric-label">Puissance musculaire</div>
               <div class="metric-value"><span id="generator-power">--</span><span class="metric-unit">W</span></div>
             </div>
             <div class="metric">
-              <div class="metric-label">Solaire session</div>
+              <div class="metric-label">Production solaire de la journée</div>
               <div class="metric-value"><span id="solar-total">--</span><span class="metric-unit">Wh</span></div>
             </div>
           </section>
@@ -398,6 +395,7 @@
         const latest = data.latest;
         document.getElementById("empty").hidden = !!latest;
         document.getElementById("content").hidden = !latest;
+        document.getElementById("topbar").hidden = !latest;
         if (!latest) return;
 
         if (latest.image_url !== latestImageUrl) {
