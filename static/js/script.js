@@ -7,6 +7,9 @@ const END_ANGLE = 126;
 
 let isLongRange = false;
 let metricsPaused = false;
+const photoPreviewState = {
+  lastImageKey: null
+};
 const powerHistoryState = {
   motor: true,
   human: true,
@@ -772,6 +775,64 @@ function updateFlagsDisplay(flagString) {
   });
 }
 
+function updatePhotoPreview(photoCapture) {
+  const box = document.getElementById("photo-preview-box");
+  const status = document.getElementById("photo-preview-status");
+  const interval = document.getElementById("photo-preview-interval");
+  const count = document.getElementById("photo-preview-count");
+  const captured = document.getElementById("photo-preview-captured");
+  const uploaded = document.getElementById("photo-preview-uploaded");
+  const link = document.getElementById("photo-preview-link");
+  const image = document.getElementById("photo-preview-image");
+  if (!box || !status || !interval || !count || !captured || !uploaded || !link || !image) return;
+
+  const cfg = (photoCapture && typeof photoCapture === "object") ? photoCapture : {};
+  const enabled = !!cfg.enabled;
+  box.hidden = !enabled;
+  if (!enabled) {
+    photoPreviewState.lastImageKey = null;
+    image.hidden = true;
+    link.hidden = true;
+    status.classList.remove("error");
+    return;
+  }
+
+  interval.textContent = `Every: ${num(cfg.interval_km, 0).toFixed(1)} km`;
+  count.textContent = `Captures: ${num(cfg.capture_count, 0).toFixed(0)}`;
+  captured.textContent = `Captured: ${cfg.last_captured_at || "–"}`;
+  uploaded.textContent = `Uploaded: ${cfg.last_uploaded_at || "–"}`;
+
+  const imageUrl = cfg.latest_local_url || cfg.latest_public_url || "";
+  const cacheToken = encodeURIComponent(cfg.last_captured_at || cfg.last_uploaded_at || "");
+  const imageKey = imageUrl ? `${imageUrl}|${cacheToken}` : null;
+
+  if (cfg.last_error) {
+    status.textContent = `Capture error: ${cfg.last_error}`;
+    status.classList.add("error");
+  } else if (imageUrl) {
+    status.textContent = "Last capture available.";
+    status.classList.remove("error");
+  } else {
+    status.textContent = "Waiting for first capture.";
+    status.classList.remove("error");
+  }
+
+  if (imageUrl) {
+    if (imageKey !== photoPreviewState.lastImageKey) {
+      const separator = imageUrl.includes("?") ? "&" : "?";
+      image.src = `${imageUrl}${separator}t=${cacheToken || Date.now()}`;
+      link.href = image.src;
+      photoPreviewState.lastImageKey = imageKey;
+    }
+    image.hidden = false;
+    link.hidden = false;
+  } else {
+    image.hidden = true;
+    link.hidden = true;
+    photoPreviewState.lastImageKey = null;
+  }
+}
+
 function showAhPopup() {
   document.getElementById("ah-popup").style.display = "block";
 }
@@ -828,6 +889,8 @@ async function fetchMetrics() {
     } else {
       hideCaResetPopup();
     }
+
+    updatePhotoPreview(json.photo_capture);
 
     // Speed
     updateSpeedometer(

@@ -11,6 +11,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from . import state
+from .config import LIVE_PHOTO_DIR
 from .monitor_client import monitor_upload_photo
 
 
@@ -43,7 +44,9 @@ def configure_session_photo_capture(enabled: bool, interval_km) -> None:
             "interval_km": normalize_interval_km(interval_km),
             "last_trigger_distance_km": 0.0,
             "capture_count": 0,
+            "last_captured_at": None,
             "last_uploaded_at": None,
+            "latest_local_path": None,
             "latest_public_url": None,
             "last_error": None,
         }
@@ -101,10 +104,12 @@ def _capture_and_upload(trigger_distance_km: float, interval_km: float) -> None:
         temp_path = None
         try:
             temp_path = _capture_image()
+            captured_at = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
+            cfg["last_captured_at"] = captured_at
+            cfg["latest_local_path"] = _persist_local_preview(temp_path)
             mime_type = mimetypes.guess_type(temp_path)[0] or "image/jpeg"
             with open(temp_path, "rb") as f:
                 image_bytes = f.read()
-            captured_at = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
             response = monitor_upload_photo(
                 image_bytes=image_bytes,
                 filename=os.path.basename(temp_path),
@@ -126,6 +131,24 @@ def _capture_and_upload(trigger_distance_km: float, interval_km: float) -> None:
                     os.remove(temp_path)
                 except Exception:
                     pass
+
+
+def latest_local_photo_path() -> str | None:
+    cfg = _photo_config()
+    path = cfg.get("latest_local_path")
+    if not path:
+        return None
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return path
+    return None
+
+
+def _persist_local_preview(source_path: str) -> str:
+    session_name = state.session_id or "current"
+    safe_name = session_name.replace("/", "_")
+    output_path = os.path.join(LIVE_PHOTO_DIR, f"{safe_name}.jpg")
+    shutil.copyfile(source_path, output_path)
+    return output_path
 
 
 def _capture_image() -> str:

@@ -1,11 +1,12 @@
 from __future__ import annotations
 import sqlite3
-from flask import render_template, jsonify, redirect, request
+from flask import render_template, jsonify, redirect, request, send_file
 
 from app.config import get_db_file, VEHICLE_CONFIGS
 from app.modes import vehicle_mode
 from app import state
 from app.metrics import update_metrics  # re-export compatibility
+from app.photo_capture import latest_local_photo_path
 from app.reader import parse_line
 
 
@@ -14,6 +15,12 @@ def _get_metrics_payload():
     total_Wh = sm["positive_Wh"] + sm["regen_Wh"]
     net_Wh = sm["positive_Wh"] - sm["regen_Wh"] - sm["human_Wh"] - sm["solar_Wh"]
     distance = max(sm["distance_km"], 0.001)
+    photo_cfg = sm.get("photo_capture")
+    if not isinstance(photo_cfg, dict):
+        photo_cfg = {}
+    latest_local_url = None
+    if latest_local_photo_path():
+        latest_local_url = "/photo_capture/latest"
 
     base_ah = (state.latest_raw_values[0] if state.latest_raw_values else 0)
     ah_used_gross = base_ah + sm.get("ah_offset", 0.0)
@@ -41,6 +48,17 @@ def _get_metrics_payload():
         "battery_capacity_ah": capacity_ah,
         "ca_reset_detected": sm.get("ca_reset_detected", False),
         "ca_reset_prompt": sm.get("ca_reset_prompt", False),
+        "photo_capture": {
+            "enabled": bool(photo_cfg.get("enabled")),
+            "interval_km": photo_cfg.get("interval_km"),
+            "last_trigger_distance_km": photo_cfg.get("last_trigger_distance_km"),
+            "capture_count": int(photo_cfg.get("capture_count") or 0),
+            "last_captured_at": photo_cfg.get("last_captured_at"),
+            "last_uploaded_at": photo_cfg.get("last_uploaded_at"),
+            "latest_local_url": latest_local_url,
+            "latest_public_url": photo_cfg.get("latest_public_url"),
+            "last_error": photo_cfg.get("last_error"),
+        },
         "solar_sensor": state.solar_sensor,
         "battery_ah_used_gross": ah_used_gross,
         "battery_ah_used_net": ah_used,
@@ -209,6 +227,13 @@ def live_logs_page():
     return render_template("live_logs.html")
 
 
+def latest_photo():
+    path = latest_local_photo_path()
+    if not path:
+        return jsonify({"error": "no local photo available"}), 404
+    return send_file(path, mimetype="image/jpeg")
+
+
 def create_blueprint():
     from flask import Blueprint
     bp = Blueprint("core", __name__)
@@ -219,6 +244,7 @@ def create_blueprint():
     bp.add_url_rule("/", view_func=root)
     bp.add_url_rule("/dashboard", view_func=dashboard)
     bp.add_url_rule("/live_logs", view_func=live_logs_page)
+    bp.add_url_rule("/photo_capture/latest", view_func=latest_photo)
     return bp
 
 
@@ -230,3 +256,4 @@ def register(app):
     app.add_url_rule("/", view_func=root)
     app.add_url_rule("/dashboard", view_func=dashboard)
     app.add_url_rule("/live_logs", view_func=live_logs_page)
+    app.add_url_rule("/photo_capture/latest", view_func=latest_photo)

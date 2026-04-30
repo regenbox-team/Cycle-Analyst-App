@@ -287,6 +287,7 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 .bar-box, .chart-box, .range-box {
   grid-column: 1 / -1;
 }
+.photo-preview-box { grid-column: 1 / -1; }
 /* Map box full width like other wide sections */
 .map-box { grid-column: 1 / -1; }
 
@@ -428,6 +429,53 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 .solar-box,
 .power-history-box {
   padding-top: 1.3rem;
+}
+
+.photo-preview-box {
+  padding-top: 1.3rem;
+  align-items: stretch;
+}
+
+.photo-preview-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  width: 100%;
+}
+
+.photo-preview-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--text-dark);
+  text-align: left;
+}
+
+.photo-preview-status {
+  font-size: 0.72rem;
+  font-weight: bold;
+}
+
+.photo-preview-status.error {
+  color: #8b1e1e;
+}
+
+.photo-preview-meta-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: var(--font-medium);
+  color: #444;
+}
+
+.photo-preview-image {
+  width: 100%;
+  max-height: 22rem;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(0,0,0,0.18);
+  background: #111;
 }
 
 .power-trends-controls {

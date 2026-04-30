@@ -53,7 +53,9 @@ def default_photo_capture_settings() -> dict:
         "interval_km": 1.0,
         "last_trigger_distance_km": 0.0,
         "capture_count": 0,
+        "last_captured_at": None,
         "last_uploaded_at": None,
+        "latest_local_path": None,
         "latest_public_url": None,
         "last_error": None,
     }
