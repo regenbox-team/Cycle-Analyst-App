@@ -116,8 +116,7 @@
         display: grid;
         grid-template-columns: minmax(0, 1.18fr) minmax(360px, 0.82fr);
         gap: 18px;
-        align-items: start;
-        --media-height: 560px;
+        align-items: stretch;
       }
 
       .live-picture,
@@ -132,15 +131,18 @@
       .live-picture {
         border-radius: 8px;
         overflow: hidden;
+        display: flex;
+        flex-direction: column;
       }
 
       .photo-panel {
         position: relative;
+        width: 100%;
         border: 0;
         border-radius: 0;
         box-shadow: none;
         overflow: hidden;
-        height: var(--media-height);
+        height: auto;
         aspect-ratio: 640 / 480;
         display: flex;
         align-items: center;
@@ -181,7 +183,8 @@
       .map-panel {
         border-radius: 8px;
         overflow: hidden;
-        height: calc(var(--media-height) + 39px);
+        height: auto;
+        min-height: 0;
         display: grid;
         grid-template-rows: auto 1fr;
         background: var(--paper);
@@ -277,16 +280,8 @@
         }
         .media-grid {
           grid-template-columns: 1fr;
-          --media-height: auto;
-        }
-        .photo-panel {
-          height: auto;
-        }
-        .photo-panel img {
-          height: auto;
         }
         .map-panel {
-          height: auto;
           min-height: 380px;
         }
         #suntrip-map {
@@ -299,14 +294,24 @@
 
       @media (max-width: 560px) {
         .topbar {
-          flex-direction: column;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          gap: 12px;
+          align-items: center;
+        }
+        .brand {
+          font-size: clamp(34px, 11vw, 54px);
+        }
+        .brand-sub {
+          font-size: clamp(24px, 7vw, 38px);
         }
         .frame-container {
           width: 100%;
           height: auto;
+          justify-content: flex-end;
         }
         .frame-mask {
-          width: min(100%, 360px);
+          width: 100%;
           height: auto;
         }
         .metrics {
@@ -409,6 +414,9 @@
         const ctx = canvas.getContext("2d");
         const frames = [];
         let currentFrame = 0;
+        let mobileLoopId = null;
+        let mobileDirection = 1;
+        const mobileQuery = window.matchMedia("(max-width: 560px)");
 
         function pad(n) {
           return n.toString().padStart(4, "0");
@@ -440,6 +448,31 @@
           ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
         }
 
+        function stepMobileLoop() {
+          let nextFrame = currentFrame + mobileDirection;
+          if (nextFrame >= totalFrames - 1) {
+            nextFrame = totalFrames - 1;
+            mobileDirection = -1;
+          } else if (nextFrame <= 0) {
+            nextFrame = 0;
+            mobileDirection = 1;
+          }
+          drawFrame(nextFrame);
+        }
+
+        function syncMobileLoop() {
+          if (mobileQuery.matches) {
+            if (!mobileLoopId) {
+              mobileLoopId = window.setInterval(stepMobileLoop, 100);
+            }
+            return;
+          }
+          if (mobileLoopId) {
+            window.clearInterval(mobileLoopId);
+            mobileLoopId = null;
+          }
+        }
+
         for (let i = 1; i <= totalFrames; i++) {
           const img = new Image();
           img.src = `${baseURL}${pad(i)}${ext}`;
@@ -447,6 +480,7 @@
         }
 
         mask.addEventListener("pointermove", event => {
+          if (mobileQuery.matches) return;
           const rect = mask.getBoundingClientRect();
           const percent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
           drawFrame(Math.floor(percent * totalFrames));
@@ -455,6 +489,8 @@
         frames[0].onload = () => drawFrame(0);
         resizeCanvas();
         window.addEventListener("resize", resizeCanvas);
+        mobileQuery.addEventListener("change", syncMobileLoop);
+        syncMobileLoop();
       }
 
       function formatAge(seconds) {
