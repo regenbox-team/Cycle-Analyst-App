@@ -3,12 +3,20 @@ import base64
 import json
 import os
 import sqlite3
+import sys
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Any
 from xml.sax.saxutils import escape
 
 from flask import Flask, jsonify, request, render_template, Response, send_from_directory, url_for
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT in sys.path:
+    sys.path.remove(REPO_ROOT)
+sys.path.insert(0, REPO_ROOT)
+
+from app.session_summary import compute_session_metrics, format_metric_value, safe_div
 
 
 TELEMETRY_TABLE = "telemetry_samples"
@@ -274,6 +282,29 @@ def _parse_distance_km(raw: str | None) -> float | None:
         return float(parts[4])
     except Exception:
         return None
+
+
+def _session_map_summary_tiles(metrics: dict[str, Any]) -> list[dict[str, str]]:
+    total_Wh = metrics["positive_Wh"] + metrics["regen_Wh"]
+    net_Wh = metrics["positive_Wh"] - metrics["regen_Wh"] - metrics["human_Wh"] - metrics["solar_Wh"]
+    return [
+        {"label": "CA distance", "value": format_metric_value(metrics["distance"], "km")},
+        {"label": "GPS distance", "value": format_metric_value(metrics["gps_distance_km"], "km")},
+        {"label": "GPS/CA delta", "value": format_metric_value(metrics["gps_distance_km"] - metrics["distance"], "km")},
+        {"label": "Net efficiency", "value": format_metric_value(safe_div(net_Wh, metrics["distance"]), "Wh/km")},
+        {"label": "Solar energy", "value": format_metric_value(metrics["solar_Wh"], "Wh")},
+        {"label": "Solar per km", "value": format_metric_value(safe_div(metrics["solar_Wh"], metrics["distance"]), "Wh/km")},
+        {"label": "Solar share", "value": format_metric_value(100 * safe_div(metrics["solar_Wh"], total_Wh), "%")},
+        {"label": "Human energy", "value": format_metric_value(metrics["human_Wh"], "Wh")},
+        {"label": "Regen energy", "value": format_metric_value(metrics["regen_Wh"], "Wh")},
+        {"label": "GPS climb", "value": format_metric_value(metrics["gps_uphill_m"], "m")},
+        {"label": "GPS descent", "value": format_metric_value(metrics["gps_downhill_m"], "m")},
+        {"label": "GPS fix coverage", "value": format_metric_value(100 * safe_div(metrics["gps_fix_count"], metrics["gps_fix_samples"]), "%")},
+        {"label": "Avg GPS satellites", "value": format_metric_value(safe_div(metrics["gps_sats_sum"], metrics["gps_sats_count"]), "")},
+        {"label": "Avg GPS HDOP", "value": format_metric_value(safe_div(metrics["gps_hdop_sum"], metrics["gps_hdop_count"]), "")},
+        {"label": "Avg solar power", "value": format_metric_value(safe_div(metrics["solar_power_sum"], metrics["solar_power_count"]), "W")},
+        {"label": "Max solar power", "value": format_metric_value(metrics["solar_power_max"], "W")},
+    ]
 
 
 def _photo_extension(filename: str | None, mime_type: str | None) -> str:
@@ -1072,22 +1103,44 @@ def create_app() -> Flask:
             ).fetchone()
             rows = conn.execute(
                 f"""
-                SELECT timestamp, gps_lat, gps_lon, gps_alt
+                SELECT timestamp, raw, user,
+                       gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+                       solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c
                 FROM {TELEMETRY_TABLE}
                 WHERE device_id = ? AND session_id = ? AND mode = ?
-                  AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
-                  AND gps_lat != 0 AND gps_lon != 0
                 ORDER BY id
                 """,
                 (device_id, session_id, mode),
             ).fetchall()
 
         points = []
+        samples = []
         for row in rows:
+            sample = {
+                "timestamp": row["timestamp"],
+                "raw": row["raw"],
+                "user": row["user"],
+                "gps_lat": row["gps_lat"],
+                "gps_lon": row["gps_lon"],
+                "gps_alt": row["gps_alt"],
+                "gps_speed_kph": row["gps_speed_kph"],
+                "gps_track_deg": row["gps_track_deg"],
+                "gps_fix": row["gps_fix"],
+                "gps_sats": row["gps_sats"],
+                "gps_hdop": row["gps_hdop"],
+                "solar_current_a": row["solar_current_a"],
+                "solar_bus_v": row["solar_bus_v"],
+                "solar_shunt_v": row["solar_shunt_v"],
+                "solar_power_w": row["solar_power_w"],
+                "solar_temperature_c": row["solar_temperature_c"],
+            }
+            samples.append(sample)
             try:
                 lat = float(row["gps_lat"])
                 lon = float(row["gps_lon"])
             except Exception:
+                continue
+            if lat == 0 or lon == 0:
                 continue
             point = {"lat": lat, "lon": lon}
             if row["gps_alt"] is not None:
@@ -1099,6 +1152,7 @@ def create_app() -> Flask:
             if time_str:
                 point["time"] = time_str
             points.append(point)
+        summary_metrics = compute_session_metrics(samples)
 
         return render_template(
             "session_map.html",
@@ -1116,6 +1170,7 @@ def create_app() -> Flask:
             end_ts=_format_dt(session_row["end_ts"]) if session_row else "",
             distance_km=session_row["distance_km"] if session_row else None,
             rows_count=session_row["rows_count"] if session_row else None,
+            summary_tiles=_session_map_summary_tiles(summary_metrics),
         )
 
     return app

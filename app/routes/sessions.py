@@ -9,6 +9,7 @@ from app import state
 from app.reader import parse_line
 from app.metrics import reset_session_state, restore_session_metrics
 from app.photo_capture import configure_session_photo_capture, normalize_interval_km
+from app.session_summary import build_summary_table, compute_session_metrics, group_samples_by_user
 
 
 def start_page():
@@ -127,13 +128,12 @@ def summary():
     if not session_id:
         return "Missing session ID", 400
 
-    import datetime
-    from collections import defaultdict
-
     with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         rows = conn.execute(
             """
-            SELECT user, timestamp, raw, solar_current_a, solar_bus_v, solar_shunt_v
+            SELECT user, timestamp, raw,
+                   gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+                   solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c
             FROM logs
             WHERE session = ?
             ORDER BY id
@@ -141,157 +141,33 @@ def summary():
             (session_id,)
         ).fetchall()
 
-    def _parse_line(line):
-        try:
-            parts = line.strip().split()
-            if len(parts) != 15:
-                return None
-            return [float(x) for x in parts[:14]] + [parts[14]]
-        except Exception:
-            return None
-
-    user_data = defaultdict(list)
-    timestamps = defaultdict(list)
-
-    for user, ts, raw, solar_current_a, solar_bus_v, solar_shunt_v in rows:
-        parsed = _parse_line(raw)
-        if not parsed or not user:
-            continue
-        user_data[user].append((parsed, solar_current_a, solar_bus_v, solar_shunt_v))
-        timestamps[user].append(ts)
-
-    def compute_metrics(data, ts_list):
-        m = {
-            "speed_sum": 0, "speed_max": 0, "speed_count": 0,
-            "power_sum": 0, "power_max": float('-inf'), "power_min": float('inf'),
-            "human_power_sum": 0, "human_power_max": 0, "human_power_count": 0,
-            "solar_power_sum": 0, "solar_power_max": 0, "solar_power_count": 0,
-            "positive_Wh": 0, "regen_Wh": 0, "human_Wh": 0, "solar_Wh": 0,
-            "temp_sum": 0, "temp_max": 0, "temp_count": 0,
-            "distance_start": None, "distance_end": None,
-            "Ah": 0
+    samples = [
+        {
+            "user": row[0],
+            "timestamp": row[1],
+            "raw": row[2],
+            "gps_lat": row[3],
+            "gps_lon": row[4],
+            "gps_alt": row[5],
+            "gps_speed_kph": row[6],
+            "gps_track_deg": row[7],
+            "gps_fix": row[8],
+            "gps_sats": row[9],
+            "gps_hdop": row[10],
+            "solar_current_a": row[11],
+            "solar_bus_v": row[12],
+            "solar_shunt_v": row[13],
+            "solar_power_w": row[14],
+            "solar_temperature_c": row[15],
         }
-
-        last_ts = None
-        for i, item in enumerate(data):
-            try:
-                d, solar_current_a, solar_bus_v, _solar_shunt_v = item
-                ah = d[0]
-                v = d[1]
-                a = d[2]
-                speed = d[3]
-                dist = d[4]
-                temp = d[5]
-                human_a = d[13]
-                solar_a = max(0.0, solar_current_a or 0.0)
-                solar_v = max(0.0, solar_bus_v or 0.0)
-                power = v * a
-                human_power = v * human_a
-                solar_power = solar_v * solar_a
-
-                if m["distance_start"] is None:
-                    m["distance_start"] = dist
-                m["distance_end"] = dist
-
-                if i < len(ts_list):
-                    current_ts = datetime.datetime.fromisoformat(ts_list[i])
-                    if last_ts:
-                        dt = (current_ts - last_ts).total_seconds()
-                    else:
-                        dt = 0.1
-                    last_ts = current_ts
-                else:
-                    dt = 0.1
-
-                if speed >= 1:
-                    m["speed_sum"] += speed
-                    m["speed_count"] += 1
-                    m["speed_max"] = max(m["speed_max"], speed)
-                    m["power_sum"] += power
-                    m["power_max"] = max(m["power_max"], power)
-                    m["power_min"] = min(m["power_min"], power)
-                    m["human_power_sum"] += human_power
-                    m["human_power_count"] += 1
-                    m["human_power_max"] = max(m["human_power_max"], human_power)
-                    m["solar_power_sum"] += solar_power
-                    m["solar_power_count"] += 1
-                    m["solar_power_max"] = max(m["solar_power_max"], solar_power)
-                    m["temp_sum"] += temp
-                    m["temp_count"] += 1
-                    m["temp_max"] = max(m["temp_max"], temp)
-
-                m["Ah"] += a * dt / 3600
-                if a > 0:
-                    m["positive_Wh"] += power * dt / 3600
-                elif a < 0:
-                    m["regen_Wh"] += abs(power) * dt / 3600
-                m["human_Wh"] += human_power * dt / 3600
-                m["solar_Wh"] += solar_power * dt / 3600
-            except Exception:
-                pass
-
-        if ts_list:
-            try:
-                t0 = datetime.datetime.fromisoformat(ts_list[0])
-                t1 = datetime.datetime.fromisoformat(ts_list[-1])
-                m["duration"] = (t1 - t0).total_seconds()
-            except Exception:
-                m["duration"] = 0
-        else:
-            m["duration"] = 0
-
-        if m["distance_start"] is not None and m["distance_end"] is not None:
-            m["distance"] = max(0.0, m["distance_end"] - m["distance_start"])
-        else:
-            m["distance"] = 0.0
-        return m
-
-    def compute_total_metrics(all_user_data, all_timestamps):
-        all_points = sum(all_user_data.values(), [])
-        all_ts = sum(all_timestamps.values(), [])
-        m = compute_metrics(all_points, all_ts)
-        distances = [item[0][4] for item in all_points if len(item[0]) > 4]
-        if distances:
-            m["distance"] = max(distances) - min(distances)
-        return m
-
-    metrics_by_user = {user: compute_metrics(user_data[user], timestamps[user]) for user in user_data}
-    metrics_by_user["Total"] = compute_total_metrics(user_data, timestamps)
-    all_users = list(user_data.keys()) + ["Total"]
-
-    def safe_div(n, d):
-        return n / max(d, 1e-6)
-
-    grouped_rows = [
-        ("Duration & distance", [("Duration (min)", lambda m: m["duration"] / 60), ("Distance (km)", lambda m: m["distance"]) ]),
-        ("Speed", [("Avg Speed (km/h)", lambda m: safe_div(m["speed_sum"], m["speed_count"])), ("Max Speed (km/h)", lambda m: m["speed_max"]) ]),
-        ("Power", [("Avg Power (W)", lambda m: safe_div(m["power_sum"], m["speed_count"])), ("Max Power (W)", lambda m: m["power_max"]), ("Min Power (W)", lambda m: m["power_min"]), ("Avg Human Power (W)", lambda m: safe_div(m["human_power_sum"], m["human_power_count"])), ("Max Human Power (W)", lambda m: m["human_power_max"]), ("Avg Solar Power (W)", lambda m: safe_div(m["solar_power_sum"], m["solar_power_count"])), ("Max Solar Power (W)", lambda m: m["solar_power_max"]) ]),
-        ("Energy", [("Battery Used (Ah)", lambda m: m["Ah"]), ("Regen Energy (Wh)", lambda m: m["regen_Wh"]), ("Human Energy (Wh)", lambda m: m["human_Wh"]), ("Solar Energy (Wh)", lambda m: m["solar_Wh"]), ("Net Energy (Wh)", lambda m: m["positive_Wh"] - m["regen_Wh"] - m["human_Wh"] - m["solar_Wh"]) ]),
-        ("Efficiency", [("Total Wh/km", lambda m: safe_div(m["positive_Wh"], m["distance"])), ("Net Wh/km", lambda m: safe_div(m["positive_Wh"] - m["regen_Wh"] - m["human_Wh"] - m["solar_Wh"], m["distance"])) ]),
-        ("Percentages", [("Regen %", lambda m: 100 * safe_div(m["regen_Wh"], m["positive_Wh"] + m["regen_Wh"])), ("Human %", lambda m: 100 * safe_div(m["human_Wh"], m["positive_Wh"] + m["regen_Wh"])), ("Solar %", lambda m: 100 * safe_div(m["solar_Wh"], m["positive_Wh"] + m["regen_Wh"])) ]),
-        ("Temperature", [("Avg Temp (°C)", lambda m: safe_div(m["temp_sum"], m["temp_count"])), ("Max Temp (°C)", lambda m: m["temp_max"]) ]),
-        ("Human effort", [("Calories Burned (kcal)", lambda m: m["human_Wh"] * 1.433)])
+        for row in rows
     ]
 
-    table = [["Metric"] + all_users]
-    for category, metrics in grouped_rows:
-        table.append([f"—— {category} ——"] + [""] * len(all_users))
-        for label, func in metrics:
-            row = [label]
-            for u in all_users:
-                value = func(metrics_by_user[u])
-                unit = " min" if "Duration" in label else \
-                       " km" if "Distance" in label else \
-                       " km/h" if "Speed" in label else \
-                       " W" if "Power" in label else \
-                       " Ah" if "Battery" in label else \
-                       " Wh/km" if "/km" in label else \
-                       " Wh" if "Energy" in label or "Energy" in label else \
-                       " %" if "%" in label else \
-                       " °C" if "Temp" in label else \
-                       " kcal" if "Calories" in label else ""
-                row.append(f"{value:.2f}{unit}")
-            table.append(row)
+    user_data = group_samples_by_user(samples)
+    metrics_by_user = {user: compute_session_metrics(user_data[user]) for user in user_data}
+    metrics_by_user["Total"] = compute_session_metrics(samples)
+    all_users = list(user_data.keys()) + ["Total"]
+    table = build_summary_table(metrics_by_user, all_users)
 
     return render_template("summary.html", session_id=session_id, table=table)
 

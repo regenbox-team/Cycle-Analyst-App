@@ -25,7 +25,7 @@
       </thead>
       <tbody>
         {% for row in table[1:] %}
-          {% if row[0].startswith("——") %}
+          {% if row[0].startswith("——") or row[0].startswith("--") %}
             <tr class="category-row">
               <td colspan="{{ row|length }}" class="category-cell">{{ row[0] }}</td>
             </tr>

@@ -1,0 +1,104 @@
+import unittest
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app.session_summary import compute_session_metrics
+
+
+def raw_line(*, amps=10.0, speed=20.0, distance=0.0, human_amps=1.0):
+    values = [0.0] * 15
+    values[1] = 50.0
+    values[2] = amps
+    values[3] = speed
+    values[4] = distance
+    values[5] = 25.0
+    values[13] = human_amps
+    values[14] = "2B"
+    return " ".join(str(v) for v in values)
+
+
+class SessionSummaryTest(unittest.TestCase):
+    def test_computes_gps_and_solar_observations(self):
+        samples = [
+            {
+                "timestamp": "2026-04-30T10:00:00",
+                "raw": raw_line(distance=0.0),
+                "gps_lat": 48.8566,
+                "gps_lon": 2.3522,
+                "gps_alt": 30,
+                "gps_speed_kph": 18,
+                "gps_fix": 1,
+                "gps_sats": 8,
+                "gps_hdop": 0.9,
+                "solar_current_a": 2,
+                "solar_bus_v": 20,
+                "solar_power_w": 40,
+            },
+            {
+                "timestamp": "2026-04-30T10:00:01",
+                "raw": raw_line(distance=0.1),
+                "gps_lat": 48.8576,
+                "gps_lon": 2.3522,
+                "gps_alt": 33,
+                "gps_speed_kph": 19,
+                "gps_fix": 1,
+                "gps_sats": 10,
+                "gps_hdop": 0.8,
+                "solar_current_a": 2,
+                "solar_bus_v": 20,
+                "solar_power_w": 40,
+            },
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertAlmostEqual(metrics["distance"], 0.1)
+        self.assertGreater(metrics["gps_distance_km"], 0.1)
+        self.assertAlmostEqual(metrics["gps_uphill_m"], 3.0)
+        self.assertEqual(metrics["gps_points"], 2)
+        self.assertEqual(metrics["gps_fix_count"], 2)
+        self.assertAlmostEqual(metrics["solar_Wh"], 40 / 3600)
+        self.assertAlmostEqual(metrics["solar_power_max"], 40)
+
+    def test_ignores_energy_across_large_timestamp_gap(self):
+        samples = [
+            {"timestamp": "2026-04-30T10:00:00", "raw": raw_line(distance=0.0)},
+            {"timestamp": "2026-04-30T10:10:00", "raw": raw_line(distance=0.1)},
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertEqual(metrics["positive_Wh"], 0)
+        self.assertEqual(metrics["solar_Wh"], 0)
+
+    def test_keeps_solar_only_samples_without_cycle_analyst_raw(self):
+        samples = [
+            {"timestamp": "2026-04-30T10:00:00", "solar_power_w": 30},
+            {"timestamp": "2026-04-30T10:00:01", "solar_power_w": 30},
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertEqual(metrics["sample_count"], 2)
+        self.assertEqual(metrics["solar_samples"], 2)
+        self.assertAlmostEqual(metrics["solar_Wh"], 30 / 3600)
+        self.assertAlmostEqual(metrics["solar_power_max"], 30)
+
+    def test_tracks_cycle_analyst_distance_reset(self):
+        samples = [
+            {"timestamp": "2026-04-30T10:00:00", "raw": raw_line(distance=5.0)},
+            {"timestamp": "2026-04-30T10:00:01", "raw": raw_line(distance=6.0)},
+            {"timestamp": "2026-04-30T10:00:02", "raw": raw_line(distance=0.2)},
+            {"timestamp": "2026-04-30T10:00:03", "raw": raw_line(distance=1.2)},
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertEqual(metrics["ca_reset_count"], 1)
+        self.assertAlmostEqual(metrics["distance"], 2.0)
+
+
+if __name__ == "__main__":
+    unittest.main()
