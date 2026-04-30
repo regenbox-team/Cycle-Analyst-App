@@ -857,6 +857,39 @@ def create_app() -> Flask:
 
         uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with _get_db() as conn:
+            payload_metrics = data.get("metrics") if isinstance(data.get("metrics"), dict) else {}
+            payload_gps = data.get("gps") if isinstance(data.get("gps"), dict) else {}
+
+            def payload_float(name: str, *metric_names: str) -> float | None:
+                value = _safe_float(data.get(name))
+                if value is not None:
+                    return value
+                for metric_name in metric_names:
+                    value = _safe_float(payload_metrics.get(metric_name))
+                    if value is not None:
+                        return value
+                return None
+
+            def gps_float(name: str, *nested_names: str) -> float | None:
+                value = _safe_float(data.get(name))
+                if value is not None:
+                    return value
+                for nested_name in nested_names:
+                    value = _safe_float(payload_gps.get(nested_name))
+                    if value is not None:
+                        return value
+                return None
+
+            def gps_int(name: str, *nested_names: str) -> int | None:
+                value = _safe_int(data.get(name))
+                if value is not None:
+                    return value
+                for nested_name in nested_names:
+                    value = _safe_int(payload_gps.get(nested_name))
+                    if value is not None:
+                        return value
+                return None
+
             metrics_json = None
             if data.get("metrics") is not None:
                 try:
@@ -886,20 +919,20 @@ def create_app() -> Flask:
                     uploaded_at,
                     int(data.get("test_mode") or 0),
                     1,
-                    _safe_float(data.get("gps_lat")),
-                    _safe_float(data.get("gps_lon")),
-                    _safe_float(data.get("gps_alt")),
-                    _safe_float(data.get("gps_speed_kph")),
-                    _safe_float(data.get("gps_track_deg")),
-                    _safe_int(data.get("gps_fix")),
-                    _safe_int(data.get("gps_sats")),
-                    _safe_float(data.get("gps_hdop")),
-                    _safe_float(data.get("speed_kph")),
-                    _safe_float(data.get("session_distance_km")),
-                    _safe_float(data.get("gps_uphill_m")),
-                    _safe_float(data.get("solar_power_w")),
-                    _safe_float(data.get("generator_power_w")),
-                    _safe_float(data.get("solar_wh")),
+                    gps_float("gps_lat", "lat"),
+                    gps_float("gps_lon", "lon"),
+                    gps_float("gps_alt", "alt"),
+                    gps_float("gps_speed_kph", "speed_kph"),
+                    gps_float("gps_track_deg", "track_deg"),
+                    gps_int("gps_fix", "fix"),
+                    gps_int("gps_sats", "sats"),
+                    gps_float("gps_hdop", "hdop"),
+                    payload_float("speed_kph", "speed_kph"),
+                    payload_float("session_distance_km", "distance_km"),
+                    payload_float("gps_uphill_m", "gps_uphill_m"),
+                    payload_float("solar_power_w", "solar_power_w"),
+                    payload_float("generator_power_w", "generator_power_w"),
+                    payload_float("solar_wh", "solar_wh", "solar_Wh"),
                     metrics_json,
                 ),
             )
@@ -1066,8 +1099,28 @@ def create_app() -> Flask:
 
     def _suntrip_photo_payload(row) -> dict[str, Any]:
         image_url = url_for("photo_file", filename=row["relative_path"])
-        distance_km = row["session_distance_km"] if row["session_distance_km"] is not None else row["distance_km"]
-        speed_kph = row["speed_kph"] if row["speed_kph"] is not None else row["gps_speed_kph"]
+        stored_metrics = {}
+        if row["metrics_json"]:
+            try:
+                stored_metrics = json.loads(row["metrics_json"])
+            except Exception:
+                stored_metrics = {}
+
+        def metric_value(column: str, *metric_names: str):
+            value = row[column]
+            if value is not None:
+                return value
+            for metric_name in metric_names:
+                if metric_name in stored_metrics:
+                    return stored_metrics.get(metric_name)
+            return None
+
+        distance_km = metric_value("session_distance_km", "distance_km")
+        if distance_km is None:
+            distance_km = row["distance_km"]
+        speed_kph = metric_value("speed_kph", "speed_kph")
+        if speed_kph is None:
+            speed_kph = row["gps_speed_kph"]
         return {
             "id": row["id"],
             "device_id": row["device_id"],
@@ -1092,10 +1145,10 @@ def create_app() -> Flask:
             "metrics": {
                 "speed_kph": speed_kph,
                 "distance_km": distance_km,
-                "gps_uphill_m": row["gps_uphill_m"],
-                "solar_power_w": row["solar_power_w"],
-                "generator_power_w": row["generator_power_w"],
-                "solar_wh": row["solar_wh"],
+                "gps_uphill_m": metric_value("gps_uphill_m", "gps_uphill_m"),
+                "solar_power_w": metric_value("solar_power_w", "solar_power_w"),
+                "generator_power_w": metric_value("generator_power_w", "generator_power_w"),
+                "solar_wh": metric_value("solar_wh", "solar_wh", "solar_Wh"),
             },
         }
 
@@ -1104,7 +1157,7 @@ def create_app() -> Flask:
             SELECT id, device_id, session_id, mode, captured_at, distance_km, interval_km,
                    relative_path, uploaded_at, gps_lat, gps_lon, gps_alt, gps_speed_kph,
                    gps_track_deg, gps_fix, gps_sats, gps_hdop, speed_kph, session_distance_km,
-                   gps_uphill_m, solar_power_w, generator_power_w, solar_wh
+                   gps_uphill_m, solar_power_w, generator_power_w, solar_wh, metrics_json
             FROM photos
             WHERE is_public = 1
         """

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from . import state
 from .config import LIVE_PHOTO_DIR
+from .gps import get_status
 from .monitor_client import monitor_upload_photo
 
 
@@ -103,6 +104,10 @@ def _capture_and_upload(trigger_distance_km: float, interval_km: float) -> None:
     with _capture_lock:
         temp_path = None
         try:
+            gps_snapshot = get_status()
+            metrics_snapshot = dict(state.session_metrics)
+            raw_values_snapshot = list(state.latest_raw_values) if isinstance(state.latest_raw_values, list) else None
+            solar_snapshot = dict(state.solar_sensor)
             temp_path = _capture_image()
             captured_at = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S")
             cfg["last_captured_at"] = captured_at
@@ -117,6 +122,10 @@ def _capture_and_upload(trigger_distance_km: float, interval_km: float) -> None:
                 captured_at=captured_at,
                 distance_km=trigger_distance_km,
                 interval_km=interval_km,
+                gps_snapshot=gps_snapshot,
+                metrics_snapshot=metrics_snapshot,
+                raw_values_snapshot=raw_values_snapshot,
+                solar_snapshot=solar_snapshot,
             )
             cfg["capture_count"] = int(cfg.get("capture_count") or 0) + 1
             cfg["last_uploaded_at"] = captured_at

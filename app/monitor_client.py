@@ -159,31 +159,37 @@ def monitor_upload_photo(
     captured_at: str,
     distance_km: float,
     interval_km: float,
+    gps_snapshot: dict[str, Any] | None = None,
+    metrics_snapshot: dict[str, Any] | None = None,
+    raw_values_snapshot: list[Any] | None = None,
+    solar_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     url = _monitor_url()
     if not url:
         raise RuntimeError("MONITOR_URL is not configured")
 
-    gps = get_status()
+    gps = gps_snapshot or get_status()
     gps_ok = (
         bool(gps.get("has_fix"))
         and not gps.get("stale")
         and gps.get("lat") is not None
         and gps.get("lon") is not None
     )
-    raw_values = state.latest_raw_values if isinstance(state.latest_raw_values, list) else []
+    raw_values = raw_values_snapshot if isinstance(raw_values_snapshot, list) else state.latest_raw_values
+    raw_values = raw_values if isinstance(raw_values, list) else []
     voltage = _safe_float(raw_values[1] if len(raw_values) > 1 else None)
     speed_kph = _safe_float(raw_values[3] if len(raw_values) > 3 else None)
     generator_current_a = _safe_float(raw_values[13] if len(raw_values) > 13 else None)
     generator_power_w = None
     if voltage is not None and generator_current_a is not None:
         generator_power_w = max(0.0, voltage * generator_current_a)
-    solar_power_w = _safe_float(state.solar_sensor.get("power_w"))
+    solar = solar_snapshot or state.solar_sensor
+    solar_power_w = _safe_float(solar.get("power_w"))
     if solar_power_w is None:
-        solar_current_a = _safe_float(state.solar_sensor.get("current_a")) or 0.0
-        solar_bus_v = _safe_float(state.solar_sensor.get("bus_v")) or 0.0
+        solar_current_a = _safe_float(solar.get("current_a")) or 0.0
+        solar_bus_v = _safe_float(solar.get("bus_v")) or 0.0
         solar_power_w = max(0.0, solar_current_a * solar_bus_v)
-    metrics = state.session_metrics
+    metrics = metrics_snapshot or state.session_metrics
     payload = {
         "device_id": _device_id(),
         "session_id": state.session_id,
