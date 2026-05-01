@@ -16,7 +16,12 @@ def start_page():
     with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         rows = conn.execute("SELECT DISTINCT session FROM logs ORDER BY session DESC LIMIT 5").fetchall()
     recent_sessions = [row[0] for row in rows]
-    return render_template("start.html", session_active=state.session_active, recent_sessions=recent_sessions)
+    return render_template(
+        "start.html",
+        session_active=state.session_active,
+        recent_sessions=recent_sessions,
+        solar_roof_enabled=state.solar_roof_enabled,
+    )
 
 
 def start_session():
@@ -24,6 +29,9 @@ def start_session():
     state.current_user = selected_user if selected_user in ("JD", "LL") else "JD"
     photo_enabled = request.form.get("photo_capture_enabled") == "on"
     photo_interval_km = normalize_interval_km(request.form.get("photo_capture_interval_km"), default=1.0)
+    solar_enabled = request.form.get("solar_roof_enabled") == "on"
+    state.solar_roof_enabled = solar_enabled
+    state.save_solar_roof_enabled(solar_enabled)
 
     state.session_id = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d_%H-%M-%S")
     state.save_session_id(state.session_id)
@@ -31,6 +39,7 @@ def start_session():
     state.session_start_time = datetime.now().timestamp()
 
     reset_session_state()
+    state.session_metrics["solar_enabled"] = solar_enabled
     configure_session_photo_capture(photo_enabled, photo_interval_km)
     state.save_session_metrics_to_file()
 
@@ -129,11 +138,14 @@ def summary():
         return "Missing session ID", 400
 
     with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(logs)").fetchall()}
+        solar_enabled_col = "solar_enabled" if "solar_enabled" in cols else "1 AS solar_enabled"
         rows = conn.execute(
-            """
+            f"""
             SELECT user, timestamp, raw,
                    gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
-                   solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c
+                   solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c,
+                   {solar_enabled_col}
             FROM logs
             WHERE session = ?
             ORDER BY id
@@ -159,6 +171,7 @@ def summary():
             "solar_shunt_v": row[13],
             "solar_power_w": row[14],
             "solar_temperature_c": row[15],
+            "solar_enabled": row[16],
         }
         for row in rows
     ]

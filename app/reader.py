@@ -111,10 +111,13 @@ def read_serial():
             if state.latest_raw_values is not None:
                 state.latest_raw_values = None
 
-        solar_sample, solar_failure_backoff_until, solar_sensor = read_solar_sample(
-            solar_sensor,
-            solar_failure_backoff_until,
-        )
+        solar_roof_enabled = bool(getattr(state, "solar_roof_enabled", True))
+        solar_sample = None
+        if solar_roof_enabled:
+            solar_sample, solar_failure_backoff_until, solar_sensor = read_solar_sample(
+                solar_sensor,
+                solar_failure_backoff_until,
+            )
         if solar_sample is not None:
             state.solar_sensor.update({
                 "enabled": True,
@@ -227,6 +230,7 @@ def read_serial():
             state.save_session_metrics_to_file()
             raw_line = " ".join(map(str, data)) if data is not None else None
             timestamp = datetime.utcnow().isoformat()
+            session_solar_enabled = bool(state.session_metrics.get("solar_enabled", state.solar_roof_enabled))
             # Snapshot GPS at the same tick
             gps = getattr(state, 'gps_state', {}) or {}
             try:
@@ -236,8 +240,9 @@ def read_serial():
                         INSERT INTO logs (
                             timestamp, session, raw, user,
                             gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
-                            solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c,
+                            solar_enabled
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             timestamp,
@@ -252,11 +257,12 @@ def read_serial():
                             1 if gps.get("has_fix") else 0,
                             gps.get("sats"),
                             gps.get("hdop"),
-                            state.solar_sensor.get("current_a"),
-                            state.solar_sensor.get("bus_v"),
-                            state.solar_sensor.get("shunt_v"),
-                            state.solar_sensor.get("power_w"),
-                            state.solar_sensor.get("temperature_c"),
+                            state.solar_sensor.get("current_a") if session_solar_enabled else None,
+                            state.solar_sensor.get("bus_v") if session_solar_enabled else None,
+                            state.solar_sensor.get("shunt_v") if session_solar_enabled else None,
+                            state.solar_sensor.get("power_w") if session_solar_enabled else None,
+                            state.solar_sensor.get("temperature_c") if session_solar_enabled else None,
+                            1 if session_solar_enabled else 0,
                         ),
                     )
             except Exception:

@@ -10,10 +10,17 @@ let metricsPaused = false;
 const photoPreviewState = {
   lastImageKey: null
 };
+const POWER_HISTORY_WINDOWS = [180, 360, 720, 1800];
+const POWER_HISTORY_SAMPLE_COUNT = 180;
 const powerHistoryState = {
   motor: true,
   human: true,
   solar: true,
+  solarRoofEnabled: true,
+  cumulative: false,
+  windowIndex: 0,
+  windowSeconds: POWER_HISTORY_WINDOWS[0],
+  serverNowMs: null,
   points: []
 };
 
@@ -311,75 +318,150 @@ function updateTempBar(live, avg, max) {
 }
 
 /* ====== CHARTS ====== */
-function renderPowerHistoryChart() {
-  const canvas = document.getElementById("power-history-chart");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
+function formatPowerWindow(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes} min`;
+}
 
-  const dpr = window.devicePixelRatio || 1;
-  const width = Math.max(320, canvas.clientWidth || 320);
-  const height = Math.max(180, canvas.clientHeight || 180);
-  if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
-  }
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, width, height);
+function powerAgoLabel(seconds) {
+  if (seconds <= 0) return "now";
+  if (seconds < 60) return `-${Math.round(seconds)}s`;
+  return `-${Math.round(seconds / 60)}m`;
+}
 
-  const points = Array.isArray(powerHistoryState.points) ? powerHistoryState.points : [];
-  const enabled = {
-    motor: powerHistoryState.motor,
-    human: powerHistoryState.human,
-    solar: powerHistoryState.solar
+function parsePowerTimestamp(timestamp) {
+  if (!timestamp) return null;
+  const raw = String(timestamp);
+  const hasTimezone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(raw);
+  const parsed = Date.parse(hasTimezone ? raw : `${raw}Z`);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function powerTimeScale(width, margin, points) {
+  const plotWidth = width - margin.left - margin.right;
+  const windowMs = Math.max(1, (powerHistoryState.windowSeconds || POWER_HISTORY_WINDOWS[0]) * 1000);
+  const fallbackNow = Date.now();
+  const latestPointMs = Math.max(
+    0,
+    ...points.map(point => parsePowerTimestamp(point.timestamp) || 0)
+  );
+  const nowMs = powerHistoryState.serverNowMs || latestPointMs || fallbackNow;
+  const startMs = nowMs - windowMs;
+
+  const xForTime = (timestamp, fallbackIndex = 0) => {
+    const pointMs = parsePowerTimestamp(timestamp);
+    if (pointMs === null) {
+      return margin.left + (plotWidth * fallbackIndex) / Math.max(1, points.length - 1);
+    }
+    const ratio = clamp((pointMs - startMs) / windowMs, 0, 1);
+    return margin.left + plotWidth * ratio;
   };
 
-  if (!points.length) {
-    ctx.fillStyle = "#666";
-    ctx.font = "12px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("Awaiting power history", width / 2, height / 2);
+  const xForAgo = (agoSeconds) => {
+    const ratio = clamp((windowMs - agoSeconds * 1000) / windowMs, 0, 1);
+    return margin.left + plotWidth * ratio;
+  };
+
+  return { xForTime, xForAgo };
+}
+
+function updatePowerHistoryControls() {
+  powerHistoryState.windowSeconds = POWER_HISTORY_WINDOWS[powerHistoryState.windowIndex] || POWER_HISTORY_WINDOWS[0];
+
+  const windowLabel = document.getElementById("power-history-window");
+  if (windowLabel) windowLabel.textContent = formatPowerWindow(powerHistoryState.windowSeconds);
+
+  const zoomIn = document.getElementById("power-history-zoom-in");
+  if (zoomIn) zoomIn.disabled = powerHistoryState.windowIndex <= 0;
+
+  const zoomOut = document.getElementById("power-history-zoom-out");
+  if (zoomOut) zoomOut.disabled = powerHistoryState.windowIndex >= POWER_HISTORY_WINDOWS.length - 1;
+
+  const cumulativeButton = document.getElementById("power-chart-cumulative");
+  if (cumulativeButton) cumulativeButton.classList.toggle("active-chart", powerHistoryState.cumulative);
+}
+
+function traceSmoothLine(ctx, coords) {
+  if (!coords.length) return;
+  if (coords.length === 1) {
+    ctx.moveTo(coords[0].x, coords[0].y);
+    ctx.lineTo(coords[0].x + 0.01, coords[0].y);
     return;
   }
 
-  const series = [
-    { key: "motor_power", enabled: enabled.motor, color: "#d1492e" },
-    { key: "human_power", enabled: enabled.human, color: "#f08a24" },
-    { key: "solar_power", enabled: enabled.solar, color: "#c7b600" }
-  ];
-  const activeSeries = series.filter(s => s.enabled);
+  ctx.moveTo(coords[0].x, coords[0].y);
+  for (let i = 0; i < coords.length - 1; i++) {
+    const current = coords[i];
+    const next = coords[i + 1];
+    const xc = (current.x + next.x) / 2;
+    const yc = (current.y + next.y) / 2;
+    ctx.quadraticCurveTo(current.x, current.y, xc, yc);
+  }
+  const last = coords[coords.length - 1];
+  ctx.lineTo(last.x, last.y);
+}
 
-  if (!activeSeries.length) {
-    ctx.fillStyle = "#666";
-    ctx.font = "12px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("All curves hidden", width / 2, height / 2);
-    return;
+function drawSmoothLine(ctx, coords, color, width = 2) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  traceSmoothLine(ctx, coords);
+  ctx.stroke();
+}
+
+function drawFilledBand(ctx, xs, lowerValues, upperValues, yForValue, color) {
+  if (!xs.length) return;
+  const upper = xs.map((x, index) => ({ x, y: yForValue(upperValues[index]) }));
+  const lower = xs.map((x, index) => ({ x, y: yForValue(lowerValues[index]) })).reverse();
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  traceSmoothLine(ctx, upper);
+  if (lower.length) {
+    ctx.lineTo(lower[0].x, lower[0].y);
+    traceSmoothLine(ctx, lower);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+function buildCumulativePowerPoint(point) {
+  const human = Math.max(0, num(point.human_power, 0));
+  const solar = Math.max(0, num(point.solar_power, 0));
+  const motorPower = num(point.motor_power, 0);
+  const motorUse = Math.max(0, motorPower);
+  const regen = Math.max(0, -motorPower);
+  const production = human + solar + regen;
+  const net = production - motorUse;
+
+  if (net <= 0 || production <= 0) {
+    return {
+      human_net: 0,
+      solar_net: 0,
+      regen_net: 0,
+      total_positive: 0,
+      deficit: Math.min(0, net),
+      net
+    };
   }
 
-  const margin = { top: 10, right: 12, bottom: 22, left: 42 };
-  const plotWidth = width - margin.left - margin.right;
-  const plotHeight = height - margin.top - margin.bottom;
+  const humanNet = net * (human / production);
+  const solarNet = net * (solar / production);
+  const regenNet = net - humanNet - solarNet;
+  return {
+    human_net: humanNet,
+    solar_net: solarNet,
+    regen_net: regenNet,
+    total_positive: net,
+    deficit: 0,
+    net
+  };
+}
 
-  let minVal = 0;
-  let maxVal = 100;
-  activeSeries.forEach(seriesDef => {
-    points.forEach(point => {
-      const value = num(point[seriesDef.key], 0);
-      minVal = Math.min(minVal, value);
-      maxVal = Math.max(maxVal, value);
-    });
-  });
-
-  const pad = Math.max(50, (maxVal - minVal) * 0.1);
-  minVal = Math.min(0, Math.floor((minVal - pad) / 50) * 50);
-  maxVal = Math.max(100, Math.ceil((maxVal + pad) / 50) * 50);
-  if (maxVal <= minVal) maxVal = minVal + 100;
-
-  const xForIndex = (index) => margin.left + (plotWidth * index) / Math.max(1, points.length - 1);
-  const yForValue = (value) => margin.top + (maxVal - value) * plotHeight / (maxVal - minVal);
-  const zeroY = yForValue(0);
-
+function drawPowerChartFrame(ctx, width, height, margin, minVal, maxVal, yForValue) {
   ctx.strokeStyle = "#d0d0d0";
   ctx.lineWidth = 1;
   ctx.fillStyle = "#666";
@@ -405,60 +487,157 @@ function renderPowerHistoryChart() {
   ctx.lineTo(width - margin.right, height - margin.bottom);
   ctx.stroke();
 
+  const zeroY = yForValue(0);
   if (zeroY >= margin.top && zeroY <= height - margin.bottom) {
-    ctx.strokeStyle = "#b5b5b5";
+    ctx.strokeStyle = "#777";
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(margin.left, zeroY);
     ctx.lineTo(width - margin.right, zeroY);
     ctx.stroke();
   }
+}
 
+function drawPowerTimeTicks(ctx, width, height, margin, xForAgo) {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  const xTicks = [
-    { index: 0, label: "-3m" },
-    { index: Math.max(0, Math.floor((points.length - 1) / 3)), label: "-2m" },
-    { index: Math.max(0, Math.floor((2 * (points.length - 1)) / 3)), label: "-1m" },
-    { index: Math.max(0, points.length - 1), label: "now" }
+  const totalSeconds = powerHistoryState.windowSeconds || 180;
+  const ticks = [
+    { ago: totalSeconds },
+    { ago: (2 * totalSeconds) / 3 },
+    { ago: totalSeconds / 3 },
+    { ago: 0 }
   ];
-  xTicks.forEach(tick => {
-    const x = xForIndex(tick.index);
+
+  ticks.forEach(tick => {
+    const x = xForAgo(tick.ago);
     ctx.strokeStyle = "#999";
     ctx.beginPath();
     ctx.moveTo(x, height - margin.bottom);
     ctx.lineTo(x, height - margin.bottom + 4);
     ctx.stroke();
     ctx.fillStyle = "#666";
-    ctx.fillText(tick.label, x, height - margin.bottom + 6);
+    ctx.fillText(powerAgoLabel(tick.ago), x, height - margin.bottom + 6);
+  });
+}
+
+function renderCumulativePowerHistory(ctx, points, width, height, margin) {
+  const plotHeight = height - margin.top - margin.bottom;
+  const stacked = points.map(buildCumulativePowerPoint);
+  const maxAbsRaw = Math.max(
+    ...stacked.map(point => Math.abs(point.net)),
+    ...stacked.map(point => point.total_positive),
+    100
+  );
+  const maxAbsVal = Math.max(100, Math.ceil(maxAbsRaw / 50) * 50);
+  const minVal = -maxAbsVal;
+  const maxVal = maxAbsVal;
+
+  const yForValue = (value) => margin.top + (maxVal - value) * plotHeight / (maxVal - minVal);
+  const { xForTime, xForAgo } = powerTimeScale(width, margin, points);
+  const xs = points.map((point, index) => xForTime(point.timestamp, index));
+  const zeroValues = stacked.map(() => 0);
+  const humanValues = stacked.map(point => point.human_net);
+  const solarValues = stacked.map(point => point.human_net + point.solar_net);
+  const totalValues = stacked.map(point => point.total_positive);
+  const deficitValues = stacked.map(point => point.deficit);
+
+  drawPowerChartFrame(ctx, width, height, margin, minVal, maxVal, yForValue);
+
+  drawFilledBand(ctx, xs, zeroValues, humanValues, yForValue, "rgba(240, 138, 36, 0.55)");
+  drawFilledBand(ctx, xs, humanValues, solarValues, yForValue, "rgba(199, 182, 0, 0.48)");
+  drawFilledBand(ctx, xs, solarValues, totalValues, yForValue, "rgba(38, 146, 126, 0.48)");
+  drawFilledBand(ctx, xs, deficitValues, zeroValues, yForValue, "rgba(209, 73, 46, 0.36)");
+
+  drawSmoothLine(ctx, xs.map((x, index) => ({ x, y: yForValue(totalValues[index]) })), "#116b5e", 1.5);
+  drawSmoothLine(ctx, xs.map((x, index) => ({ x, y: yForValue(stacked[index].net) })), "#111", 1.25);
+  drawPowerTimeTicks(ctx, width, height, margin, xForAgo);
+}
+
+function renderStandardPowerHistory(ctx, points, width, height, margin) {
+  const enabled = {
+    motor: powerHistoryState.motor,
+    human: powerHistoryState.human,
+    solar: powerHistoryState.solar
+  };
+  const series = [
+    { key: "motor_power", enabled: enabled.motor, color: "#d1492e" },
+    { key: "human_power", enabled: enabled.human, color: "#f08a24" },
+    { key: "solar_power", enabled: enabled.solar, color: "#c7b600" }
+  ];
+  const activeSeries = series.filter(s => s.enabled);
+
+  if (!activeSeries.length) {
+    ctx.fillStyle = "#666";
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("All curves hidden", width / 2, height / 2);
+    return;
+  }
+
+  const plotHeight = height - margin.top - margin.bottom;
+
+  let minVal = 0;
+  let maxVal = 100;
+  activeSeries.forEach(seriesDef => {
+    points.forEach(point => {
+      const value = num(point[seriesDef.key], 0);
+      minVal = Math.min(minVal, value);
+      maxVal = Math.max(maxVal, value);
+    });
   });
 
+  const pad = Math.max(50, (maxVal - minVal) * 0.1);
+  minVal = Math.min(0, Math.floor((minVal - pad) / 50) * 50);
+  maxVal = Math.max(100, Math.ceil((maxVal + pad) / 50) * 50);
+  if (maxVal <= minVal) maxVal = minVal + 100;
+
+  const yForValue = (value) => margin.top + (maxVal - value) * plotHeight / (maxVal - minVal);
+  const { xForTime, xForAgo } = powerTimeScale(width, margin, points);
+
+  drawPowerChartFrame(ctx, width, height, margin, minVal, maxVal, yForValue);
+  drawPowerTimeTicks(ctx, width, height, margin, xForAgo);
+
   activeSeries.forEach(seriesDef => {
-    ctx.strokeStyle = seriesDef.color;
-    ctx.lineWidth = 2;
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.beginPath();
     const coords = points.map((point, index) => ({
-      x: xForIndex(index),
+      x: xForTime(point.timestamp, index),
       y: yForValue(num(point[seriesDef.key], 0))
     }));
-    if (coords.length === 1) {
-      ctx.moveTo(coords[0].x, coords[0].y);
-      ctx.lineTo(coords[0].x + 0.01, coords[0].y);
-    } else {
-      ctx.moveTo(coords[0].x, coords[0].y);
-      for (let i = 0; i < coords.length - 1; i++) {
-        const current = coords[i];
-        const next = coords[i + 1];
-        const xc = (current.x + next.x) / 2;
-        const yc = (current.y + next.y) / 2;
-        ctx.quadraticCurveTo(current.x, current.y, xc, yc);
-      }
-      const last = coords[coords.length - 1];
-      ctx.lineTo(last.x, last.y);
-    }
-    ctx.stroke();
+    drawSmoothLine(ctx, coords, seriesDef.color, 2);
   });
+}
+
+function renderPowerHistoryChart() {
+  const canvas = document.getElementById("power-history-chart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(320, canvas.clientWidth || 320);
+  const height = Math.max(180, canvas.clientHeight || 180);
+  if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const points = Array.isArray(powerHistoryState.points) ? powerHistoryState.points : [];
+  if (!points.length) {
+    ctx.fillStyle = "#666";
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Awaiting power history", width / 2, height / 2);
+    return;
+  }
+
+  const margin = { top: 10, right: 12, bottom: 22, left: 42 };
+  if (powerHistoryState.cumulative) {
+    renderCumulativePowerHistory(ctx, points, width, height, margin);
+  } else {
+    renderStandardPowerHistory(ctx, points, width, height, margin);
+  }
 }
 
 function setPowerSeriesButtonState() {
@@ -469,16 +648,70 @@ function setPowerSeriesButtonState() {
   ].forEach(([id, enabled]) => {
     const button = document.getElementById(id);
     if (!button) return;
+    if (id === "power-series-solar") {
+      button.disabled = !powerHistoryState.solarRoofEnabled;
+    }
     button.classList.toggle("active-chart", enabled);
   });
+  updatePowerHistoryControls();
+}
+
+function showChartById(chartId) {
+  const chartButtons = {
+    "btn-wh": "wh-per-km-chart",
+    "btn-human": "human-pct-per-km-chart",
+    "btn-solar": "solar-pct-per-km-chart",
+    "btn-regen": "regen-pct-per-km-chart"
+  };
+  Object.entries(chartButtons).forEach(([buttonId, targetChartId]) => {
+    const button = document.getElementById(buttonId);
+    const chart = document.getElementById(targetChartId);
+    if (chart) chart.style.display = targetChartId === chartId ? "" : "none";
+    if (button) button.classList.toggle("active-chart", targetChartId === chartId);
+  });
+}
+
+function setSolarUiEnabled(enabled) {
+  const isEnabled = enabled !== false;
+  powerHistoryState.solarRoofEnabled = isEnabled;
+  if (!isEnabled) {
+    powerHistoryState.solar = false;
+  }
+
+  document.querySelectorAll(".solar-box").forEach(el => {
+    el.style.display = isEnabled ? "" : "none";
+  });
+  const solarSeriesButton = document.getElementById("power-series-solar");
+  if (solarSeriesButton) {
+    solarSeriesButton.style.display = isEnabled ? "" : "none";
+    solarSeriesButton.disabled = !isEnabled;
+  }
+  const solarChartButton = document.getElementById("btn-solar");
+  if (solarChartButton) {
+    solarChartButton.style.display = isEnabled ? "" : "none";
+    solarChartButton.disabled = !isEnabled;
+  }
+  const solarChart = document.getElementById("solar-pct-per-km-chart");
+  if (!isEnabled && solarChart && solarChart.style.display !== "none") {
+    showChartById("wh-per-km-chart");
+  }
+  setPowerSeriesButtonState();
 }
 
 async function fetchPowerHistory() {
   if (document.body.classList.contains('edit-mode')) return;
   try {
-    const res = await fetch('/power_history', { cache: 'no-store' });
+    const params = new URLSearchParams({
+      window_seconds: String(powerHistoryState.windowSeconds || POWER_HISTORY_WINDOWS[0]),
+      samples: String(POWER_HISTORY_SAMPLE_COUNT)
+    });
+    const res = await fetch(`/power_history?${params.toString()}`, { cache: 'no-store' });
     const json = await res.json();
     powerHistoryState.points = Array.isArray(json.points) ? json.points : [];
+    if (Number.isFinite(Number(json.window_seconds))) {
+      powerHistoryState.windowSeconds = Number(json.window_seconds);
+    }
+    powerHistoryState.serverNowMs = parsePowerTimestamp(json.server_time) || Date.now();
     renderPowerHistoryChart();
   } catch (err) {
     console.error('Error fetching power history:', err);
@@ -883,8 +1116,10 @@ async function fetchMetrics() {
   try {
     const res = await fetch('/metrics');
     const json = await res.json();
+    const solarEnabled = json.solar_enabled !== false && json.calculated_CA_values?.solar_enabled !== false;
+    setSolarUiEnabled(solarEnabled);
 
-    if (json.ca_reset_prompt) {
+    if (json.ca_reset_prompt && !solarEnabled) {
       showCaResetPopup();
     } else {
       hideCaResetPopup();
@@ -930,12 +1165,12 @@ async function fetchMetrics() {
     document.getElementById("solar-percent").textContent = `${solarPercent.toFixed(1)}`;
 
     // Solar panel power
-    const pvLive = Math.max(0, num(json.calculated_CA_values?.solar_power_live, 0));
+    const pvLive = solarEnabled ? Math.max(0, num(json.calculated_CA_values?.solar_power_live, 0)) : 0;
     updateAuxMeter(
       "pv",
       pvLive,
-      num(json.calculated_CA_values?.solar_power_avg, 0),
-      num(json.calculated_CA_values?.solar_power_max, 0)
+      solarEnabled ? num(json.calculated_CA_values?.solar_power_avg, 0) : 0,
+      solarEnabled ? num(json.calculated_CA_values?.solar_power_max, 0) : 0
     );
 
     const pvPercent = powerLive > 0 ? (100 * pvLive / powerLive) : 0;
@@ -963,9 +1198,9 @@ async function fetchMetrics() {
     const calories = num(json.calculated_CA_values?.human_calories_burned ?? json.calculated_CA_values?.calories_burned, 0);
     document.getElementById("solar-calories").textContent = calories.toFixed(0);
 
-    const pvWh = num(json.calculated_CA_values?.solar_Wh, 0);
+    const pvWh = solarEnabled ? num(json.calculated_CA_values?.solar_Wh, 0) : 0;
     document.getElementById("pv-cumulative").textContent = pvWh.toFixed(1);
-    const pvCurrent = num(json.calculated_CA_values?.solar_current_live, 0);
+    const pvCurrent = solarEnabled ? num(json.calculated_CA_values?.solar_current_live, 0) : 0;
     document.getElementById("pv-current").textContent = pvCurrent.toFixed(1);
 
     // Trip metrics
@@ -1005,13 +1240,15 @@ async function fetchMetrics() {
       range,
       "orange"
     );
-    updatePctChart(
-      "solar-pct-per-km-chart",
-      json.calculated_CA_values?.solar_pct_per_km_last ?? [],
-      pvPercent,
-      range,
-      "#e0b400"
-    );
+    if (solarEnabled) {
+      updatePctChart(
+        "solar-pct-per-km-chart",
+        json.calculated_CA_values?.solar_pct_per_km_last ?? [],
+        pvPercent,
+        range,
+        "#e0b400"
+      );
+    }
     updateRegenPctChart(
       json.calculated_CA_values?.regen_pct_per_km_last ?? [],
       num(json.calculated_CA_values?.["%_regen"], 0),
@@ -1382,13 +1619,8 @@ window.addEventListener("DOMContentLoaded", () => {
 
     if (btn && chartEl) {
       btn.addEventListener("click", () => {
-        Object.entries(chartButtons).forEach(([b, c]) => {
-          document.getElementById(c).style.display = "none";
-          document.getElementById(b).classList.remove("active-chart");
-        });
-
-        chartEl.style.display = "";
-        btn.classList.add("active-chart");
+        if (buttonId === "btn-solar" && !powerHistoryState.solarRoofEnabled) return;
+        showChartById(chartId);
       });
     }
   });
@@ -1401,12 +1633,42 @@ window.addEventListener("DOMContentLoaded", () => {
     const button = document.getElementById(id);
     if (!button) return;
     button.addEventListener("click", () => {
+      if (key === "solar" && !powerHistoryState.solarRoofEnabled) return;
       powerHistoryState[key] = !powerHistoryState[key];
       setPowerSeriesButtonState();
       renderPowerHistoryChart();
     });
   });
+
+  const cumulativeButton = document.getElementById("power-chart-cumulative");
+  if (cumulativeButton) {
+    cumulativeButton.addEventListener("click", () => {
+      powerHistoryState.cumulative = !powerHistoryState.cumulative;
+      updatePowerHistoryControls();
+      renderPowerHistoryChart();
+    });
+  }
+
+  const zoomInButton = document.getElementById("power-history-zoom-in");
+  if (zoomInButton) {
+    zoomInButton.addEventListener("click", () => {
+      powerHistoryState.windowIndex = Math.max(0, powerHistoryState.windowIndex - 1);
+      updatePowerHistoryControls();
+      fetchPowerHistory();
+    });
+  }
+
+  const zoomOutButton = document.getElementById("power-history-zoom-out");
+  if (zoomOutButton) {
+    zoomOutButton.addEventListener("click", () => {
+      powerHistoryState.windowIndex = Math.min(POWER_HISTORY_WINDOWS.length - 1, powerHistoryState.windowIndex + 1);
+      updatePowerHistoryControls();
+      fetchPowerHistory();
+    });
+  }
+
   setPowerSeriesButtonState();
+  updatePowerHistoryControls();
   window.addEventListener("resize", renderPowerHistoryChart);
 
   // Restart service button

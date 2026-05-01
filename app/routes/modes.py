@@ -53,6 +53,37 @@ def get_test_mode():
     return jsonify({"test_mode": is_test_mode()})
 
 
+def set_solar_roof():
+    try:
+        data = request.get_json() or {}
+        enabled = bool(data.get("enabled", False))
+        state.solar_roof_enabled = enabled
+        state.save_solar_roof_enabled(enabled)
+        if state.session_active:
+            state.session_metrics["solar_enabled"] = enabled
+            state.save_session_metrics_to_file()
+        if not enabled:
+            state.solar_sensor.update({
+                "enabled": False,
+                "source": None,
+                "address": None,
+                "manufacturer_id": None,
+                "device_id": None,
+                "current_a": 0.0,
+                "bus_v": 0.0,
+                "shunt_v": 0.0,
+                "power_w": 0.0,
+                "temperature_c": 0.0,
+            })
+        return jsonify({"solar_roof_enabled": enabled})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def get_solar_roof():
+    return jsonify({"solar_roof_enabled": bool(state.solar_roof_enabled)})
+
+
 def create_blueprint():
     from flask import Blueprint
     bp = Blueprint("modes", __name__)
@@ -60,6 +91,8 @@ def create_blueprint():
     bp.add_url_rule("/get_vehicle_mode", view_func=get_vehicle_mode)
     bp.add_url_rule("/set_test_mode", methods=["POST"], view_func=set_test_mode)
     bp.add_url_rule("/get_test_mode", view_func=get_test_mode)
+    bp.add_url_rule("/set_solar_roof", methods=["POST"], view_func=set_solar_roof)
+    bp.add_url_rule("/get_solar_roof", view_func=get_solar_roof)
     return bp
 
 
@@ -68,3 +101,5 @@ def register(app):
     app.add_url_rule("/get_vehicle_mode", view_func=get_vehicle_mode)
     app.add_url_rule("/set_test_mode", methods=["POST"], view_func=set_test_mode)
     app.add_url_rule("/get_test_mode", view_func=get_test_mode)
+    app.add_url_rule("/set_solar_roof", methods=["POST"], view_func=set_solar_roof)
+    app.add_url_rule("/get_solar_roof", view_func=get_solar_roof)

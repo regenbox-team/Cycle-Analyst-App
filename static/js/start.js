@@ -92,6 +92,18 @@ async function fetchVehicleMode() {
   }
 }
 
+async function setSolarRoof(enabled) {
+  try {
+    await fetch("/set_solar_roof", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled })
+    });
+  } catch (err) {
+    console.error("Failed to set solar roof", err);
+  }
+}
+
 function openResumeModal() {
   document.getElementById("resume-modal").style.display = "block";
 }
@@ -110,6 +122,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const testToggle = document.getElementById('test-mode-toggle');
   const photoToggle = document.getElementById('photo-capture-enabled');
   const photoInterval = document.getElementById('photo-capture-interval');
+  const solarRoofToggle = document.getElementById('solar-roof-enabled');
 
   const syncPhotoInputs = () => {
     if (!photoToggle || !photoInterval) return;
@@ -125,6 +138,9 @@ window.addEventListener("DOMContentLoaded", () => {
   if (testToggle) testToggle.addEventListener('change', () => {
     isTest = !!testToggle.checked;
     setVehicleMode(deriveMode(selectedVehicle, isTest));
+  });
+  if (solarRoofToggle) solarRoofToggle.addEventListener('change', () => {
+    setSolarRoof(!!solarRoofToggle.checked);
   });
   if (photoToggle) photoToggle.addEventListener('change', syncPhotoInputs);
 

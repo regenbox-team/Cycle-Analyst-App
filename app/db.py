@@ -23,6 +23,7 @@ def _ensure_log_gps_columns(conn: sqlite3.Connection) -> None:
         ("solar_shunt_v", "REAL"),
         ("solar_power_w", "REAL"),
         ("solar_temperature_c", "REAL"),
+        ("solar_enabled", "INTEGER DEFAULT 1"),
     ]
     for name, typ in desired:
         if name not in cols:
@@ -30,6 +31,10 @@ def _ensure_log_gps_columns(conn: sqlite3.Connection) -> None:
                 conn.execute(f"ALTER TABLE logs ADD COLUMN {name} {typ}")
             except Exception:
                 pass
+    try:
+        conn.execute("UPDATE logs SET solar_enabled = 1 WHERE solar_enabled IS NULL")
+    except Exception:
+        pass
 
 
 def init_db(mode: str | None = None):

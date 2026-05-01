@@ -95,6 +95,9 @@ def _fetch_session_rows(db_path: str, session_id: str) -> list[dict[str, Any]]:
             def col(name: str) -> str:
                 return name if name in cols else f"NULL AS {name}"
 
+            def bool_col(name: str) -> str:
+                return name if name in cols else f"1 AS {name}"
+
             rows = conn.execute(
                 f"""
                 SELECT timestamp, session, raw, user,
@@ -102,7 +105,8 @@ def _fetch_session_rows(db_path: str, session_id: str) -> list[dict[str, Any]]:
                        {col("gps_speed_kph")}, {col("gps_track_deg")}, {col("gps_fix")},
                        {col("gps_sats")}, {col("gps_hdop")},
                        {col("solar_current_a")}, {col("solar_bus_v")}, {col("solar_shunt_v")},
-                       {col("solar_power_w")}, {col("solar_temperature_c")}
+                       {col("solar_power_w")}, {col("solar_temperature_c")},
+                       {bool_col("solar_enabled")}
                 FROM logs
                 WHERE session = ?
                 ORDER BY id
@@ -128,6 +132,7 @@ def _fetch_session_rows(db_path: str, session_id: str) -> list[dict[str, Any]]:
                 "solar_shunt_v": r[14],
                 "solar_power_w": r[15],
                 "solar_temperature_c": r[16],
+                "solar_enabled": r[17],
             }
             for r in rows
         ]
@@ -183,18 +188,20 @@ def monitor_upload_photo(
     generator_power_w = None
     if voltage is not None and generator_current_a is not None:
         generator_power_w = max(0.0, voltage * generator_current_a)
+    metrics = metrics_snapshot or state.session_metrics
+    solar_enabled = bool(metrics.get("solar_enabled", state.solar_roof_enabled))
     solar = solar_snapshot or state.solar_sensor
-    solar_power_w = _safe_float(solar.get("power_w"))
+    solar_power_w = _safe_float(solar.get("power_w")) if solar_enabled else 0.0
     if solar_power_w is None:
         solar_current_a = _safe_float(solar.get("current_a")) or 0.0
         solar_bus_v = _safe_float(solar.get("bus_v")) or 0.0
         solar_power_w = max(0.0, solar_current_a * solar_bus_v)
-    metrics = metrics_snapshot or state.session_metrics
     payload = {
         "device_id": _device_id(),
         "session_id": state.session_id,
         "mode": _mode_from_db_path(get_db_file()),
         "test_mode": 1 if is_test_mode() else 0,
+        "solar_enabled": 1 if solar_enabled else 0,
         "captured_at": captured_at,
         "distance_km": distance_km,
         "interval_km": interval_km,
@@ -215,11 +222,12 @@ def monitor_upload_photo(
         "gps_uphill_m": metrics.get("gps_uphill_m"),
         "solar_power_w": solar_power_w,
         "generator_power_w": generator_power_w,
-        "solar_wh": metrics.get("solar_Wh"),
+        "solar_wh": metrics.get("solar_Wh") if solar_enabled else 0.0,
         "metrics": {
             "distance_km": metrics.get("distance_km"),
             "gps_uphill_m": metrics.get("gps_uphill_m"),
-            "solar_Wh": metrics.get("solar_Wh"),
+            "solar_enabled": solar_enabled,
+            "solar_Wh": metrics.get("solar_Wh") if solar_enabled else 0.0,
             "speed_kph": speed_kph,
             "solar_power_w": solar_power_w,
             "generator_power_w": generator_power_w,
@@ -256,6 +264,7 @@ def _send_heartbeat(url: str, device_id: str) -> None:
         "session_active": 1 if state.session_active else 0,
         "mode": _mode_from_db_path(current_db),
         "test_mode": 1 if is_test_mode() else 0,
+        "solar_enabled": 1 if bool(state.session_metrics.get("solar_enabled", state.solar_roof_enabled)) else 0,
         "gps_available": 1 if gps_ok else 0,
         "gps_lat": gps.get("lat") if gps_ok else None,
         "gps_lon": gps.get("lon") if gps_ok else None,
@@ -288,13 +297,16 @@ def _sync_once() -> None:
             rows = _fetch_session_rows(db_path, sid)
             if not rows:
                 continue
+            metrics = _metrics_for_session(sid) or {}
+            solar_enabled = bool(metrics.get("solar_enabled", rows[0].get("solar_enabled", True)))
             payload = {
                 "device_id": device_id,
                 "session_id": sid,
                 "mode": mode,
                 "test_mode": 1 if is_test_mode() else 0,
+                "solar_enabled": 1 if solar_enabled else 0,
                 "telemetry_samples": rows,
-                "metrics": _metrics_for_session(sid),
+                "metrics": metrics,
             }
             if not _upload_session(url, payload):
                 return

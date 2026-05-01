@@ -398,6 +398,7 @@
               <th>Device</th>
               <th>Session</th>
               <th>Mode</th>
+              <th title="Solar session">☀️</th>
               <th>Actions</th>
               <th>
                 Start
@@ -426,6 +427,7 @@
               <td>{{ s["device_id"] }}</td>
               <td>{{ s["session_id"] }}</td>
               <td>{{ s["mode"] }}</td>
+              <td>{{ "☀️" if s["solar_enabled"] else "" }}</td>
               <td>
                 <a class="download-arrow" href="/api/export_session?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}" aria-label="Download JSON">↓</a>
                 <a class="action-link primary" href="/api/export_gpx?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}">GPX</a>

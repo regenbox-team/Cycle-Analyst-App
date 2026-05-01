@@ -3,7 +3,7 @@ import os, time, json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from .config import (
-    SESSION_FILE, SESSION_STATE_FILE, SESSION_METRICS_DIR, USER_FILE,
+    SESSION_FILE, SESSION_STATE_FILE, SESSION_METRICS_DIR, USER_FILE, SOLAR_ROOF_FILE,
 )
 
 # Live state used across modules
@@ -15,6 +15,7 @@ session_active: bool = False
 reader_started: bool = False
 gps_reader_started: bool = False
 monitor_started: bool = False
+solar_roof_enabled: bool = True
 
 # GPS state
 gps_state = {
@@ -103,6 +104,7 @@ session_metrics = {
     "gps_uphill_m": 0.0,
     "last_gps_alt_m": None,
     "photo_capture": default_photo_capture_settings(),
+    "solar_enabled": True,
 }
 
 
@@ -151,6 +153,21 @@ def load_current_user() -> str:
         except Exception:
             return "JD"
     return "JD"
+
+
+def save_solar_roof_enabled(flag: bool) -> None:
+    with open(SOLAR_ROOF_FILE, "w") as f:
+        f.write("true" if flag else "false")
+
+
+def load_solar_roof_enabled() -> bool:
+    if os.path.exists(SOLAR_ROOF_FILE):
+        try:
+            with open(SOLAR_ROOF_FILE, "r") as f:
+                return f.read().strip().lower() == "true"
+        except Exception:
+            return True
+    return True
 
 
 def metrics_json_path(for_session: str | None = None) -> str | None:

@@ -60,6 +60,7 @@ def create_app(start_reader: bool = False) -> Flask:
     state.latest_raw_values = None
     state.current_user = state.load_current_user()
     state.session_active = state.load_session_active()
+    state.solar_roof_enabled = state.load_solar_roof_enabled()
 
     # Migrate legacy files, then init DB and restore metrics snapshot
     migrate_legacy_files()

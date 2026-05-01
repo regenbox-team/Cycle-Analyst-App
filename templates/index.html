@@ -153,9 +153,13 @@
     <div class="box power-history-box">
       <div class="box-title">Power Trends</div>
       <div class="power-trends-controls">
+        <button id="power-chart-cumulative" class="dashboard-button">Cumulative</button>
         <button id="power-series-motor" class="dashboard-button active-chart">Motor</button>
         <button id="power-series-human" class="dashboard-button active-chart">Human</button>
         <button id="power-series-solar" class="dashboard-button active-chart">Solar</button>
+        <button id="power-history-zoom-out" class="dashboard-button" title="Show more time">-</button>
+        <span id="power-history-window" class="power-history-window">3 min</span>
+        <button id="power-history-zoom-in" class="dashboard-button" title="Show less time">+</button>
       </div>
       <div class="power-history-canvas-wrap">
         <canvas id="power-history-chart"></canvas>

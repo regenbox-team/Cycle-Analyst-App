@@ -97,6 +97,7 @@ def _empty_metrics() -> dict[str, Any]:
         "solar_power_sum": 0.0,
         "solar_power_max": 0.0,
         "solar_power_count": 0,
+        "solar_enabled": True,
         "positive_Wh": 0.0,
         "regen_Wh": 0.0,
         "human_Wh": 0.0,
@@ -148,13 +149,24 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
         dt = _bounded_dt(last_ts, current_ts)
         last_ts = current_ts or last_ts
 
-        solar_a = _non_negative(sample.get("solar_current_a"))
-        solar_v = _non_negative(sample.get("solar_bus_v"))
+        sample_solar_enabled = sample.get("solar_enabled")
+        if sample_solar_enabled is None:
+            solar_enabled = True
+        else:
+            try:
+                solar_enabled = bool(int(sample_solar_enabled))
+            except Exception:
+                solar_enabled = bool(sample_solar_enabled)
+        if not solar_enabled:
+            m["solar_enabled"] = False
+
+        solar_a = _non_negative(sample.get("solar_current_a")) if solar_enabled else 0.0
+        solar_v = _non_negative(sample.get("solar_bus_v")) if solar_enabled else 0.0
         solar_power = _safe_float(sample.get("solar_power_w"))
         if solar_power is None:
             solar_power = solar_v * solar_a
-        solar_power = max(0.0, solar_power)
-        has_solar = (
+        solar_power = max(0.0, solar_power) if solar_enabled else 0.0
+        has_solar = solar_enabled and (
             sample.get("solar_current_a") is not None
             or sample.get("solar_bus_v") is not None
             or sample.get("solar_power_w") is not None

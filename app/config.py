@@ -8,6 +8,7 @@ LIVE_PHOTO_DIR = os.path.join(BASE_DIR, "live_photo")
 
 TEST_MODE_FILE = os.path.join(BASE_DIR, "test_mode.txt")
 VEHICLE_MODE_FILE = os.path.join(BASE_DIR, "vehicle_mode.txt")
+SOLAR_ROOF_FILE = os.path.join(BASE_DIR, "solar_roof.txt")
 SESSION_FILE = os.path.join(BASE_DIR, "current_session.txt")
 SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.txt")
 SESSION_METRICS_DIR = os.path.join(BASE_DIR, "session_metrics")

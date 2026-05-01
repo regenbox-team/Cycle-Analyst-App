@@ -9,6 +9,8 @@ MAX_METRICS_DT_SECONDS = 2.0
 
 
 def _migrate_legacy_metrics(store: dict) -> None:
+    if "solar_enabled" not in store:
+        store["solar_enabled"] = True
     if "human_Ah" not in store:
         store["human_Ah"] = 0
     if "solar_Ah" not in store:
@@ -42,6 +44,7 @@ def _migrate_legacy_metrics(store: dict) -> None:
 
 
 def reset_session_state():
+    from . import state as _state
     session_metrics.update({
         "speed_max": 0,
         "speed_sum": 0,
@@ -83,6 +86,7 @@ def reset_session_state():
         "gps_uphill_m": 0.0,
         "last_gps_alt_m": None,
         "photo_capture": default_photo_capture_settings(),
+        "solar_enabled": bool(_state.solar_roof_enabled),
     })
 
     # Ensure at least one checkpoint exists
@@ -99,13 +103,16 @@ def update_metrics(data, now=None, solar_sample=None):
     distance = data[4]
     temp = data[5]
     human_a = data[13]
+    solar_enabled = bool(session_metrics.get("solar_enabled", True))
+    if not solar_enabled:
+        solar_sample = None
     solar_a = max(0.0, getattr(solar_sample, "current_a", 0.0) or 0.0)
     solar_v = max(0.0, getattr(solar_sample, "bus_v", 0.0) or 0.0)
 
     if now is None:
         now = _time.time()
 
-    session_metrics["ca_reset_prompt"] = 53 <= v <= 54.6 and distance > 1
+    session_metrics["ca_reset_prompt"] = (not solar_enabled) and 53 <= v <= 54.6 and distance > 1
 
     if not hasattr(update_metrics, "last_time"):
         update_metrics.last_time = None
@@ -208,7 +215,7 @@ def update_metrics(data, now=None, solar_sample=None):
 def update_solar_only_metrics(solar_sample, now=None):
     import time as _time
 
-    if solar_sample is None:
+    if solar_sample is None or not bool(session_metrics.get("solar_enabled", True)):
         return
 
     solar_a = max(0.0, getattr(solar_sample, "current_a", 0.0) or 0.0)
@@ -257,9 +264,12 @@ def restore_session_metrics(session_id: str, db_file: str, parse_line_func):
     # fallback to DB
     try:
         with sqlite3.connect(db_file) as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(logs)").fetchall()}
+            solar_enabled_col = "solar_enabled" if "solar_enabled" in cols else "1 AS solar_enabled"
             rows = conn.execute(
-                """
-                SELECT raw, solar_current_a, solar_bus_v, solar_shunt_v
+                f"""
+                SELECT raw, solar_current_a, solar_bus_v, solar_shunt_v,
+                       {solar_enabled_col}
                 FROM logs
                 WHERE session = ?
                 ORDER BY id
@@ -270,7 +280,8 @@ def restore_session_metrics(session_id: str, db_file: str, parse_line_func):
                 parsed = parse_line_func(row[0])
                 if parsed:
                     solar_sample = None
-                    if row[1] is not None or row[2] is not None or row[3] is not None:
+                    session_metrics["solar_enabled"] = bool(row[4])
+                    if row[4] and (row[1] is not None or row[2] is not None or row[3] is not None):
                         class _SolarSample:
                             pass
                         solar_sample = _SolarSample()

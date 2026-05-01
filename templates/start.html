@@ -6,28 +6,27 @@
   <title>Cycle Analyst Start</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body>
-  <h1>Vehicule Dashboard</h1>
-
-  <div class="section" style="padding-top:0;">
+<body class="start-page">
+  <main class="start-shell">
+    <header class="start-hero">
+      <div class="start-kicker">Cycle Analyst</div>
+      <h1>Start Session</h1>
+    </header>
 
     {% if session_active %}
-      <div class="card" style="max-width:720px;">
-        <div style="text-align:center; width:100%;">
+      <div class="card active-session-card">
+        <div class="active-session-content">
           <p>Session is currently active.</p>
           <a href="/dashboard" class="start-button">Go to Session in Progress</a>
         </div>
       </div>
     {% else %}
 
-      <!-- Vehicle selector card with dark background and status -->
-      <div class="card card-dark" id="vehicle-card" style="max-width: 820px;">
+      <div class="card card-dark start-card" id="vehicle-card">
         <div class="vehicle-title">Select Vehicle</div>
-        <!-- Small test mode toggle, top-left -->
         <div class="vehicle-controls">
           <label class="toggle-label"><input type="checkbox" id="test-mode-toggle"> Test Mode</label>
         </div>
-        <!-- Vehicle layout -->
         <div class="vehicle-select">
           <div class="vehicle-option" id="vehicle-supercycle" data-vehicle="supercycle" title="Supercycle">
             <img id="img-supercycle"
@@ -41,33 +40,53 @@
         </div>
       </div>
 
-      <!-- Start form with merged User + GPS card and big Start button -->
-      <form id="start-form" method="POST" action="/start_session" style="width:100%; display:flex; flex-direction:column; align-items:center;">
-        <div class="card" id="user-gps-card" style="max-width:820px;">
-          <div style="width:100%; display:flex; flex-direction:column; gap:0.6rem; align-items:stretch;">
-            <div class="kv" style="grid-template-columns: auto 1fr; align-items:center;">
-              <div class="kv-key">Select User:</div>
-              <div class="kv-val" style="display:flex; gap:0.8rem; align-items:center; flex-wrap:wrap;">
-                <label><input type="radio" name="user" value="JD" checked> JD</label>
-                <label><input type="radio" name="user" value="LL"> LL</label>
-              </div>
+      <form id="start-form" class="start-form" method="POST" action="/start_session">
+        <div class="card settings-card" id="session-settings-card">
+          <div class="settings-header">
+            <div>
+              <div class="settings-eyebrow">Settings</div>
+              <h2>Session setup</h2>
             </div>
-            <div class="kv" style="grid-template-columns: auto 1fr; align-items:center;">
-              <div class="kv-key">GPS Status:</div>
-              <div class="kv-val"><button id="gps-status-pill" disabled>GPS: Checking...</button></div>
-              <div class="kv-key">Add Route:</div>
-              <div class="kv-val">
-                <input type="file" id="gpx-file-input-start" accept=".gpx" style="display:none" />
-                <button class="dashboard-button" id="gpx-upload-start" type="button">Upload GPX</button>
+            <button id="gps-status-pill" class="status-pill" disabled>GPS: Checking...</button>
+          </div>
+
+          <div class="settings-grid">
+            <section class="settings-block">
+              <div class="settings-label">Rider</div>
+              <div class="choice-row" role="radiogroup" aria-label="Select user">
+                <label class="choice-pill">
+                  <input type="radio" name="user" value="JD" checked>
+                  <span>JD</span>
+                </label>
+                <label class="choice-pill">
+                  <input type="radio" name="user" value="LL">
+                  <span>LL</span>
+                </label>
               </div>
-            </div>
-            <div class="kv" style="grid-template-columns: auto 1fr auto auto; align-items:center; gap:0.8rem;">
-              <div class="kv-key">Live Photos:</div>
-              <div class="kv-val">
-                <label><input type="checkbox" id="photo-capture-enabled" name="photo_capture_enabled"> Enable webcam capture</label>
-              </div>
-              <div class="kv-key">Every</div>
-              <div class="kv-val" style="display:flex; align-items:center; gap:0.5rem;">
+            </section>
+
+            <section class="settings-block">
+              <div class="settings-label">Power sources</div>
+              <label class="setting-switch">
+                <span>Solar roof</span>
+                <input type="checkbox" id="solar-roof-enabled" name="solar_roof_enabled" {% if solar_roof_enabled %}checked{% endif %}>
+              </label>
+            </section>
+
+            <section class="settings-block">
+              <div class="settings-label">Route</div>
+              <input class="visually-hidden" type="file" id="gpx-file-input-start" accept=".gpx" />
+              <button class="dashboard-button" id="gpx-upload-start" type="button">Upload GPX</button>
+            </section>
+
+            <section class="settings-block live-photo-block">
+              <div class="settings-label">Live photos</div>
+              <label class="setting-switch">
+                <span>Webcam capture</span>
+                <input type="checkbox" id="photo-capture-enabled" name="photo_capture_enabled">
+              </label>
+              <label class="interval-control" for="photo-capture-interval">
+                <span>Every</span>
                 <input
                   type="number"
                   id="photo-capture-interval"
@@ -75,33 +94,27 @@
                   min="0.1"
                   step="0.1"
                   value="1.0"
-                  style="width:6rem; padding:0.35rem 0.45rem;"
                 />
                 <span>km</span>
-              </div>
-            </div>
-            <div style="margin-top:0.6rem;">
-              <button class="start-button start-button-large" type="submit" id="start-btn" disabled>Start Session</button>
-            </div>
+              </label>
+            </section>
           </div>
+
+          <button class="start-button start-button-large" type="submit" id="start-btn" disabled>Start Session</button>
         </div>
       </form>
 
-      <!-- Other actions card -->
-      <div class="card" id="actions-card" style="max-width:820px;">
-        <div style="display:flex; gap:0.6rem; justify-content:center; flex-wrap:wrap; width:100%;">
+      <div class="card start-card actions-card" id="actions-card">
+        <div class="action-row">
           <button class="start-button" type="button" onclick="openResumeModal()">Resume Session</button>
-          <a id="link-live-logs" class="dashboard-button" href="/live_logs">🔍 View Live Logs</a>
+          <a id="link-live-logs" class="dashboard-button" href="/live_logs">View Live Logs</a>
           <a id="link-select-session" class="dashboard-button" href="/select_session">View Session Summaries</a>
           <a id="link-edit-session" class="dashboard-button" href="/edit_session">Edit Logs</a>
         </div>
       </div>
 
-      <!-- Route upload card removed per request -->
-
     {% endif %}
-
-  </div>
+  </main>
 
   <div id="resume-modal" class="modal">
     <div class="modal-content">
