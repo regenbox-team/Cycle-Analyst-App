@@ -278,6 +278,56 @@
         font-weight: 750;
       }
 
+      .metrics-groups {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .metrics-box {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .metrics-box-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .metrics-box-head h2 {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      #metrics-age {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        opacity: 0.68;
+        white-space: nowrap;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .metric {
+        box-shadow: none;
+        background: var(--panel-soft);
+      }
+
       .action-links {
         display: flex;
         flex-wrap: wrap;
@@ -405,8 +455,12 @@
         #suntrip-map {
           min-height: 310px;
         }
+        .metrics-groups {
+          grid-template-columns: 1fr;
+        }
+
         .metrics {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
         .project-info {
           padding: 18px;
@@ -452,6 +506,11 @@
         }
         .metrics {
           grid-template-columns: 1fr;
+        }
+        .metrics-box-head {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 4px;
         }
         .panel-head {
           align-items: flex-start;
@@ -512,32 +571,50 @@
           </section>
         </div>
 
-        <section class="metrics" aria-label="Métriques de session">
-          <div class="metric">
-            <div class="metric-label">Vitesse actuelle</div>
-            <div class="metric-value"><span id="speed">--</span><span class="metric-unit">km/h</span></div>
+      <section class="metrics-groups" aria-label="Métriques de session">
+        <div class="metrics-box">
+          <div class="metrics-box-head">
+            <h2>Données en quasi-direct</h2>
+            <span id="metrics-age">--</span>
           </div>
-          <div class="metric">
-            <div class="metric-label">Distance parcourue aujourd'hui</div>
-            <div class="metric-value"><span id="distance">--</span><span class="metric-unit">km</span></div>
+
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-label">Vitesse actuelle</div>
+              <div class="metric-value"><span id="speed">--</span><span class="metric-unit">km/h</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Puissance solaire</div>
+              <div class="metric-value"><span id="solar-power">--</span><span class="metric-unit">W</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Puissance musculaire</div>
+              <div class="metric-value"><span id="generator-power">--</span><span class="metric-unit">W</span></div>
+            </div>
           </div>
-          <div class="metric">
-            <div class="metric-label">Dénivelé du jour</div>
-            <div class="metric-value"><span id="uphill">--</span><span class="metric-unit">m</span></div>
+        </div>
+
+        <div class="metrics-box">
+          <div class="metrics-box-head">
+            <h2>Données journalières</h2>
           </div>
-          <div class="metric">
-            <div class="metric-label">Puissance solaire</div>
-            <div class="metric-value"><span id="solar-power">--</span><span class="metric-unit">W</span></div>
+
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-label">Production solaire de la journée</div>
+              <div class="metric-value"><span id="solar-total">--</span><span class="metric-unit">Wh</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Distance parcourue aujourd'hui</div>
+              <div class="metric-value"><span id="distance">--</span><span class="metric-unit">km</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Dénivelé du jour</div>
+              <div class="metric-value"><span id="uphill">--</span><span class="metric-unit">m</span></div>
+            </div>
           </div>
-          <div class="metric">
-            <div class="metric-label">Puissance musculaire</div>
-            <div class="metric-value"><span id="generator-power">--</span><span class="metric-unit">W</span></div>
-          </div>
-          <div class="metric">
-            <div class="metric-label">Production solaire de la journée</div>
-            <div class="metric-value"><span id="solar-total">--</span><span class="metric-unit">Wh</span></div>
-          </div>
-        </section>
+        </div>
+      </section>
 
         <nav class="action-links" aria-label="Liens utiles">
           <a class="link-button" href="https://supercycle.bike/">Vers le site supercycle.bike</a>
@@ -789,6 +866,7 @@
         setText("captured-at", latest.captured_at || "Dernière capture");
         const photoAge = formatAge(data.seconds_since_latest);
         setText("time-since", photoAge === "--" ? "Dernière photo prise : --" : `Dernière photo prise ${photoAge}`);
+        setText("metrics-age", photoAge === "--" ? "--" : photoAge);
         setText("session-label", `${latest.device_id || ""} · ${latest.session_id || ""}`);
 
         const metrics = latest.metrics || {};
