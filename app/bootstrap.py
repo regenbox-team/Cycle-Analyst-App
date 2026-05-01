@@ -2,7 +2,7 @@ import os
 import shutil
 from .config import (
     BASE_DIR, TEST_MODE_FILE, VEHICLE_MODE_FILE, SESSION_FILE, SESSION_STATE_FILE,
-    SESSION_METRICS_DIR, DB_FILE, USER_FILE, SOLAR_ROOF_FILE
+    SESSION_METRICS_DIR, DB_FILE, USER_FILE, SOLAR_ROOF_FILE, USERS_FILE, CURRENT_USER_ID_FILE
 )
 
 LEGACY_FILES = {
@@ -12,6 +12,8 @@ LEGACY_FILES = {
     "current_session.txt": SESSION_FILE,
     "session_state.txt": SESSION_STATE_FILE,
     "current_user.txt": USER_FILE,
+    "current_user_id.txt": CURRENT_USER_ID_FILE,
+    "users.json": USERS_FILE,
     "ride_data.db": DB_FILE,
 }
 

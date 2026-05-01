@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cycle Analyst Users</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="start-page users-page">
+  <main class="start-shell">
+    <header class="start-hero">
+      <div class="start-kicker">Cycle Analyst</div>
+      <h1>{% if setup %}Set Up Users{% else %}Users{% endif %}</h1>
+    </header>
+
+    <div class="card settings-card users-card">
+      <div class="settings-header">
+        <div>
+          <div class="settings-eyebrow">Profiles</div>
+          <h2>Visible on start page</h2>
+        </div>
+        <a class="dashboard-button" href="/start">Back</a>
+      </div>
+
+      {% if not active_users %}
+        <p class="users-empty">Create at least one user profile before starting a session.</p>
+      {% endif %}
+
+      <div class="users-list">
+        {% for user in users %}
+          <div class="user-row {% if not user['active'] %}user-row-muted{% endif %}">
+            <div class="user-avatar">{{ user["initials"] }}</div>
+            <div class="user-main">
+              <div class="user-name">{{ user["first_name"] }} {{ user["last_name"] }}</div>
+              <div class="user-meta">
+                {{ user["date_of_birth"] or "No birth date" }} · {{ user["gender"] or "No gender" }}
+                {% if not user["active"] %} · hidden{% endif %}
+              </div>
+            </div>
+            {% if user["active"] %}
+              <form method="POST" action="/users/{{ user['user_id'] }}/hide">
+                <button class="dashboard-button" type="submit">Hide</button>
+              </form>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if setup and server_users %}
+      <div class="card settings-card users-card">
+        <div class="settings-header">
+          <div>
+            <div class="settings-eyebrow">Monitor</div>
+            <h2>Import existing user</h2>
+          </div>
+        </div>
+        <div class="users-list">
+          {% for user in server_users %}
+            <div class="user-row">
+              <div class="user-avatar">{{ user["initials"] }}</div>
+              <div class="user-main">
+                <div class="user-name">{{ user["first_name"] }} {{ user["last_name"] }}</div>
+                <div class="user-meta">{{ user["date_of_birth"] or "No birth date" }} · {{ user["gender"] or "No gender" }}</div>
+              </div>
+              <form method="POST" action="/users/import">
+                <input type="hidden" name="user_id" value="{{ user['user_id'] }}">
+                <button class="dashboard-button" type="submit">Import</button>
+              </form>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    <form class="card settings-card users-card" method="POST" action="/users/create">
+      <div class="settings-header">
+        <div>
+          <div class="settings-eyebrow">New profile</div>
+          <h2>Create user</h2>
+        </div>
+      </div>
+
+      <div class="user-form-grid">
+        <label>
+          <span>Initials</span>
+          <input name="initials" maxlength="6" placeholder="AB">
+        </label>
+        <label>
+          <span>First name</span>
+          <input name="first_name" required>
+        </label>
+        <label>
+          <span>Last name</span>
+          <input name="last_name" required>
+        </label>
+        <label>
+          <span>Birth date</span>
+          <input name="date_of_birth" type="date">
+        </label>
+        <label>
+          <span>Gender</span>
+          <input name="gender" placeholder="Optional">
+        </label>
+      </div>
+
+      <button class="start-button start-button-large" type="submit">Create User</button>
+    </form>
+  </main>
+</body>
+</html>

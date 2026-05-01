@@ -128,6 +128,156 @@ def _empty_metrics() -> dict[str, Any]:
     }
 
 
+def _finalize_metrics(m: dict[str, Any]) -> dict[str, Any]:
+    if m["power_max"] == float("-inf"):
+        m["power_max"] = 0.0
+    if m["power_min"] == float("inf"):
+        m["power_min"] = 0.0
+    return m
+
+
+def _sample_user(sample: dict[str, Any]) -> str | None:
+    user = sample.get("user") or sample.get("user_initials")
+    if user is None:
+        return None
+    user = str(user).strip()
+    return user or None
+
+
+def _sample_solar_enabled(sample: dict[str, Any]) -> bool:
+    value = sample.get("solar_enabled")
+    if value is None:
+        return True
+    try:
+        return bool(int(value))
+    except Exception:
+        return bool(value)
+
+
+def _solar_power_for_sample(sample: dict[str, Any], solar_enabled: bool) -> tuple[float, bool]:
+    if not solar_enabled:
+        return 0.0, False
+    solar_a = _non_negative(sample.get("solar_current_a"))
+    solar_v = _non_negative(sample.get("solar_bus_v"))
+    solar_power = _safe_float(sample.get("solar_power_w"))
+    if solar_power is None:
+        solar_power = solar_v * solar_a
+    has_solar = (
+        sample.get("solar_current_a") is not None
+        or sample.get("solar_bus_v") is not None
+        or sample.get("solar_power_w") is not None
+    )
+    return max(0.0, solar_power), has_solar
+
+
+def _add_instant_metrics(m: dict[str, Any], sample: dict[str, Any], values: list[float] | None, solar_power: float, has_solar: bool) -> None:
+    m["sample_count"] += 1
+    if has_solar:
+        m["solar_samples"] += 1
+        m["solar_power_sum"] += solar_power
+        m["solar_power_count"] += 1
+        m["solar_power_max"] = max(m["solar_power_max"], solar_power)
+
+    if values:
+        v = values[1]
+        a = values[2]
+        speed = values[3]
+        temp = values[5]
+        human_a = values[13]
+        power = v * a
+        human_power = v * human_a
+        if speed >= 1:
+            m["speed_sum"] += speed
+            m["speed_count"] += 1
+            m["speed_max"] = max(m["speed_max"], speed)
+            m["power_sum"] += power
+            m["power_max"] = max(m["power_max"], power)
+            m["power_min"] = min(m["power_min"], power)
+            m["human_power_sum"] += human_power
+            m["human_power_count"] += 1
+            m["human_power_max"] = max(m["human_power_max"], human_power)
+            m["temp_sum"] += temp
+            m["temp_count"] += 1
+            m["temp_max"] = max(m["temp_max"], temp)
+
+    gps = _valid_gps(sample.get("gps_lat"), sample.get("gps_lon"))
+    if gps is not None:
+        m["gps_points"] += 1
+        alt = _safe_float(sample.get("gps_alt"))
+        if alt is not None:
+            m["gps_alt_min"] = alt if m["gps_alt_min"] is None else min(m["gps_alt_min"], alt)
+            m["gps_alt_max"] = alt if m["gps_alt_max"] is None else max(m["gps_alt_max"], alt)
+        gps_speed = _safe_float(sample.get("gps_speed_kph"))
+        if gps_speed is not None and gps_speed >= 0:
+            m["gps_speed_sum"] += gps_speed
+            m["gps_speed_count"] += 1
+            m["gps_speed_max"] = max(m["gps_speed_max"], gps_speed)
+
+    gps_fix = sample.get("gps_fix")
+    if gps_fix is not None:
+        m["gps_fix_samples"] += 1
+        if bool(gps_fix):
+            m["gps_fix_count"] += 1
+    sats = _safe_float(sample.get("gps_sats"))
+    if sats is not None:
+        m["gps_sats_sum"] += sats
+        m["gps_sats_count"] += 1
+    hdop = _safe_float(sample.get("gps_hdop"))
+    if hdop is not None:
+        m["gps_hdop_sum"] += hdop
+        m["gps_hdop_count"] += 1
+
+
+def _add_interval_metrics(
+    m: dict[str, Any],
+    sample: dict[str, Any],
+    values: list[float] | None,
+    previous_sample: dict[str, Any] | None,
+    previous_values: list[float] | None,
+    dt: float,
+    solar_power: float,
+) -> None:
+    m["duration"] += dt
+    if dt <= 0:
+        return
+
+    if values:
+        v = values[1]
+        a = values[2]
+        raw_distance = values[4]
+        human_a = values[13]
+        power = v * a
+        m["Ah"] += a * dt / 3600
+        if abs(power) > 2:
+            if a > 0:
+                m["positive_Wh"] += power * dt / 3600
+            elif a < 0:
+                m["regen_Wh"] += abs(power) * dt / 3600
+        m["human_Wh"] += (v * human_a) * dt / 3600
+        if previous_values:
+            previous_distance = previous_values[4]
+            if raw_distance < previous_distance - 0.1:
+                m["ca_reset_count"] += 1
+            else:
+                m["distance"] += max(0.0, raw_distance - previous_distance)
+
+    m["solar_Wh"] += solar_power * dt / 3600
+
+    gps = _valid_gps(sample.get("gps_lat"), sample.get("gps_lon"))
+    previous_gps = _valid_gps(previous_sample.get("gps_lat"), previous_sample.get("gps_lon")) if previous_sample else None
+    if gps is not None and previous_gps is not None:
+        m["gps_distance_km"] += _haversine_km(previous_gps, gps)
+
+    alt = _safe_float(sample.get("gps_alt"))
+    previous_alt = _safe_float(previous_sample.get("gps_alt")) if previous_sample else None
+    if alt is not None and previous_alt is not None:
+        diff = alt - previous_alt
+        if diff > 0.5:
+            m["gps_uphill_m"] += diff
+        elif diff < -0.5:
+            m["gps_downhill_m"] += abs(diff)
+
+
 def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]:
     m = _empty_metrics()
     last_ts = None
@@ -149,28 +299,11 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
         dt = _bounded_dt(last_ts, current_ts)
         last_ts = current_ts or last_ts
 
-        sample_solar_enabled = sample.get("solar_enabled")
-        if sample_solar_enabled is None:
-            solar_enabled = True
-        else:
-            try:
-                solar_enabled = bool(int(sample_solar_enabled))
-            except Exception:
-                solar_enabled = bool(sample_solar_enabled)
+        solar_enabled = _sample_solar_enabled(sample)
         if not solar_enabled:
             m["solar_enabled"] = False
 
-        solar_a = _non_negative(sample.get("solar_current_a")) if solar_enabled else 0.0
-        solar_v = _non_negative(sample.get("solar_bus_v")) if solar_enabled else 0.0
-        solar_power = _safe_float(sample.get("solar_power_w"))
-        if solar_power is None:
-            solar_power = solar_v * solar_a
-        solar_power = max(0.0, solar_power) if solar_enabled else 0.0
-        has_solar = solar_enabled and (
-            sample.get("solar_current_a") is not None
-            or sample.get("solar_bus_v") is not None
-            or sample.get("solar_power_w") is not None
-        )
+        solar_power, has_solar = _solar_power_for_sample(sample, solar_enabled)
         if has_solar:
             m["solar_samples"] += 1
             m["solar_power_sum"] += solar_power
@@ -260,17 +393,42 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
 
     if first_ts is not None and final_ts is not None:
         m["duration"] = max(0.0, (final_ts - first_ts).total_seconds())
-    if m["power_max"] == float("-inf"):
-        m["power_max"] = 0.0
-    if m["power_min"] == float("inf"):
-        m["power_min"] = 0.0
-    return m
+    return _finalize_metrics(m)
+
+
+def compute_timeline_metrics_by_user(samples: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    ordered = list(samples)
+    metrics_by_user: dict[str, dict[str, Any]] = {}
+    previous_sample = None
+    previous_values = None
+    previous_ts = None
+
+    for sample in ordered:
+        user = _sample_user(sample)
+        values = parse_raw_values(sample.get("raw"))
+        current_ts = parse_timestamp(sample.get("timestamp"))
+        dt = _bounded_dt(previous_ts, current_ts)
+        solar_enabled = _sample_solar_enabled(sample)
+        solar_power, has_solar = _solar_power_for_sample(sample, solar_enabled)
+
+        if user:
+            m = metrics_by_user.setdefault(user, _empty_metrics())
+            if not solar_enabled:
+                m["solar_enabled"] = False
+            _add_instant_metrics(m, sample, values, solar_power, has_solar)
+            _add_interval_metrics(m, sample, values, previous_sample, previous_values, dt, solar_power)
+
+        previous_sample = sample
+        previous_values = values
+        previous_ts = current_ts or previous_ts
+
+    return {user: _finalize_metrics(metrics) for user, metrics in metrics_by_user.items()}
 
 
 def group_samples_by_user(samples: Iterable[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for sample in samples:
-        user = sample.get("user")
+        user = sample.get("user") or sample.get("user_initials")
         if user:
             grouped[str(user)].append(sample)
     return dict(grouped)
@@ -395,3 +553,24 @@ def build_summary_table(metrics_by_user: dict[str, dict[str, Any]], users: list[
                 row.append(format_metric_value(func(metrics_by_user[user]), unit))
             table.append(row)
     return table
+
+
+def build_summary_sections(metrics_by_user: dict[str, dict[str, Any]], users: list[str]) -> list[dict[str, Any]]:
+    sections = []
+    for category, metrics in SUMMARY_GROUPS:
+        rows = []
+        for label, unit, func in metrics:
+            rows.append(
+                {
+                    "label": label,
+                    "values": [
+                        {
+                            "user": user,
+                            "value": format_metric_value(func(metrics_by_user[user]), unit),
+                        }
+                        for user in users
+                    ],
+                }
+            )
+        sections.append({"category": category, "rows": rows})
+    return sections

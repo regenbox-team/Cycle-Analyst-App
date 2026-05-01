@@ -24,6 +24,9 @@ def _ensure_log_gps_columns(conn: sqlite3.Connection) -> None:
         ("solar_power_w", "REAL"),
         ("solar_temperature_c", "REAL"),
         ("solar_enabled", "INTEGER DEFAULT 1"),
+        ("user_id", "TEXT"),
+        ("user_initials", "TEXT"),
+        ("user_snapshot_json", "TEXT"),
     ]
     for name, typ in desired:
         if name not in cols:
@@ -33,6 +36,33 @@ def _ensure_log_gps_columns(conn: sqlite3.Connection) -> None:
                 pass
     try:
         conn.execute("UPDATE logs SET solar_enabled = 1 WHERE solar_enabled IS NULL")
+    except Exception:
+        pass
+    try:
+        initials_rows = conn.execute(
+            "SELECT DISTINCT user FROM logs WHERE user IS NOT NULL AND TRIM(user) != ''"
+        ).fetchall()
+        legacy_initials = {str(row[0]).strip().upper() for row in initials_rows if row[0]}
+        if legacy_initials:
+            from .user_profiles import ensure_profiles_for_legacy_initials, profile_snapshot_json
+            profiles = ensure_profiles_for_legacy_initials(legacy_initials)
+            by_initials = {p["initials"]: p for p in profiles}
+            for initials, profile in by_initials.items():
+                conn.execute(
+                    """
+                    UPDATE logs
+                    SET user_id = COALESCE(user_id, ?),
+                        user_initials = COALESCE(user_initials, ?),
+                        user_snapshot_json = COALESCE(user_snapshot_json, ?)
+                    WHERE UPPER(user) = ? AND (user_id IS NULL OR user_initials IS NULL OR user_snapshot_json IS NULL)
+                    """,
+                    (
+                        profile["user_id"],
+                        profile["initials"],
+                        profile_snapshot_json(profile),
+                        initials,
+                    ),
+                )
     except Exception:
         pass
 

@@ -5,9 +5,32 @@ from app import state
 
 
 def switch_user():
-    state.current_user = "LL" if state.current_user == "JD" else "JD"
+    from app.user_profiles import active_profiles, get_profile
+
+    profiles = active_profiles()
+    if profiles:
+        current_id = getattr(state, "current_user_id", None)
+        current_index = next(
+            (index for index, profile in enumerate(profiles) if profile["user_id"] == current_id),
+            -1,
+        )
+        profile = profiles[(current_index + 1) % len(profiles)]
+    else:
+        next_initials = "LL" if state.current_user == "JD" else "JD"
+        profile = get_profile(next_initials)
+
+    if profile:
+        state.current_user_profile = profile
+        state.current_user_id = profile["user_id"]
+        state.current_user = profile["initials"]
+        state.save_current_user_id(state.current_user_id)
+        state.session_metrics["user_id"] = state.current_user_id
+        state.session_metrics["user_initials"] = state.current_user
+    else:
+        state.current_user = "LL" if state.current_user == "JD" else "JD"
     state.save_current_user(state.current_user)
-    return jsonify({"user": state.current_user})
+    state.save_session_metrics_to_file()
+    return jsonify({"user": state.current_user, "user_id": getattr(state, "current_user_id", None)})
 
 
 def add_ah():

@@ -87,6 +87,8 @@ def reset_session_state():
         "last_gps_alt_m": None,
         "photo_capture": default_photo_capture_settings(),
         "solar_enabled": bool(_state.solar_roof_enabled),
+        "user_id": _state.current_user_id,
+        "user_initials": _state.current_user,
     })
 
     # Ensure at least one checkpoint exists

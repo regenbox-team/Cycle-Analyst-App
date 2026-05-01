@@ -72,6 +72,8 @@ def _init_db() -> None:
                 mode TEXT,
                 test_mode INTEGER,
                 solar_enabled INTEGER DEFAULT 1,
+                current_user_id TEXT,
+                current_user_initials TEXT,
                 last_gps_lat REAL,
                 last_gps_lon REAL,
                 last_gps_ts TEXT,
@@ -94,6 +96,7 @@ def _init_db() -> None:
                 avg_speed_kph REAL,
                 uphill_m REAL,
                 solar_enabled INTEGER DEFAULT 1,
+                user_ids_json TEXT,
                 metrics_json TEXT,
                 uploaded_at TEXT,
                 UNIQUE(device_id, session_id, mode)
@@ -110,6 +113,9 @@ def _init_db() -> None:
                 timestamp TEXT,
                 raw TEXT,
                 user TEXT,
+                user_id TEXT,
+                user_initials TEXT,
+                user_snapshot_json TEXT,
                 gps_lat REAL,
                 gps_lon REAL,
                 gps_alt REAL,
@@ -158,7 +164,27 @@ def _init_db() -> None:
                 generator_power_w REAL,
                 solar_wh REAL,
                 solar_enabled INTEGER DEFAULT 1,
+                user_id TEXT,
+                user_initials TEXT,
+                user_snapshot_json TEXT,
                 metrics_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                initials TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                date_of_birth TEXT,
+                gender TEXT,
+                active INTEGER DEFAULT 1,
+                source_device_id TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                synced_at TEXT
             )
             """
         )
@@ -204,12 +230,34 @@ def _migrate_db() -> None:
             conn.execute("ALTER TABLE devices ADD COLUMN gps_available INTEGER")
         if "solar_enabled" not in device_columns:
             conn.execute("ALTER TABLE devices ADD COLUMN solar_enabled INTEGER DEFAULT 1")
+        if "current_user_id" not in device_columns:
+            conn.execute("ALTER TABLE devices ADD COLUMN current_user_id TEXT")
+        if "current_user_initials" not in device_columns:
+            conn.execute("ALTER TABLE devices ADD COLUMN current_user_initials TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                initials TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                date_of_birth TEXT,
+                gender TEXT,
+                active INTEGER DEFAULT 1,
+                source_device_id TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                synced_at TEXT
+            )
+            """
+        )
         columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
         missing = {
             "duration_sec": "REAL",
             "avg_speed_kph": "REAL",
             "uphill_m": "REAL",
             "solar_enabled": "INTEGER DEFAULT 1",
+            "user_ids_json": "TEXT",
         }
         for name, col_type in missing.items():
             if name not in columns:
@@ -224,11 +272,90 @@ def _migrate_db() -> None:
             "solar_power_w": "REAL",
             "solar_temperature_c": "REAL",
             "solar_enabled": "INTEGER DEFAULT 1",
+            "user_id": "TEXT",
+            "user_initials": "TEXT",
+            "user_snapshot_json": "TEXT",
         }
         for name, col_type in telemetry_missing.items():
             if name not in telemetry_columns:
                 conn.execute(f"ALTER TABLE {TELEMETRY_TABLE} ADD COLUMN {name} {col_type}")
         conn.execute(f"UPDATE {TELEMETRY_TABLE} SET solar_enabled = 1 WHERE solar_enabled IS NULL")
+        try:
+            from app.user_profiles import legacy_profiles_for_initials, profile_snapshot_json
+            initials_rows = conn.execute(
+                f"SELECT DISTINCT user FROM {TELEMETRY_TABLE} WHERE user IS NOT NULL AND TRIM(user) != ''"
+            ).fetchall()
+            legacy_initials = {str(row[0]).strip().upper() for row in initials_rows if row[0]}
+            legacy_profiles = legacy_profiles_for_initials(legacy_initials)
+            for profile in legacy_profiles:
+                conn.execute(
+                    """
+                    INSERT INTO users (
+                        user_id, initials, first_name, last_name, date_of_birth, gender, active,
+                        source_device_id, created_at, updated_at, synced_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        initials = excluded.initials,
+                        first_name = excluded.first_name,
+                        last_name = excluded.last_name,
+                        date_of_birth = excluded.date_of_birth,
+                        gender = excluded.gender,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        profile["user_id"],
+                        profile["initials"],
+                        profile["first_name"],
+                        profile["last_name"],
+                        profile["date_of_birth"],
+                        profile["gender"],
+                        1 if profile.get("active", True) else 0,
+                        None,
+                        profile.get("created_at"),
+                        profile.get("updated_at"),
+                        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    ),
+                )
+                conn.execute(
+                    f"""
+                    UPDATE {TELEMETRY_TABLE}
+                    SET user_id = COALESCE(user_id, ?),
+                        user_initials = COALESCE(user_initials, ?),
+                        user_snapshot_json = COALESCE(user_snapshot_json, ?)
+                    WHERE UPPER(user) = ?
+                      AND (user_id IS NULL OR user_initials IS NULL OR user_snapshot_json IS NULL)
+                    """,
+                    (
+                        profile["user_id"],
+                        profile["initials"],
+                        profile_snapshot_json(profile),
+                        profile["initials"],
+                    ),
+                )
+            session_rows = conn.execute(
+                """
+                SELECT id, device_id, session_id, mode
+                FROM sessions
+                WHERE user_ids_json IS NULL
+                """
+            ).fetchall()
+            for session in session_rows:
+                user_rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT user_id
+                    FROM {TELEMETRY_TABLE}
+                    WHERE device_id = ? AND session_id = ? AND mode = ? AND user_id IS NOT NULL
+                    """,
+                    (session["device_id"], session["session_id"], session["mode"]),
+                ).fetchall()
+                user_ids = sorted(str(row["user_id"]) for row in user_rows if row["user_id"])
+                if user_ids:
+                    conn.execute(
+                        "UPDATE sessions SET user_ids_json = ? WHERE id = ?",
+                        (json.dumps(user_ids), session["id"]),
+                    )
+        except Exception:
+            pass
 
         if _table_exists(conn, "logs"):
             legacy_columns = _table_columns(conn, "logs")
@@ -240,6 +367,9 @@ def _migrate_db() -> None:
                 "timestamp",
                 "raw",
                 "user",
+                "user_id",
+                "user_initials",
+                "user_snapshot_json",
                 "gps_lat",
                 "gps_lon",
                 "gps_alt",
@@ -286,6 +416,9 @@ def _migrate_db() -> None:
             "generator_power_w": "REAL",
             "solar_wh": "REAL",
             "solar_enabled": "INTEGER DEFAULT 1",
+            "user_id": "TEXT",
+            "user_initials": "TEXT",
+            "user_snapshot_json": "TEXT",
             "metrics_json": "TEXT",
         }
         for name, col_type in photo_missing.items():
@@ -847,6 +980,67 @@ def create_app() -> Flask:
             }
         )
 
+    @app.route("/api/users", methods=["GET"])
+    @_require_auth
+    def list_users():
+        with _get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id, initials, first_name, last_name, date_of_birth, gender, active,
+                       source_device_id, created_at, updated_at, synced_at
+                FROM users
+                ORDER BY initials, last_name, first_name
+                """
+            ).fetchall()
+        return jsonify({"users": [dict(row) for row in rows]})
+
+    @app.route("/api/users/sync", methods=["POST"])
+    @_require_auth
+    def sync_users():
+        data = request.get_json(force=True) or {}
+        device_id = data.get("device_id")
+        users = data.get("users")
+        if not isinstance(users, list):
+            return jsonify({"error": "missing users"}), 400
+        synced_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        with _get_db() as conn:
+            for user in users:
+                if not isinstance(user, dict) or not user.get("user_id"):
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO users (
+                        user_id, initials, first_name, last_name, date_of_birth, gender, active,
+                        source_device_id, created_at, updated_at, synced_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        initials = excluded.initials,
+                        first_name = excluded.first_name,
+                        last_name = excluded.last_name,
+                        date_of_birth = excluded.date_of_birth,
+                        gender = excluded.gender,
+                        active = excluded.active,
+                        source_device_id = COALESCE(users.source_device_id, excluded.source_device_id),
+                        updated_at = excluded.updated_at,
+                        synced_at = excluded.synced_at
+                    """,
+                    (
+                        user.get("user_id"),
+                        user.get("initials"),
+                        user.get("first_name"),
+                        user.get("last_name"),
+                        user.get("date_of_birth"),
+                        user.get("gender"),
+                        1 if user.get("active", True) else 0,
+                        device_id,
+                        user.get("created_at"),
+                        user.get("updated_at"),
+                        synced_at,
+                    ),
+                )
+            conn.commit()
+        return jsonify({"status": "ok"})
+
     @app.route("/api/session", methods=["DELETE"])
     @_require_auth
     def delete_session():
@@ -895,9 +1089,9 @@ def create_app() -> Flask:
                 """
                 INSERT INTO devices (
                     device_id, last_seen, last_ip, last_session, session_active, mode, test_mode,
-                    solar_enabled, last_gps_lat, last_gps_lon, last_gps_ts, gps_available
+                    solar_enabled, current_user_id, current_user_initials, last_gps_lat, last_gps_lon, last_gps_ts, gps_available
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
                     last_seen = excluded.last_seen,
                     last_ip = excluded.last_ip,
@@ -906,6 +1100,8 @@ def create_app() -> Flask:
                     mode = excluded.mode,
                     test_mode = excluded.test_mode,
                     solar_enabled = excluded.solar_enabled,
+                    current_user_id = excluded.current_user_id,
+                    current_user_initials = excluded.current_user_initials,
                     last_gps_lat = excluded.last_gps_lat,
                     last_gps_lon = excluded.last_gps_lon,
                     last_gps_ts = excluded.last_gps_ts,
@@ -920,6 +1116,8 @@ def create_app() -> Flask:
                     data.get("mode"),
                     int(data.get("test_mode") or 0),
                     solar_enabled,
+                    data.get("user_id"),
+                    data.get("user_initials"),
                     gps_lat,
                     gps_lon,
                     gps_ts,
@@ -981,6 +1179,12 @@ def create_app() -> Flask:
             uphill_m = total_uphill
             if duration_sec and distance_km is not None and duration_sec > 0:
                 avg_speed_kph = float(distance_km) / (duration_sec / 3600)
+            user_ids = sorted({
+                str(row.get("user_id"))
+                for row in samples
+                if row.get("user_id")
+            })
+            user_ids_json = json.dumps(user_ids) if user_ids else None
             metrics_json = None
             if data.get("metrics") is not None:
                 try:
@@ -992,8 +1196,8 @@ def create_app() -> Flask:
                 """
                 INSERT INTO sessions (
                     device_id, session_id, mode, start_ts, end_ts,
-                    rows_count, distance_km, duration_sec, avg_speed_kph, uphill_m, solar_enabled, metrics_json, uploaded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rows_count, distance_km, duration_sec, avg_speed_kph, uphill_m, solar_enabled, user_ids_json, metrics_json, uploaded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     device_id,
@@ -1007,6 +1211,7 @@ def create_app() -> Flask:
                     avg_speed_kph,
                     uphill_m,
                     solar_enabled,
+                    user_ids_json,
                     metrics_json,
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 ),
@@ -1017,9 +1222,10 @@ def create_app() -> Flask:
                     f"""
                     INSERT INTO {TELEMETRY_TABLE} (
                         device_id, session_id, mode, timestamp, raw, user,
+                        user_id, user_initials, user_snapshot_json,
                         gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                         solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -1029,6 +1235,9 @@ def create_app() -> Flask:
                             row.get("timestamp"),
                             row.get("raw"),
                             row.get("user"),
+                            row.get("user_id"),
+                            row.get("user_initials") or row.get("user"),
+                            row.get("user_snapshot_json"),
                             row.get("gps_lat"),
                             row.get("gps_lon"),
                             row.get("gps_alt"),
@@ -1051,15 +1260,17 @@ def create_app() -> Flask:
 
             conn.execute(
                 """
-                INSERT INTO devices (device_id, last_seen, last_ip, last_session, mode, test_mode, solar_enabled)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO devices (device_id, last_seen, last_ip, last_session, mode, test_mode, solar_enabled, current_user_id, current_user_initials)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
                     last_seen = excluded.last_seen,
                     last_ip = excluded.last_ip,
                     last_session = excluded.last_session,
                     mode = excluded.mode,
                     test_mode = excluded.test_mode,
-                    solar_enabled = excluded.solar_enabled
+                    solar_enabled = excluded.solar_enabled,
+                    current_user_id = excluded.current_user_id,
+                    current_user_initials = excluded.current_user_initials
                 """,
                 (
                     device_id,
@@ -1069,6 +1280,8 @@ def create_app() -> Flask:
                     mode,
                     int(data.get("test_mode") or 0),
                     solar_enabled,
+                    data.get("user_id"),
+                    data.get("user_initials"),
                 ),
             )
             conn.commit()
@@ -1156,8 +1369,8 @@ def create_app() -> Flask:
                     filename, mime_type, relative_path, uploaded_at, test_mode, is_public,
                     gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                     speed_kph, session_distance_km, gps_uphill_m, solar_power_w, generator_power_w, solar_wh,
-                    solar_enabled, metrics_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    solar_enabled, user_id, user_initials, user_snapshot_json, metrics_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     device_id,
@@ -1187,6 +1400,9 @@ def create_app() -> Flask:
                     payload_float("generator_power_w", "generator_power_w"),
                     payload_float("solar_wh", "solar_wh", "solar_Wh"),
                     solar_enabled,
+                    data.get("user_id"),
+                    data.get("user_initials"),
+                    json.dumps(data.get("user_snapshot"), ensure_ascii=False) if isinstance(data.get("user_snapshot"), dict) else data.get("user_snapshot_json"),
                     metrics_json,
                 ),
             )
@@ -1223,6 +1439,7 @@ def create_app() -> Flask:
             rows = conn.execute(
                 f"""
                 SELECT timestamp, session_id, raw, user,
+                       user_id, user_initials, user_snapshot_json,
                        gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                        solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
                 FROM {TELEMETRY_TABLE}
@@ -1245,20 +1462,23 @@ def create_app() -> Flask:
                 "session": r[1],
                 "raw": r[2],
                 "user": r[3],
-                "gps_lat": r[4],
-                "gps_lon": r[5],
-                "gps_alt": r[6],
-                "gps_speed_kph": r[7],
-                "gps_track_deg": r[8],
-                "gps_fix": r[9],
-                "gps_sats": r[10],
-                "gps_hdop": r[11],
-                "solar_current_a": r[12],
-                "solar_bus_v": r[13],
-                "solar_shunt_v": r[14],
-                "solar_power_w": r[15],
-                "solar_temperature_c": r[16],
-                "solar_enabled": r[17],
+                "user_id": r[4],
+                "user_initials": r[5],
+                "user_snapshot_json": r[6],
+                "gps_lat": r[7],
+                "gps_lon": r[8],
+                "gps_alt": r[9],
+                "gps_speed_kph": r[10],
+                "gps_track_deg": r[11],
+                "gps_fix": r[12],
+                "gps_sats": r[13],
+                "gps_hdop": r[14],
+                "solar_current_a": r[15],
+                "solar_bus_v": r[16],
+                "solar_shunt_v": r[17],
+                "solar_power_w": r[18],
+                "solar_temperature_c": r[19],
+                "solar_enabled": r[20],
             }
             for r in rows
         ]
@@ -1582,6 +1802,7 @@ def create_app() -> Flask:
             rows = conn.execute(
                 f"""
                 SELECT timestamp, raw, user,
+                       user_id, user_initials, user_snapshot_json,
                        gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                        solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
                 FROM {TELEMETRY_TABLE}
@@ -1598,6 +1819,9 @@ def create_app() -> Flask:
                 "timestamp": row["timestamp"],
                 "raw": row["raw"],
                 "user": row["user"],
+                "user_id": row["user_id"],
+                "user_initials": row["user_initials"],
+                "user_snapshot_json": row["user_snapshot_json"],
                 "gps_lat": row["gps_lat"],
                 "gps_lon": row["gps_lon"],
                 "gps_alt": row["gps_alt"],

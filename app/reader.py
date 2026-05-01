@@ -231,6 +231,20 @@ def read_serial():
             raw_line = " ".join(map(str, data)) if data is not None else None
             timestamp = datetime.utcnow().isoformat()
             session_solar_enabled = bool(state.session_metrics.get("solar_enabled", state.solar_roof_enabled))
+            user_profile = getattr(state, "current_user_profile", None)
+            if not user_profile:
+                try:
+                    from .user_profiles import get_profile
+                    user_profile = get_profile(getattr(state, "current_user_id", None) or state.current_user)
+                except Exception:
+                    user_profile = None
+            try:
+                from .user_profiles import profile_snapshot_json
+                user_snapshot_json = profile_snapshot_json(user_profile)
+            except Exception:
+                user_snapshot_json = None
+            user_id = user_profile.get("user_id") if user_profile else getattr(state, "current_user_id", None)
+            user_initials = user_profile.get("initials") if user_profile else state.current_user
             # Snapshot GPS at the same tick
             gps = getattr(state, 'gps_state', {}) or {}
             try:
@@ -239,16 +253,20 @@ def read_serial():
                         """
                         INSERT INTO logs (
                             timestamp, session, raw, user,
+                            user_id, user_initials, user_snapshot_json,
                             gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                             solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c,
                             solar_enabled
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             timestamp,
                             state.session_id,
                             raw_line,
                             state.current_user,
+                            user_id,
+                            user_initials,
+                            user_snapshot_json,
                             gps.get("lat"),
                             gps.get("lon"),
                             gps.get("alt"),

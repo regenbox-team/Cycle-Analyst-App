@@ -14,6 +14,8 @@ SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.txt")
 SESSION_METRICS_DIR = os.path.join(BASE_DIR, "session_metrics")
 DB_FILE = os.path.join(BASE_DIR, "ride_data.db")
 USER_FILE = os.path.join(BASE_DIR, "current_user.txt")
+CURRENT_USER_ID_FILE = os.path.join(BASE_DIR, "current_user_id.txt")
+USERS_FILE = os.path.join(BASE_DIR, "users.json")
 SCORES_DB_FILE = os.path.join(BASE_DIR, "game_scores.db")
 
 # GPX route file path (persist during session, cleared on end)

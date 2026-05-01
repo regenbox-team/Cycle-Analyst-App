@@ -9,10 +9,14 @@ from app import state
 from app.reader import parse_line
 from app.metrics import reset_session_state, restore_session_metrics
 from app.photo_capture import configure_session_photo_capture, normalize_interval_km
-from app.session_summary import build_summary_table, compute_session_metrics, group_samples_by_user
+from app.session_summary import build_summary_sections, build_summary_table, compute_session_metrics, compute_timeline_metrics_by_user
+from app.user_profiles import active_profiles, get_profile
 
 
 def start_page():
+    users = active_profiles()
+    if not state.session_active and not users:
+        return redirect("/users?setup=1")
     with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         rows = conn.execute("SELECT DISTINCT session FROM logs ORDER BY session DESC LIMIT 5").fetchall()
     recent_sessions = [row[0] for row in rows]
@@ -21,12 +25,22 @@ def start_page():
         session_active=state.session_active,
         recent_sessions=recent_sessions,
         solar_roof_enabled=state.solar_roof_enabled,
+        users=users,
+        current_user_id=state.current_user_id,
     )
 
 
 def start_session():
-    selected_user = request.form.get("user", "JD").strip()
-    state.current_user = selected_user if selected_user in ("JD", "LL") else "JD"
+    selected_user_id = request.form.get("user_id", "").strip()
+    selected_profile = get_profile(selected_user_id)
+    if selected_profile is None:
+        users = active_profiles()
+        selected_profile = users[0] if users else get_profile("JD")
+    if selected_profile is None:
+        return redirect("/users?setup=1")
+    state.current_user_profile = selected_profile
+    state.current_user_id = selected_profile["user_id"]
+    state.current_user = selected_profile["initials"]
     photo_enabled = request.form.get("photo_capture_enabled") == "on"
     photo_interval_km = normalize_interval_km(request.form.get("photo_capture_interval_km"), default=1.0)
     solar_enabled = request.form.get("solar_roof_enabled") == "on"
@@ -35,11 +49,14 @@ def start_session():
 
     state.session_id = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d_%H-%M-%S")
     state.save_session_id(state.session_id)
+    state.save_current_user_id(state.current_user_id)
     state.save_current_user(state.current_user)
     state.session_start_time = datetime.now().timestamp()
 
     reset_session_state()
     state.session_metrics["solar_enabled"] = solar_enabled
+    state.session_metrics["user_id"] = state.current_user_id
+    state.session_metrics["user_initials"] = state.current_user
     configure_session_photo_capture(photo_enabled, photo_interval_km)
     state.save_session_metrics_to_file()
 
@@ -140,12 +157,15 @@ def summary():
     with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(logs)").fetchall()}
         solar_enabled_col = "solar_enabled" if "solar_enabled" in cols else "1 AS solar_enabled"
+        user_id_col = "user_id" if "user_id" in cols else "NULL AS user_id"
+        user_initials_col = "user_initials" if "user_initials" in cols else "user AS user_initials"
+        user_snapshot_col = "user_snapshot_json" if "user_snapshot_json" in cols else "NULL AS user_snapshot_json"
         rows = conn.execute(
             f"""
             SELECT user, timestamp, raw,
                    gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                    solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c,
-                   {solar_enabled_col}
+                   {solar_enabled_col}, {user_id_col}, {user_initials_col}, {user_snapshot_col}
             FROM logs
             WHERE session = ?
             ORDER BY id
@@ -172,17 +192,20 @@ def summary():
             "solar_power_w": row[14],
             "solar_temperature_c": row[15],
             "solar_enabled": row[16],
+            "user_id": row[17],
+            "user_initials": row[18],
+            "user_snapshot_json": row[19],
         }
         for row in rows
     ]
 
-    user_data = group_samples_by_user(samples)
-    metrics_by_user = {user: compute_session_metrics(user_data[user]) for user in user_data}
+    metrics_by_user = compute_timeline_metrics_by_user(samples)
     metrics_by_user["Total"] = compute_session_metrics(samples)
-    all_users = list(user_data.keys()) + ["Total"]
+    all_users = ["Total"] + [user for user in metrics_by_user.keys() if user != "Total"]
     table = build_summary_table(metrics_by_user, all_users)
+    sections = build_summary_sections(metrics_by_user, all_users)
 
-    return render_template("summary.html", session_id=session_id, table=table)
+    return render_template("summary.html", session_id=session_id, table=table, sections=sections, users=all_users)
 
 
 def create_blueprint():

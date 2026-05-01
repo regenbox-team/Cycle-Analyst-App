@@ -54,14 +54,12 @@
             <section class="settings-block">
               <div class="settings-label">Rider</div>
               <div class="choice-row" role="radiogroup" aria-label="Select user">
+                {% for user in users %}
                 <label class="choice-pill">
-                  <input type="radio" name="user" value="JD" checked>
-                  <span>JD</span>
+                  <input type="radio" name="user_id" value="{{ user['user_id'] }}" {% if user['user_id'] == current_user_id or (not current_user_id and loop.first) %}checked{% endif %}>
+                  <span title="{{ user['first_name'] }} {{ user['last_name'] }}">{{ user["initials"] }}</span>
                 </label>
-                <label class="choice-pill">
-                  <input type="radio" name="user" value="LL">
-                  <span>LL</span>
-                </label>
+                {% endfor %}
               </div>
             </section>
 
@@ -108,6 +106,7 @@
         <div class="action-row">
           <button class="start-button" type="button" onclick="openResumeModal()">Resume Session</button>
           <a id="link-live-logs" class="dashboard-button" href="/live_logs">View Live Logs</a>
+          <a id="link-users" class="dashboard-button" href="/users">Users</a>
           <a id="link-select-session" class="dashboard-button" href="/select_session">View Session Summaries</a>
           <a id="link-edit-session" class="dashboard-button" href="/edit_session">Edit Logs</a>
         </div>

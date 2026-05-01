@@ -13,6 +13,7 @@ from .config import BASE_DIR, DB_FILE, SESSION_METRICS_DIR, get_db_file
 from .gps import get_status
 from .modes import is_test_mode
 from . import state
+from .user_profiles import load_profiles, profile_snapshot
 
 
 def _device_id() -> str:
@@ -101,6 +102,7 @@ def _fetch_session_rows(db_path: str, session_id: str) -> list[dict[str, Any]]:
             rows = conn.execute(
                 f"""
                 SELECT timestamp, session, raw, user,
+                       {col("user_id")}, {col("user_initials")}, {col("user_snapshot_json")},
                        {col("gps_lat")}, {col("gps_lon")}, {col("gps_alt")},
                        {col("gps_speed_kph")}, {col("gps_track_deg")}, {col("gps_fix")},
                        {col("gps_sats")}, {col("gps_hdop")},
@@ -119,20 +121,23 @@ def _fetch_session_rows(db_path: str, session_id: str) -> list[dict[str, Any]]:
                 "session": r[1],
                 "raw": r[2],
                 "user": r[3],
-                "gps_lat": r[4],
-                "gps_lon": r[5],
-                "gps_alt": r[6],
-                "gps_speed_kph": r[7],
-                "gps_track_deg": r[8],
-                "gps_fix": r[9],
-                "gps_sats": r[10],
-                "gps_hdop": r[11],
-                "solar_current_a": r[12],
-                "solar_bus_v": r[13],
-                "solar_shunt_v": r[14],
-                "solar_power_w": r[15],
-                "solar_temperature_c": r[16],
-                "solar_enabled": r[17],
+                "user_id": r[4],
+                "user_initials": r[5],
+                "user_snapshot_json": r[6],
+                "gps_lat": r[7],
+                "gps_lon": r[8],
+                "gps_alt": r[9],
+                "gps_speed_kph": r[10],
+                "gps_track_deg": r[11],
+                "gps_fix": r[12],
+                "gps_sats": r[13],
+                "gps_hdop": r[14],
+                "solar_current_a": r[15],
+                "solar_bus_v": r[16],
+                "solar_shunt_v": r[17],
+                "solar_power_w": r[18],
+                "solar_temperature_c": r[19],
+                "solar_enabled": r[20],
             }
             for r in rows
         ]
@@ -154,6 +159,29 @@ def _upload_session(url: str, payload: dict[str, Any]) -> bool:
         return resp.get("status") in ("ok", "exists")
     except Exception:
         return False
+
+
+def _sync_users(url: str, device_id: str) -> None:
+    profiles = load_profiles()
+    if not profiles:
+        return
+    server_profiles = [dict(profile) | {"active": True} for profile in profiles]
+    try:
+        _request_json("POST", f"{url}/api/users/sync", {"device_id": device_id, "users": server_profiles})
+    except Exception:
+        pass
+
+
+def fetch_monitor_users() -> list[dict[str, Any]]:
+    url = _monitor_url()
+    if not url:
+        return []
+    try:
+        resp = _request_json("GET", f"{url}/api/users")
+        users = resp.get("users", [])
+        return users if isinstance(users, list) else []
+    except Exception:
+        return []
 
 
 def monitor_upload_photo(
@@ -202,6 +230,9 @@ def monitor_upload_photo(
         "mode": _mode_from_db_path(get_db_file()),
         "test_mode": 1 if is_test_mode() else 0,
         "solar_enabled": 1 if solar_enabled else 0,
+        "user_id": getattr(state, "current_user_id", None),
+        "user_initials": getattr(state, "current_user", None),
+        "user_snapshot": profile_snapshot(getattr(state, "current_user_profile", None)),
         "captured_at": captured_at,
         "distance_km": distance_km,
         "interval_km": interval_km,
@@ -265,6 +296,8 @@ def _send_heartbeat(url: str, device_id: str) -> None:
         "mode": _mode_from_db_path(current_db),
         "test_mode": 1 if is_test_mode() else 0,
         "solar_enabled": 1 if bool(state.session_metrics.get("solar_enabled", state.solar_roof_enabled)) else 0,
+        "user_id": getattr(state, "current_user_id", None),
+        "user_initials": getattr(state, "current_user", None),
         "gps_available": 1 if gps_ok else 0,
         "gps_lat": gps.get("lat") if gps_ok else None,
         "gps_lon": gps.get("lon") if gps_ok else None,
@@ -282,6 +315,7 @@ def _sync_once() -> None:
         return
     device_id = _device_id()
     _send_heartbeat(url, device_id)
+    _sync_users(url, device_id)
 
     current_session = state.session_id if state.session_active else None
 

@@ -11,6 +11,8 @@ session_id: str | None = None
 session_start_time: float = time.time()
 latest_raw_values = None
 current_user: str = "JD"
+current_user_id: str | None = None
+current_user_profile: dict | None = None
 session_active: bool = False
 reader_started: bool = False
 gps_reader_started: bool = False
@@ -105,6 +107,8 @@ session_metrics = {
     "last_gps_alt_m": None,
     "photo_capture": default_photo_capture_settings(),
     "solar_enabled": True,
+    "user_id": None,
+    "user_initials": "JD",
 }
 
 
@@ -153,6 +157,16 @@ def load_current_user() -> str:
         except Exception:
             return "JD"
     return "JD"
+
+
+def save_current_user_id(user_id: str) -> None:
+    from .user_profiles import save_current_user_id as _save_current_user_id
+    _save_current_user_id(user_id)
+
+
+def load_current_user_id() -> str | None:
+    from .user_profiles import load_current_user_id as _load_current_user_id
+    return _load_current_user_id()
 
 
 def save_solar_roof_enabled(flag: bool) -> None:

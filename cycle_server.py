@@ -18,7 +18,7 @@ def create_app(start_reader: bool = False) -> Flask:
     app = Flask(__name__)
 
     # Register routes (each in isolation so one failure won't block others)
-    from app.routes import core as routes_core, sessions as routes_sessions, admin as routes_admin, modes as routes_modes, gps as routes_gps, tiles as routes_tiles, tracks as routes_tracks, game as routes_game, sys as routes_sys
+    from app.routes import core as routes_core, sessions as routes_sessions, admin as routes_admin, modes as routes_modes, gps as routes_gps, tiles as routes_tiles, tracks as routes_tracks, game as routes_game, sys as routes_sys, users as routes_users
     # Optional debug routes (safe to import; if missing, ignored below)
     try:
         from app.routes import debug as routes_debug
@@ -43,6 +43,7 @@ def create_app(start_reader: bool = False) -> Flask:
     for mod in (
         routes_core,
         routes_sessions,
+        routes_users,
         routes_admin,
         routes_modes,
         routes_gps,
@@ -66,6 +67,22 @@ def create_app(start_reader: bool = False) -> Flask:
     migrate_legacy_files()
     # Initialize DB for current mode and restore metrics snapshot from that DB
     init_db()
+    try:
+        for _mode in modes.VEHICLE_CONFIGS:
+            init_db(_mode)
+    except Exception:
+        pass
+    try:
+        from app.user_profiles import get_profile
+        state.current_user_id = state.load_current_user_id()
+        state.current_user_profile = get_profile(state.current_user_id or state.current_user)
+        if state.current_user_profile:
+            state.current_user_id = state.current_user_profile["user_id"]
+            state.current_user = state.current_user_profile["initials"]
+            state.save_current_user_id(state.current_user_id)
+            state.save_current_user(state.current_user)
+    except Exception:
+        pass
     # Initialize game scores DB
     try:
         from app.game_db import init_game_db
