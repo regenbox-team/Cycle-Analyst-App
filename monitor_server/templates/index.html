@@ -156,6 +156,41 @@
         color: #0f766e;
         border-color: var(--accent);
       }
+      .action-link.danger {
+        color: #b42318;
+        border-color: #f5b5ae;
+        background: #fff4f2;
+        cursor: pointer;
+      }
+      button.action-link {
+        font-family: inherit;
+      }
+      button.action-link:disabled {
+        cursor: wait;
+        opacity: 0.65;
+      }
+      .bulk-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .bulk-count {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .session-check {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+      }
+      .select-col {
+        width: 34px;
+      }
       .summary-card {
         display: grid;
         grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
@@ -350,9 +385,16 @@
       </div>
 
       <div class="card table-card">
+        <div class="bulk-actions">
+          <div class="bulk-count"><span id="selected-count">0</span> selected</div>
+          <button id="bulk-delete-btn" class="action-link danger" type="button" disabled>Delete selected</button>
+        </div>
         <table class="table-compact">
           <thead>
             <tr>
+              <th class="select-col">
+                <input id="select-all-sessions" class="session-check" type="checkbox" aria-label="Select all sessions">
+              </th>
               <th>Device</th>
               <th>Session</th>
               <th>Mode</th>
@@ -371,7 +413,16 @@
           </thead>
           <tbody id="sessions-body">
             {% for s in sessions %}
-            <tr data-start="{{ s['start_ts'] or '' }}" data-distance="{{ s['distance_km'] or 0 }}">
+            <tr
+              data-start="{{ s['start_ts'] or '' }}"
+              data-distance="{{ s['distance_km'] or 0 }}"
+              data-device-id="{{ s['device_id'] }}"
+              data-session-id="{{ s['session_id'] }}"
+              data-mode="{{ s['mode'] }}"
+            >
+              <td>
+                <input class="session-check session-row-check" type="checkbox" aria-label="Select session {{ s['session_id'] }}">
+              </td>
               <td>{{ s["device_id"] }}</td>
               <td>{{ s["session_id"] }}</td>
               <td>{{ s["mode"] }}</td>
@@ -379,6 +430,7 @@
                 <a class="download-arrow" href="/api/export_session?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}" aria-label="Download JSON">↓</a>
                 <a class="action-link primary" href="/api/export_gpx?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}">GPX</a>
                 <a class="action-link" href="/session_map?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}">Map</a>
+                <button class="action-link danger session-delete-btn" type="button" aria-label="Delete session {{ s['session_id'] }}">Delete</button>
               </td>
               <td>{{ s["start_ts_fmt"] or "" }}</td>
               <td>{{ s["rows_count"] or 0 }}</td>
@@ -447,6 +499,122 @@
 
       const sortButtons = document.querySelectorAll(".sort-btn");
       const tbody = document.getElementById("sessions-body");
+      const selectAllSessions = document.getElementById("select-all-sessions");
+      const bulkDeleteBtn = document.getElementById("bulk-delete-btn");
+      const selectedCount = document.getElementById("selected-count");
+      const getSessionPayload = (row) => ({
+        device_id: row.dataset.deviceId || "",
+        session_id: row.dataset.sessionId || "",
+        mode: row.dataset.mode || "default"
+      });
+      const selectedRows = () => tbody ? Array.from(tbody.querySelectorAll(".session-row-check:checked")).map((check) => check.closest("tr")).filter(Boolean) : [];
+      const updateSelectionState = () => {
+        if (!tbody) return;
+        const checks = Array.from(tbody.querySelectorAll(".session-row-check"));
+        const checkedCount = checks.filter((check) => check.checked).length;
+        if (selectedCount) selectedCount.textContent = String(checkedCount);
+        if (bulkDeleteBtn) bulkDeleteBtn.disabled = checkedCount === 0;
+        if (selectAllSessions) {
+          selectAllSessions.checked = checks.length > 0 && checkedCount === checks.length;
+          selectAllSessions.indeterminate = checkedCount > 0 && checkedCount < checks.length;
+        }
+      };
+      const removeRows = (rows) => {
+        rows.forEach((row) => row.remove());
+        updateSelectionState();
+      };
+      if (tbody) {
+        tbody.addEventListener("click", async (event) => {
+          const button = event.target.closest(".session-delete-btn");
+          if (!button) return;
+          const row = button.closest("tr");
+          if (!row) return;
+
+          const payload = getSessionPayload(row);
+          const label = `${payload.device_id} / ${payload.session_id} (${payload.mode})`;
+          if (!confirm(`Delete session ${label} from the monitor server?`)) {
+            return;
+          }
+
+          const originalText = button.textContent;
+          button.disabled = true;
+          button.textContent = "Deleting";
+          try {
+            const response = await fetch("/api/session", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(result.error || "Delete failed");
+            }
+            removeRows([row]);
+          } catch (error) {
+            alert(error.message || "Delete failed");
+            button.disabled = false;
+            button.textContent = originalText;
+          }
+        });
+        tbody.addEventListener("change", (event) => {
+          if (event.target.matches(".session-row-check")) {
+            updateSelectionState();
+          }
+        });
+      }
+      if (selectAllSessions && tbody) {
+        selectAllSessions.addEventListener("change", () => {
+          tbody.querySelectorAll(".session-row-check").forEach((check) => {
+            check.checked = selectAllSessions.checked;
+          });
+          updateSelectionState();
+        });
+      }
+      if (bulkDeleteBtn && tbody) {
+        bulkDeleteBtn.addEventListener("click", async () => {
+          const rows = selectedRows();
+          if (!rows.length) return;
+          const count = rows.length;
+          if (!confirm(`Delete ${count} selected session${count > 1 ? "s" : ""} from the monitor server?`)) {
+            return;
+          }
+          const sessions = rows.map(getSessionPayload);
+          const originalText = bulkDeleteBtn.textContent;
+          bulkDeleteBtn.disabled = true;
+          bulkDeleteBtn.textContent = "Deleting";
+          try {
+            const response = await fetch("/api/sessions", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sessions })
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(result.error || "Delete failed");
+            }
+            const deletedKeys = new Set(
+              (result.results || [])
+                .filter((item) => item.status === "deleted")
+                .map((item) => `${item.device_id}\u0000${item.session_id}\u0000${item.mode}`)
+            );
+            const deletedRows = rows.filter((row) => {
+              const payload = getSessionPayload(row);
+              return deletedKeys.has(`${payload.device_id}\u0000${payload.session_id}\u0000${payload.mode}`);
+            });
+            removeRows(deletedRows);
+            if (deletedRows.length !== rows.length) {
+              alert(`${deletedRows.length} of ${rows.length} selected sessions were deleted.`);
+            }
+          } catch (error) {
+            alert(error.message || "Delete failed");
+            bulkDeleteBtn.disabled = false;
+          } finally {
+            bulkDeleteBtn.textContent = originalText;
+            updateSelectionState();
+          }
+        });
+      }
+      updateSelectionState();
       const getValue = (row, key) => {
         if (key === "start") {
           const raw = row.dataset.start || "";

@@ -345,6 +345,137 @@ def _photo_extension(filename: str | None, mime_type: str | None) -> str:
     return ".jpg"
 
 
+def _remove_empty_parent_dirs(path: str, stop_dir: str) -> None:
+    current = os.path.dirname(path)
+    stop_dir = os.path.abspath(stop_dir)
+    while current and os.path.abspath(current).startswith(stop_dir) and os.path.abspath(current) != stop_dir:
+        try:
+            os.rmdir(current)
+        except OSError:
+            break
+        current = os.path.dirname(current)
+
+
+def _delete_media_files(relative_paths: list[str]) -> int:
+    media_dir = os.path.abspath(_media_dir())
+    removed = 0
+    for relative_path in relative_paths:
+        if not relative_path:
+            continue
+        absolute_path = os.path.abspath(os.path.join(media_dir, relative_path))
+        if not absolute_path.startswith(media_dir + os.sep):
+            continue
+        try:
+            os.remove(absolute_path)
+            removed += 1
+            _remove_empty_parent_dirs(absolute_path, media_dir)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+    return removed
+
+
+def _delete_session_data(device_id: str, session_id: str, mode: str) -> dict[str, Any]:
+    with _get_db() as conn:
+        photo_rows = conn.execute(
+            """
+            SELECT relative_path
+            FROM photos
+            WHERE device_id = ? AND session_id = ? AND mode = ?
+            """,
+            (device_id, session_id, mode),
+        ).fetchall()
+        photo_paths = [row["relative_path"] for row in photo_rows if row["relative_path"]]
+
+        session_cursor = conn.execute(
+            """
+            DELETE FROM sessions
+            WHERE device_id = ? AND session_id = ? AND mode = ?
+            """,
+            (device_id, session_id, mode),
+        )
+        samples_cursor = conn.execute(
+            f"""
+            DELETE FROM {TELEMETRY_TABLE}
+            WHERE device_id = ? AND session_id = ? AND mode = ?
+            """,
+            (device_id, session_id, mode),
+        )
+        photos_cursor = conn.execute(
+            """
+            DELETE FROM photos
+            WHERE device_id = ? AND session_id = ? AND mode = ?
+            """,
+            (device_id, session_id, mode),
+        )
+        conn.execute(
+            """
+            UPDATE devices
+            SET last_session = NULL
+            WHERE device_id = ? AND last_session = ? AND mode = ?
+            """,
+            (device_id, session_id, mode),
+        )
+        conn.commit()
+
+    deleted_sessions = max(session_cursor.rowcount, 0)
+    deleted_samples = max(samples_cursor.rowcount, 0)
+    deleted_photos = max(photos_cursor.rowcount, 0)
+    deleted_files = _delete_media_files(photo_paths)
+    return {
+        "status": "deleted",
+        "device_id": device_id,
+        "session_id": session_id,
+        "mode": mode,
+        "deleted_sessions": deleted_sessions,
+        "deleted_samples": deleted_samples,
+        "deleted_photos": deleted_photos,
+        "deleted_files": deleted_files,
+    }
+
+
+def _delete_sessions_data(sessions: list[dict[str, Any]]) -> dict[str, Any]:
+    results = []
+    totals = {
+        "deleted_sessions": 0,
+        "deleted_samples": 0,
+        "deleted_photos": 0,
+        "deleted_files": 0,
+    }
+    for session in sessions:
+        device_id = str(session.get("device_id") or "").strip()
+        session_id = str(session.get("session_id") or "").strip()
+        mode = str(session.get("mode") or "default").strip() or "default"
+        if not device_id or not session_id:
+            results.append(
+                {
+                    "status": "skipped",
+                    "error": "missing device_id or session_id",
+                    "device_id": device_id,
+                    "session_id": session_id,
+                    "mode": mode,
+                }
+            )
+            continue
+
+        result = _delete_session_data(device_id, session_id, mode)
+        if result["deleted_sessions"] == 0 and result["deleted_samples"] == 0 and result["deleted_photos"] == 0:
+            result["status"] = "not_found"
+        results.append(result)
+        for key in totals:
+            totals[key] += int(result.get(key) or 0)
+
+    deleted_count = sum(1 for result in results if result.get("status") == "deleted")
+    return {
+        "status": "deleted",
+        "requested": len(sessions),
+        "deleted_count": deleted_count,
+        "results": results,
+        **totals,
+    }
+
+
 def create_app() -> Flask:
     app = Flask(
         __name__,
@@ -636,6 +767,36 @@ def create_app() -> Flask:
                 (device_id, mode),
             ).fetchall()
         return jsonify({"sessions": [r[0] for r in rows]})
+
+    @app.route("/api/session", methods=["DELETE"])
+    @_require_auth
+    def delete_session():
+        data = request.get_json(silent=True) or {}
+        device_id = data.get("device_id") or request.args.get("device_id")
+        session_id = data.get("session_id") or request.args.get("session_id")
+        mode = data.get("mode") or request.args.get("mode", "default")
+        if not device_id or not session_id:
+            return jsonify({"error": "missing device_id or session_id"}), 400
+
+        result = _delete_session_data(device_id, session_id, mode)
+        if result["deleted_sessions"] == 0 and result["deleted_samples"] == 0 and result["deleted_photos"] == 0:
+            return jsonify({"error": "session not found"}), 404
+
+        return jsonify(result)
+
+    @app.route("/api/sessions", methods=["DELETE"])
+    @_require_auth
+    def delete_sessions():
+        data = request.get_json(silent=True) or {}
+        sessions = data.get("sessions")
+        if not isinstance(sessions, list) or not sessions:
+            return jsonify({"error": "missing sessions"}), 400
+
+        result = _delete_sessions_data(sessions)
+        if result["deleted_count"] == 0:
+            return jsonify({"error": "sessions not found", **result}), 404
+
+        return jsonify(result)
 
     @app.route("/api/heartbeat", methods=["POST"])
     @_require_auth
