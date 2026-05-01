@@ -158,11 +158,35 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS deleted_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT,
+                session_id TEXT,
+                mode TEXT,
+                deleted_at TEXT,
+                UNIQUE(device_id, session_id, mode)
+            )
+            """
+        )
         conn.commit()
 
 
 def _migrate_db() -> None:
     with _get_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS deleted_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT,
+                session_id TEXT,
+                mode TEXT,
+                deleted_at TEXT,
+                UNIQUE(device_id, session_id, mode)
+            )
+            """
+        )
         device_columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()}
         if "session_active" not in device_columns:
             conn.execute("ALTER TABLE devices ADD COLUMN session_active INTEGER")
@@ -417,6 +441,20 @@ def _delete_session_data(device_id: str, session_id: str, mode: str) -> dict[str
             """,
             (device_id, session_id, mode),
         )
+        conn.execute(
+            """
+            INSERT INTO deleted_sessions (device_id, session_id, mode, deleted_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(device_id, session_id, mode) DO UPDATE SET
+                deleted_at = excluded.deleted_at
+            """,
+            (
+                device_id,
+                session_id,
+                mode,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
         conn.commit()
 
     deleted_sessions = max(session_cursor.rowcount, 0)
@@ -474,6 +512,18 @@ def _delete_sessions_data(sessions: list[dict[str, Any]]) -> dict[str, Any]:
         "results": results,
         **totals,
     }
+
+
+def _is_deleted_session(conn: sqlite3.Connection, device_id: str, session_id: str, mode: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM deleted_sessions
+        WHERE device_id = ? AND session_id = ? AND mode = ?
+        """,
+        (device_id, session_id, mode),
+    ).fetchone()
+    return row is not None
 
 
 def create_app() -> Flask:
@@ -763,10 +813,25 @@ def create_app() -> Flask:
             return jsonify({"error": "missing device_id"}), 400
         with _get_db() as conn:
             rows = conn.execute(
-                "SELECT session_id FROM sessions WHERE device_id = ? AND mode = ?",
+                """
+                SELECT session_id FROM sessions WHERE device_id = ? AND mode = ?
+                UNION
+                SELECT session_id FROM deleted_sessions WHERE device_id = ? AND mode = ?
+                """,
+                (device_id, mode, device_id, mode),
+            ).fetchall()
+            deleted_rows = conn.execute(
+                """
+                SELECT session_id FROM deleted_sessions WHERE device_id = ? AND mode = ?
+                """,
                 (device_id, mode),
             ).fetchall()
-        return jsonify({"sessions": [r[0] for r in rows]})
+        return jsonify(
+            {
+                "sessions": [r[0] for r in rows],
+                "deleted_sessions": [r[0] for r in deleted_rows],
+            }
+        )
 
     @app.route("/api/session", methods=["DELETE"])
     @_require_auth
@@ -858,6 +923,9 @@ def create_app() -> Flask:
             return jsonify({"error": "missing device_id or session_id"}), 400
 
         with _get_db() as conn:
+            if _is_deleted_session(conn, device_id, session_id, mode):
+                return jsonify({"status": "exists", "deleted": True})
+
             existing = conn.execute(
                 "SELECT 1 FROM sessions WHERE device_id = ? AND session_id = ? AND mode = ?",
                 (device_id, session_id, mode),

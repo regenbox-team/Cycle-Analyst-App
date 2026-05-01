@@ -40,10 +40,11 @@ class MonitorDeleteSessionTest(unittest.TestCase):
             flask_stub.url_for = lambda *args, **kwargs: None
             sys.modules["flask"] = flask_stub
 
-        from monitor_server.app import _delete_session_data, _delete_sessions_data, _init_db
+        from monitor_server.app import _delete_session_data, _delete_sessions_data, _init_db, _is_deleted_session
 
         self.delete_session_data = _delete_session_data
         self.delete_sessions_data = _delete_sessions_data
+        self.is_deleted_session = _is_deleted_session
         _init_db()
 
     def tearDown(self):
@@ -109,7 +110,10 @@ class MonitorDeleteSessionTest(unittest.TestCase):
                 count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 self.assertEqual(count, 0)
             device = conn.execute("SELECT last_session FROM devices WHERE device_id = ?", ("bike",)).fetchone()
+            tombstone_count = conn.execute("SELECT COUNT(*) FROM deleted_sessions").fetchone()[0]
+            self.assertTrue(self.is_deleted_session(conn, "bike", "2026-05-01_10-00-00", "default"))
         self.assertIsNone(device[0])
+        self.assertEqual(tombstone_count, 1)
 
     def test_delete_sessions_removes_multiple_selected_sessions(self):
         first_path = self.seed_session(session_id="2026-05-01_10-00-00")
@@ -134,6 +138,10 @@ class MonitorDeleteSessionTest(unittest.TestCase):
             for table in ("sessions", "telemetry_samples", "photos"):
                 count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 self.assertEqual(count, 0)
+            tombstone_count = conn.execute("SELECT COUNT(*) FROM deleted_sessions").fetchone()[0]
+            self.assertTrue(self.is_deleted_session(conn, "bike", "2026-05-01_10-00-00", "default"))
+            self.assertTrue(self.is_deleted_session(conn, "bike", "2026-05-01_11-00-00", "default"))
+        self.assertEqual(tombstone_count, 2)
 
 
 if __name__ == "__main__":
