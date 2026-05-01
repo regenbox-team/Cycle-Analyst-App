@@ -1,0 +1,25 @@
+<div class="summary-section-grid">
+  {% for section in sections %}
+    <section class="summary-category-card">
+      <h2>{{ section["category"] }}</h2>
+      <div class="summary-metric-list">
+        <div class="summary-column-head" style="--summary-user-count: {{ users|length }};">
+          <span></span>
+          {% for user in users %}
+            <span>{{ user }}</span>
+          {% endfor %}
+        </div>
+        {% for row in section["rows"] %}
+          <div class="summary-metric-row" style="--summary-user-count: {{ users|length }};">
+            <div class="summary-metric-title">{{ row["label"] }}</div>
+            {% for item in row["values"] %}
+              <div class="summary-value">
+                <span class="summary-value-number">{{ item["value"] }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% endfor %}
+</div>

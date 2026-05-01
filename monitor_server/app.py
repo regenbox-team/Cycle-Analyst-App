@@ -10,13 +10,18 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from flask import Flask, jsonify, request, render_template, Response, send_from_directory, url_for
+from jinja2 import ChoiceLoader, FileSystemLoader
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT in sys.path:
     sys.path.remove(REPO_ROOT)
 sys.path.insert(0, REPO_ROOT)
 
-from app.session_summary import compute_session_metrics, format_metric_value, safe_div
+from app.session_summary import (
+    build_summary_sections,
+    compute_session_metrics,
+    compute_timeline_metrics_by_user,
+)
 
 
 TELEMETRY_TABLE = "telemetry_samples"
@@ -485,29 +490,6 @@ def _parse_distance_km(raw: str | None) -> float | None:
         return None
 
 
-def _session_map_summary_tiles(metrics: dict[str, Any]) -> list[dict[str, str]]:
-    total_Wh = metrics["positive_Wh"] + metrics["regen_Wh"]
-    net_Wh = metrics["positive_Wh"] - metrics["regen_Wh"] - metrics["human_Wh"] - metrics["solar_Wh"]
-    return [
-        {"label": "CA distance", "value": format_metric_value(metrics["distance"], "km")},
-        {"label": "GPS distance", "value": format_metric_value(metrics["gps_distance_km"], "km")},
-        {"label": "GPS/CA delta", "value": format_metric_value(metrics["gps_distance_km"] - metrics["distance"], "km")},
-        {"label": "Net efficiency", "value": format_metric_value(safe_div(net_Wh, metrics["distance"]), "Wh/km")},
-        {"label": "Solar energy", "value": format_metric_value(metrics["solar_Wh"], "Wh")},
-        {"label": "Solar per km", "value": format_metric_value(safe_div(metrics["solar_Wh"], metrics["distance"]), "Wh/km")},
-        {"label": "Solar share", "value": format_metric_value(100 * safe_div(metrics["solar_Wh"], total_Wh), "%")},
-        {"label": "Human energy", "value": format_metric_value(metrics["human_Wh"], "Wh")},
-        {"label": "Regen energy", "value": format_metric_value(metrics["regen_Wh"], "Wh")},
-        {"label": "GPS climb", "value": format_metric_value(metrics["gps_uphill_m"], "m")},
-        {"label": "GPS descent", "value": format_metric_value(metrics["gps_downhill_m"], "m")},
-        {"label": "GPS fix coverage", "value": format_metric_value(100 * safe_div(metrics["gps_fix_count"], metrics["gps_fix_samples"]), "%")},
-        {"label": "Avg GPS satellites", "value": format_metric_value(safe_div(metrics["gps_sats_sum"], metrics["gps_sats_count"]), "")},
-        {"label": "Avg GPS HDOP", "value": format_metric_value(safe_div(metrics["gps_hdop_sum"], metrics["gps_hdop_count"]), "")},
-        {"label": "Avg solar power", "value": format_metric_value(safe_div(metrics["solar_power_sum"], metrics["solar_power_count"]), "W")},
-        {"label": "Max solar power", "value": format_metric_value(metrics["solar_power_max"], "W")},
-    ]
-
-
 def _photo_extension(filename: str | None, mime_type: str | None) -> str:
     filename = (filename or "").lower()
     mime_type = (mime_type or "").lower()
@@ -678,6 +660,12 @@ def create_app() -> Flask:
         __name__,
         static_folder=os.path.join(REPO_ROOT, "static"),
         static_url_path="/static",
+    )
+    app.jinja_loader = ChoiceLoader(
+        [
+            app.jinja_loader,
+            FileSystemLoader(os.path.join(REPO_ROOT, "templates")),
+        ]
     )
     _init_db()
     _migrate_db()
@@ -1855,7 +1843,10 @@ def create_app() -> Flask:
             if time_str:
                 point["time"] = time_str
             points.append(point)
-        summary_metrics = compute_session_metrics(samples)
+        metrics_by_user = compute_timeline_metrics_by_user(samples)
+        metrics_by_user["Total"] = compute_session_metrics(samples)
+        session_users = [user for user in metrics_by_user.keys() if user != "Total"]
+        all_users = ["Total"] if len(session_users) <= 1 else ["Total"] + session_users
 
         return render_template(
             "session_map.html",
@@ -1873,7 +1864,8 @@ def create_app() -> Flask:
             end_ts=_format_dt(session_row["end_ts"]) if session_row else "",
             distance_km=session_row["distance_km"] if session_row else None,
             rows_count=session_row["rows_count"] if session_row else None,
-            summary_tiles=_session_map_summary_tiles(summary_metrics),
+            sections=build_summary_sections(metrics_by_user, all_users),
+            users=all_users,
         )
 
     return app

@@ -201,7 +201,8 @@ def summary():
 
     metrics_by_user = compute_timeline_metrics_by_user(samples)
     metrics_by_user["Total"] = compute_session_metrics(samples)
-    all_users = ["Total"] + [user for user in metrics_by_user.keys() if user != "Total"]
+    session_users = [user for user in metrics_by_user.keys() if user != "Total"]
+    all_users = ["Total"] if len(session_users) <= 1 else ["Total"] + session_users
     table = build_summary_table(metrics_by_user, all_users)
     sections = build_summary_sections(metrics_by_user, all_users)
 

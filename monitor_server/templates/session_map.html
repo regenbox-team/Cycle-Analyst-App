@@ -88,17 +88,87 @@
       }
       .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
       .stat-value { font-size: 18px; font-weight: 700; margin-top: 6px; }
-      .summary-grid {
+      .summary-section-grid {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 10px;
-        margin-top: 10px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .summary-category-card {
+        background: #fffdf9;
+        border: 1px solid #efe3d5;
+        border-radius: 8px;
+        padding: 12px;
+      }
+      .summary-category-card h2 {
+        margin: 0 0 10px 0;
+        color: #111111;
+        font-size: 15px;
+        font-weight: 800;
+      }
+      .summary-metric-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .summary-column-head,
+      .summary-metric-row {
+        display: grid;
+        grid-template-columns: minmax(5.8rem, 0.8fr) repeat(var(--summary-user-count), minmax(3.6rem, 1fr));
+        gap: 6px;
+        align-items: stretch;
+      }
+      .summary-column-head span {
+        min-width: 0;
+        color: #9a5a00;
+        background: #fff2d6;
+        border: 1px solid #f3c56e;
+        border-radius: 999px;
+        padding: 4px 6px;
+        font-size: 10px;
+        font-weight: 800;
+        text-align: center;
+        text-transform: uppercase;
+      }
+      .summary-column-head span:first-child {
+        background: transparent;
+        border-color: transparent;
+      }
+      .summary-metric-title {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        color: #d47500;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1.15;
+      }
+      .summary-value {
+        min-width: 0;
+        background: #faf6ef;
+        border: 1px solid #efe3d5;
+        border-radius: 7px;
+        padding: 6px;
+        text-align: center;
+      }
+      .summary-value-number {
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1.15;
       }
       @media (max-width: 720px) {
         main { padding: 24px 16px 40px; }
         .map { height: 320px; }
         .stats { grid-template-columns: 1fr; }
-        .summary-grid { grid-template-columns: 1fr; }
+        .summary-section-grid { grid-template-columns: 1fr; }
+        .summary-column-head,
+        .summary-metric-row {
+          grid-template-columns: minmax(4.8rem, 0.85fr) repeat(var(--summary-user-count), minmax(3.1rem, 1fr));
+          gap: 5px;
+        }
+        .summary-metric-title { font-size: 11px; }
+        .summary-value-number { font-size: 12px; }
       }
     </style>
   </head>
@@ -131,14 +201,7 @@
           </div>
         </div>
         <h2>Ride summary</h2>
-        <div class="summary-grid">
-          {% for tile in summary_tiles %}
-          <div class="stat">
-            <div class="stat-label">{{ tile.label }}</div>
-            <div class="stat-value">{{ tile.value }}</div>
-          </div>
-          {% endfor %}
-        </div>
+        {% include "partials/summary_cards.html" %}
       </div>
     </main>
     <script
