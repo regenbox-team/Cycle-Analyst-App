@@ -57,6 +57,7 @@ class SessionSummaryTest(unittest.TestCase):
         self.assertAlmostEqual(metrics["distance"], 0.1)
         self.assertGreater(metrics["gps_distance_km"], 0.1)
         self.assertAlmostEqual(metrics["gps_uphill_m"], 6.0)
+        self.assertAlmostEqual(metrics["raw_gps_uphill_m"], 6.0)
         self.assertEqual(metrics["gps_points"], 2)
         self.assertEqual(metrics["gps_fix_count"], 2)
         self.assertAlmostEqual(metrics["solar_Wh"], 40 / 3600)
@@ -114,6 +115,25 @@ class SessionSummaryTest(unittest.TestCase):
         metrics = compute_session_metrics(samples)
 
         self.assertAlmostEqual(metrics["gps_uphill_m"], 6.0)
+
+    def test_prefers_terrain_altitude_for_uphill_when_available(self):
+        samples = [
+            {
+                "timestamp": f"2026-04-30T10:00:0{i}",
+                "raw": raw_line(distance=i * 0.1),
+                "gps_lat": 48.8566 + i * 0.0001,
+                "gps_lon": 2.3522,
+                "gps_alt": gps_alt,
+                "terrain_alt_m": terrain_alt,
+            }
+            for i, (gps_alt, terrain_alt) in enumerate([(100.0, 30.0), (180.0, 36.0), (90.0, 42.0)])
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertAlmostEqual(metrics["gps_uphill_m"], 12.0)
+        self.assertAlmostEqual(metrics["raw_gps_uphill_m"], 80.0)
+        self.assertAlmostEqual(metrics["raw_gps_downhill_m"], 90.0)
 
 
 if __name__ == "__main__":

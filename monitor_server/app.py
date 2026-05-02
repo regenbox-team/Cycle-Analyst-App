@@ -1,9 +1,13 @@
 from __future__ import annotations
 import base64
 import json
+import math
 import os
 import sqlite3
 import sys
+import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Any
@@ -25,6 +29,20 @@ from app.session_summary import (
 
 
 TELEMETRY_TABLE = "telemetry_samples"
+TERRAIN_CACHE_TABLE = "terrain_elevation_cache"
+TERRAIN_API_URL = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json"
+TERRAIN_RESOURCE = os.getenv("MONITOR_TERRAIN_RESOURCE", "ign_rge_alti_wld")
+TERRAIN_CACHE_DECIMALS = int(os.getenv("MONITOR_TERRAIN_CACHE_DECIMALS", "5"))
+TERRAIN_BATCH_SIZE = int(os.getenv("MONITOR_TERRAIN_BATCH_SIZE", "5000"))
+TERRAIN_TIMEOUT_SEC = float(os.getenv("MONITOR_TERRAIN_TIMEOUT_SEC", "8"))
+TERRAIN_FALLBACK_DATASET = os.getenv("MONITOR_TERRAIN_FALLBACK_DATASET", "srtm30m")
+TERRAIN_FALLBACK_API_URL = os.getenv(
+    "MONITOR_TERRAIN_FALLBACK_API_URL",
+    f"https://api.opentopodata.org/v1/{TERRAIN_FALLBACK_DATASET}",
+)
+TERRAIN_FALLBACK_BATCH_SIZE = int(os.getenv("MONITOR_TERRAIN_FALLBACK_BATCH_SIZE", "100"))
+TERRAIN_FALLBACK_THROTTLE_SEC = float(os.getenv("MONITOR_TERRAIN_FALLBACK_THROTTLE_SEC", "1.0"))
+TERRAIN_BACKFILL_LIMIT_POINTS = int(os.getenv("MONITOR_TERRAIN_BACKFILL_LIMIT_POINTS", "500"))
 
 
 def _db_path() -> str:
@@ -100,6 +118,7 @@ def _init_db() -> None:
                 duration_sec REAL,
                 avg_speed_kph REAL,
                 uphill_m REAL,
+                raw_gps_uphill_m REAL,
                 solar_enabled INTEGER DEFAULT 1,
                 user_ids_json TEXT,
                 metrics_json TEXT,
@@ -124,6 +143,9 @@ def _init_db() -> None:
                 gps_lat REAL,
                 gps_lon REAL,
                 gps_alt REAL,
+                terrain_alt_m REAL,
+                terrain_alt_source TEXT,
+                terrain_alt_updated_at TEXT,
                 gps_speed_kph REAL,
                 gps_track_deg REAL,
                 gps_fix INTEGER,
@@ -135,6 +157,18 @@ def _init_db() -> None:
                 solar_power_w REAL,
                 solar_temperature_c REAL,
                 solar_enabled INTEGER DEFAULT 1
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS terrain_elevation_cache (
+                cache_key TEXT PRIMARY KEY,
+                lat REAL,
+                lon REAL,
+                terrain_alt_m REAL,
+                source TEXT,
+                fetched_at TEXT
             )
             """
         )
@@ -261,6 +295,7 @@ def _migrate_db() -> None:
             "duration_sec": "REAL",
             "avg_speed_kph": "REAL",
             "uphill_m": "REAL",
+            "raw_gps_uphill_m": "REAL",
             "solar_enabled": "INTEGER DEFAULT 1",
             "user_ids_json": "TEXT",
         }
@@ -271,6 +306,9 @@ def _migrate_db() -> None:
 
         telemetry_columns = _table_columns(conn, TELEMETRY_TABLE)
         telemetry_missing = {
+            "terrain_alt_m": "REAL",
+            "terrain_alt_source": "TEXT",
+            "terrain_alt_updated_at": "TEXT",
             "solar_current_a": "REAL",
             "solar_bus_v": "REAL",
             "solar_shunt_v": "REAL",
@@ -284,6 +322,18 @@ def _migrate_db() -> None:
         for name, col_type in telemetry_missing.items():
             if name not in telemetry_columns:
                 conn.execute(f"ALTER TABLE {TELEMETRY_TABLE} ADD COLUMN {name} {col_type}")
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {TERRAIN_CACHE_TABLE} (
+                cache_key TEXT PRIMARY KEY,
+                lat REAL,
+                lon REAL,
+                terrain_alt_m REAL,
+                source TEXT,
+                fetched_at TEXT
+            )
+            """
+        )
         conn.execute(f"UPDATE {TELEMETRY_TABLE} SET solar_enabled = 1 WHERE solar_enabled IS NULL")
         try:
             from app.user_profiles import legacy_profiles_for_initials, profile_snapshot_json
@@ -378,6 +428,9 @@ def _migrate_db() -> None:
                 "gps_lat",
                 "gps_lon",
                 "gps_alt",
+                "terrain_alt_m",
+                "terrain_alt_source",
+                "terrain_alt_updated_at",
                 "gps_speed_kph",
                 "gps_track_deg",
                 "gps_fix",
@@ -495,9 +548,240 @@ def _safe_float(value: Any) -> float | None:
     try:
         if value is None:
             return None
-        return float(value)
+        number = float(value)
     except Exception:
         return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _terrain_enabled() -> bool:
+    value = os.getenv("MONITOR_TERRAIN_ELEVATION_ENABLED", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _terrain_fallback_enabled() -> bool:
+    value = os.getenv("MONITOR_TERRAIN_FALLBACK_ENABLED", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _valid_lat_lon(lat: Any, lon: Any) -> tuple[float, float] | None:
+    lat_f = _safe_float(lat)
+    lon_f = _safe_float(lon)
+    if lat_f is None or lon_f is None:
+        return None
+    if lat_f == 0 or lon_f == 0:
+        return None
+    if not (-90 <= lat_f <= 90 and -180 <= lon_f <= 180):
+        return None
+    return lat_f, lon_f
+
+
+def _terrain_cache_key(lat: float, lon: float) -> str:
+    return f"{lat:.{TERRAIN_CACHE_DECIMALS}f},{lon:.{TERRAIN_CACHE_DECIMALS}f}"
+
+
+def _fetch_ign_terrain_altitudes(points: list[tuple[float, float]]) -> dict[str, dict[str, Any]]:
+    if not points:
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    delimiter = "|"
+    batch_size = max(1, min(TERRAIN_BATCH_SIZE, 5000))
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Cycle-Analyst-Monitor/1.0",
+    }
+    for offset in range(0, len(points), batch_size):
+        batch = points[offset : offset + batch_size]
+        payload = {
+            "lon": delimiter.join(f"{lon:.8f}" for lat, lon in batch),
+            "lat": delimiter.join(f"{lat:.8f}" for lat, lon in batch),
+            "resource": TERRAIN_RESOURCE,
+            "delimiter": delimiter,
+            "indent": "false",
+            "measures": "false",
+            "zonly": "false",
+        }
+        try:
+            body = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(TERRAIN_API_URL, data=body, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=TERRAIN_TIMEOUT_SEC) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
+            continue
+        elevations = data.get("elevations") if isinstance(data, dict) else None
+        if not isinstance(elevations, list):
+            continue
+        for point, elevation in zip(batch, elevations):
+            if not isinstance(elevation, dict):
+                continue
+            alt = _safe_float(elevation.get("z"))
+            if alt is None or alt <= -99998:
+                continue
+            lat, lon = point
+            result[_terrain_cache_key(lat, lon)] = {
+                "terrain_alt_m": alt,
+                "source": TERRAIN_RESOURCE,
+            }
+    return result
+
+
+def _fetch_opentopodata_altitudes(points: list[tuple[float, float]]) -> dict[str, dict[str, Any]]:
+    if not points:
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    delimiter = "|"
+    batch_size = max(1, min(TERRAIN_FALLBACK_BATCH_SIZE, 100))
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Cycle-Analyst-Monitor/1.0",
+    }
+    for offset in range(0, len(points), batch_size):
+        if offset > 0 and TERRAIN_FALLBACK_THROTTLE_SEC > 0:
+            time.sleep(TERRAIN_FALLBACK_THROTTLE_SEC)
+        batch = points[offset : offset + batch_size]
+        payload = {
+            "locations": delimiter.join(f"{lat:.8f},{lon:.8f}" for lat, lon in batch),
+            "interpolation": "bilinear",
+        }
+        try:
+            body = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(TERRAIN_FALLBACK_API_URL, data=body, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=TERRAIN_TIMEOUT_SEC) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(data, dict) or data.get("status") != "OK":
+            continue
+        elevations = data.get("results")
+        if not isinstance(elevations, list):
+            continue
+        for point, elevation in zip(batch, elevations):
+            if not isinstance(elevation, dict):
+                continue
+            alt = _safe_float(elevation.get("elevation"))
+            if alt is None:
+                continue
+            dataset = str(elevation.get("dataset") or TERRAIN_FALLBACK_DATASET)
+            lat, lon = point
+            result[_terrain_cache_key(lat, lon)] = {
+                "terrain_alt_m": alt,
+                "source": f"opentopodata:{dataset}",
+            }
+    return result
+
+
+def _fetch_terrain_altitudes(
+    points: list[tuple[float, float]],
+    *,
+    allow_fallback: bool = True,
+) -> dict[str, dict[str, Any]]:
+    result = _fetch_ign_terrain_altitudes(points)
+    if not allow_fallback or not _terrain_fallback_enabled():
+        return result
+    missing = [point for point in points if _terrain_cache_key(*point) not in result]
+    if not missing:
+        return result
+    fallback = _fetch_opentopodata_altitudes(missing)
+    for key, value in fallback.items():
+        result.setdefault(key, value)
+    return result
+
+
+def _enrich_samples_with_terrain_altitude(
+    conn: sqlite3.Connection,
+    samples: list[dict[str, Any]],
+    *,
+    allow_fallback: bool = True,
+) -> int:
+    if not samples or not _terrain_enabled():
+        return 0
+
+    keyed_points: dict[str, tuple[float, float]] = {}
+    for sample in samples:
+        if _safe_float(sample.get("terrain_alt_m")) is not None:
+            continue
+        gps = _valid_lat_lon(sample.get("gps_lat"), sample.get("gps_lon"))
+        if gps is None:
+            continue
+        lat, lon = gps
+        keyed_points.setdefault(_terrain_cache_key(lat, lon), (lat, lon))
+
+    if not keyed_points:
+        return 0
+
+    elevations: dict[str, dict[str, Any]] = {}
+    keys = list(keyed_points)
+    for offset in range(0, len(keys), 900):
+        chunk = keys[offset : offset + 900]
+        cached_rows = conn.execute(
+            f"""
+            SELECT cache_key, terrain_alt_m, source
+            FROM {TERRAIN_CACHE_TABLE}
+            WHERE cache_key IN ({", ".join("?" for _ in chunk)})
+            """,
+            tuple(chunk),
+        ).fetchall()
+        elevations.update(
+            {
+                row["cache_key"]: {
+                    "terrain_alt_m": row["terrain_alt_m"],
+                    "source": row["source"],
+                }
+                for row in cached_rows
+                if _safe_float(row["terrain_alt_m"]) is not None
+            }
+        )
+
+    missing = [point for key, point in keyed_points.items() if key not in elevations]
+    fetched = _fetch_terrain_altitudes(missing, allow_fallback=allow_fallback)
+    if fetched:
+        fetched_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        conn.executemany(
+            f"""
+            INSERT INTO {TERRAIN_CACHE_TABLE} (cache_key, lat, lon, terrain_alt_m, source, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(cache_key) DO UPDATE SET
+                lat = excluded.lat,
+                lon = excluded.lon,
+                terrain_alt_m = excluded.terrain_alt_m,
+                source = excluded.source,
+                fetched_at = excluded.fetched_at
+            """,
+            [
+                (
+                    key,
+                    keyed_points[key][0],
+                    keyed_points[key][1],
+                    value["terrain_alt_m"],
+                    value["source"],
+                    fetched_at,
+                )
+                for key, value in fetched.items()
+                if key in keyed_points
+            ],
+        )
+        elevations.update(fetched)
+
+    updated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    enriched = 0
+    for sample in samples:
+        if _safe_float(sample.get("terrain_alt_m")) is not None:
+            continue
+        gps = _valid_lat_lon(sample.get("gps_lat"), sample.get("gps_lon"))
+        if gps is None:
+            continue
+        value = elevations.get(_terrain_cache_key(*gps))
+        if not value:
+            continue
+        sample["terrain_alt_m"] = value["terrain_alt_m"]
+        sample["terrain_alt_source"] = value["source"]
+        sample["terrain_alt_updated_at"] = updated_at
+        enriched += 1
+    return enriched
 
 
 def _compute_session_distance_km(samples: list[dict[str, Any]]) -> float | None:
@@ -518,11 +802,30 @@ def _compute_session_distance_km(samples: list[dict[str, Any]]) -> float | None:
 def _compute_session_uphill_m(samples: list[dict[str, Any]]) -> float | None:
     if not samples:
         return None
-    if not any(_safe_float(sample.get("gps_alt")) is not None for sample in samples):
+    if not any(
+        _safe_float(sample.get("terrain_alt_m")) is not None
+        or _safe_float(sample.get("gps_alt")) is not None
+        for sample in samples
+    ):
         return None
     try:
         metrics = compute_session_metrics(samples)
         uphill = metrics.get("gps_uphill_m")
+        if uphill is not None:
+            return float(uphill)
+    except Exception:
+        pass
+    return None
+
+
+def _compute_raw_gps_uphill_m(samples: list[dict[str, Any]]) -> float | None:
+    if not samples:
+        return None
+    if not any(_safe_float(sample.get("gps_alt")) is not None for sample in samples):
+        return None
+    try:
+        metrics = compute_session_metrics(samples)
+        uphill = metrics.get("raw_gps_uphill_m")
         if uphill is not None:
             return float(uphill)
     except Exception:
@@ -538,7 +841,8 @@ def _telemetry_samples_for_session(
 ) -> list[dict[str, Any]]:
     rows = conn.execute(
         f"""
-        SELECT timestamp, raw, solar_enabled, gps_lat, gps_lon, gps_alt
+        SELECT timestamp, raw, solar_enabled, gps_lat, gps_lon, gps_alt,
+               terrain_alt_m, terrain_alt_source, terrain_alt_updated_at
         FROM {TELEMETRY_TABLE}
         WHERE device_id = ? AND session_id = ? AND mode = ?
         ORDER BY id
@@ -553,6 +857,9 @@ def _telemetry_samples_for_session(
             "gps_lat": row["gps_lat"],
             "gps_lon": row["gps_lon"],
             "gps_alt": row["gps_alt"],
+            "terrain_alt_m": row["terrain_alt_m"],
+            "terrain_alt_source": row["terrain_alt_source"],
+            "terrain_alt_updated_at": row["terrain_alt_updated_at"],
         }
         for row in rows
     ]
@@ -562,7 +869,7 @@ def _backfill_session_distances(conn: sqlite3.Connection) -> None:
     try:
         rows = conn.execute(
             """
-            SELECT id, device_id, session_id, mode, distance_km, duration_sec, avg_speed_kph, uphill_m
+            SELECT id, device_id, session_id, mode, distance_km, duration_sec, avg_speed_kph, uphill_m, raw_gps_uphill_m
             FROM sessions
             """
         ).fetchall()
@@ -575,10 +882,12 @@ def _backfill_session_distances(conn: sqlite3.Connection) -> None:
             )
             distance_km = _compute_session_distance_km(samples)
             uphill_m = _compute_session_uphill_m(samples)
-            if distance_km is None and uphill_m is None:
+            raw_gps_uphill_m = _compute_raw_gps_uphill_m(samples)
+            if distance_km is None and uphill_m is None and raw_gps_uphill_m is None:
                 continue
             current = row["distance_km"]
             current_uphill = row["uphill_m"]
+            current_raw_gps_uphill = row["raw_gps_uphill_m"]
             distance_unchanged = (
                 distance_km is None
                 or (current is not None and abs(float(current) - distance_km) < 0.001)
@@ -587,12 +896,18 @@ def _backfill_session_distances(conn: sqlite3.Connection) -> None:
                 uphill_m is None
                 or (current_uphill is not None and abs(float(current_uphill) - uphill_m) < 0.001)
             )
-            if distance_unchanged and uphill_unchanged:
+            raw_gps_uphill_unchanged = (
+                raw_gps_uphill_m is None
+                or (current_raw_gps_uphill is not None and abs(float(current_raw_gps_uphill) - raw_gps_uphill_m) < 0.001)
+            )
+            if distance_unchanged and uphill_unchanged and raw_gps_uphill_unchanged:
                 continue
             if distance_km is None:
                 distance_km = current
             if uphill_m is None:
                 uphill_m = current_uphill
+            if raw_gps_uphill_m is None:
+                raw_gps_uphill_m = current_raw_gps_uphill
             avg_speed_kph = None
             if distance_km is not None and row["duration_sec"] and row["duration_sec"] > 0:
                 avg_speed_kph = distance_km / (float(row["duration_sec"]) / 3600)
@@ -601,13 +916,126 @@ def _backfill_session_distances(conn: sqlite3.Connection) -> None:
             conn.execute(
                 """
                 UPDATE sessions
-                SET distance_km = ?, avg_speed_kph = ?, uphill_m = ?
+                SET distance_km = ?, avg_speed_kph = ?, uphill_m = ?, raw_gps_uphill_m = ?
                 WHERE id = ?
                 """,
-                (distance_km, avg_speed_kph, uphill_m, row["id"]),
+                (distance_km, avg_speed_kph, uphill_m, raw_gps_uphill_m, row["id"]),
             )
     except Exception:
         pass
+
+
+def _missing_terrain_cache_key(sample: dict[str, Any]) -> str | None:
+    if _safe_float(sample.get("terrain_alt_m")) is not None:
+        return None
+    gps = _valid_lat_lon(sample.get("gps_lat"), sample.get("gps_lon"))
+    if gps is None:
+        return None
+    return _terrain_cache_key(*gps)
+
+
+def _backfill_terrain_altitudes(
+    conn: sqlite3.Connection,
+    limit_sessions: int | None = None,
+    limit_points: int | None = None,
+) -> dict[str, int | bool]:
+    rows = conn.execute(
+        """
+        SELECT id, device_id, session_id, mode
+        FROM sessions
+        ORDER BY start_ts DESC, id DESC
+        """
+    ).fetchall()
+    if limit_sessions and limit_sessions > 0:
+        rows = rows[:limit_sessions]
+    if limit_points is None:
+        limit_points = TERRAIN_BACKFILL_LIMIT_POINTS
+    remaining_points = limit_points if limit_points and limit_points > 0 else None
+
+    stats = {
+        "sessions_checked": 0,
+        "sessions_updated": 0,
+        "samples_updated": 0,
+        "points_requested": 0,
+        "points_limit": int(limit_points or 0),
+        "limited": False,
+        "cache_entries": 0,
+    }
+    for row in rows:
+        if remaining_points is not None and remaining_points <= 0:
+            stats["limited"] = True
+            break
+
+        stats["sessions_checked"] += 1
+        sample_rows = conn.execute(
+            f"""
+            SELECT id, timestamp, raw, solar_enabled, gps_lat, gps_lon, gps_alt,
+                   terrain_alt_m, terrain_alt_source, terrain_alt_updated_at
+            FROM {TELEMETRY_TABLE}
+            WHERE device_id = ? AND session_id = ? AND mode = ?
+            ORDER BY id
+            """,
+            (row["device_id"], row["session_id"], row["mode"]),
+        ).fetchall()
+        samples = [dict(sample_row) for sample_row in sample_rows]
+        before = {
+            sample["id"]: _safe_float(sample.get("terrain_alt_m"))
+            for sample in samples
+            if sample.get("id") is not None
+        }
+        samples_to_enrich = samples
+        if remaining_points is not None:
+            missing_keys = list(dict.fromkeys(
+                key for sample in samples if (key := _missing_terrain_cache_key(sample))
+            ))
+            if len(missing_keys) > remaining_points:
+                stats["limited"] = True
+                allowed_keys = set(missing_keys[:remaining_points])
+                samples_to_enrich = [
+                    sample
+                    for sample in samples
+                    if _missing_terrain_cache_key(sample) in allowed_keys
+                ]
+            else:
+                allowed_keys = set(missing_keys)
+            stats["points_requested"] += len(allowed_keys)
+            remaining_points -= len(allowed_keys)
+
+        enriched = _enrich_samples_with_terrain_altitude(conn, samples_to_enrich)
+        if not enriched:
+            continue
+        for sample in samples:
+            sample_id = sample.get("id")
+            terrain_alt = _safe_float(sample.get("terrain_alt_m"))
+            if sample_id is None or terrain_alt is None or before.get(sample_id) is not None:
+                continue
+            conn.execute(
+                f"""
+                UPDATE {TELEMETRY_TABLE}
+                SET terrain_alt_m = ?,
+                    terrain_alt_source = ?,
+                    terrain_alt_updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    terrain_alt,
+                    sample.get("terrain_alt_source"),
+                    sample.get("terrain_alt_updated_at"),
+                    sample_id,
+                ),
+            )
+            stats["samples_updated"] += 1
+        uphill_m = _compute_session_uphill_m(samples)
+        raw_gps_uphill_m = _compute_raw_gps_uphill_m(samples)
+        if uphill_m is not None:
+            conn.execute(
+                "UPDATE sessions SET uphill_m = ?, raw_gps_uphill_m = ? WHERE id = ?",
+                (uphill_m, raw_gps_uphill_m, row["id"]),
+            )
+        stats["sessions_updated"] += 1
+    cache_count = conn.execute(f"SELECT COUNT(*) FROM {TERRAIN_CACHE_TABLE}").fetchone()
+    stats["cache_entries"] = int(cache_count[0] or 0)
+    return stats
 
 
 def _photo_extension(filename: str | None, mime_type: str | None) -> str:
@@ -921,7 +1349,8 @@ def create_app() -> Flask:
                 """
                 SELECT
                     SUM(COALESCE(distance_km, 0)) AS total_distance_km,
-                    SUM(COALESCE(uphill_m, 0)) AS total_uphill_m
+                    SUM(COALESCE(uphill_m, 0)) AS total_uphill_m,
+                    SUM(COALESCE(raw_gps_uphill_m, uphill_m, 0)) AS raw_gps_total_uphill_m
                 FROM sessions
                 WHERE start_ts IS NOT NULL
                   AND date(start_ts) >= date('now', '-30 days')
@@ -1022,6 +1451,7 @@ def create_app() -> Flask:
         ]
         total_distance_30 = float(totals_30["total_distance_km"] or 0) if totals_30 else 0.0
         total_uphill_30 = float(totals_30["total_uphill_m"] or 0) if totals_30 else 0.0
+        raw_gps_total_uphill_30 = float(totals_30["raw_gps_total_uphill_m"] or 0) if totals_30 else 0.0
         avg_session_distance = float(avg_session["avg_distance_km"] or 0) if avg_session else 0.0
         avg_speed = 0.0
         if avg_speed_row and avg_speed_row["total_duration_sec"]:
@@ -1049,6 +1479,7 @@ def create_app() -> Flask:
             daily_all=daily_all,
             total_distance_30=total_distance_30,
             total_uphill_30=total_uphill_30,
+            raw_gps_total_uphill_30=raw_gps_total_uphill_30,
             avg_session_distance=avg_session_distance,
             avg_speed=avg_speed,
             latest_photo=latest_photo_payload,
@@ -1259,6 +1690,8 @@ def create_app() -> Flask:
                 return jsonify({"status": "exists"})
 
             samples = data.get("telemetry_samples") or data.get("logs") or []
+            samples = [dict(row) for row in samples if isinstance(row, dict)]
+            _enrich_samples_with_terrain_altitude(conn, samples, allow_fallback=False)
             payload_metrics = data.get("metrics") if isinstance(data.get("metrics"), dict) else {}
             solar_enabled = 1 if data.get("solar_enabled", payload_metrics.get("solar_enabled", True)) else 0
             rows_count = len(samples)
@@ -1276,6 +1709,7 @@ def create_app() -> Flask:
             if start_dt and end_dt:
                 duration_sec = max(0.0, (end_dt - start_dt).total_seconds())
             uphill_m = _compute_session_uphill_m(samples) or 0.0
+            raw_gps_uphill_m = _compute_raw_gps_uphill_m(samples) or 0.0
             if duration_sec and distance_km is not None and duration_sec > 0:
                 avg_speed_kph = float(distance_km) / (duration_sec / 3600)
             user_ids = sorted({
@@ -1295,8 +1729,9 @@ def create_app() -> Flask:
                 """
                 INSERT INTO sessions (
                     device_id, session_id, mode, start_ts, end_ts,
-                    rows_count, distance_km, duration_sec, avg_speed_kph, uphill_m, solar_enabled, user_ids_json, metrics_json, uploaded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rows_count, distance_km, duration_sec, avg_speed_kph, uphill_m, raw_gps_uphill_m,
+                    solar_enabled, user_ids_json, metrics_json, uploaded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     device_id,
@@ -1309,6 +1744,7 @@ def create_app() -> Flask:
                     duration_sec,
                     avg_speed_kph,
                     uphill_m,
+                    raw_gps_uphill_m,
                     solar_enabled,
                     user_ids_json,
                     metrics_json,
@@ -1322,9 +1758,10 @@ def create_app() -> Flask:
                     INSERT INTO {TELEMETRY_TABLE} (
                         device_id, session_id, mode, timestamp, raw, user,
                         user_id, user_initials, user_snapshot_json,
-                        gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+                        gps_lat, gps_lon, gps_alt, terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
+                        gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                         solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -1340,6 +1777,9 @@ def create_app() -> Flask:
                             row.get("gps_lat"),
                             row.get("gps_lon"),
                             row.get("gps_alt"),
+                            row.get("terrain_alt_m"),
+                            row.get("terrain_alt_source"),
+                            row.get("terrain_alt_updated_at"),
                             row.get("gps_speed_kph"),
                             row.get("gps_track_deg"),
                             row.get("gps_fix"),
@@ -1386,6 +1826,17 @@ def create_app() -> Flask:
             conn.commit()
 
         return jsonify({"status": "ok"})
+
+    @app.route("/api/backfill_terrain_altitudes", methods=["POST"])
+    @_require_auth
+    def backfill_terrain_altitudes():
+        data = request.get_json(silent=True) or {}
+        limit_sessions = _safe_int(data.get("limit_sessions"))
+        limit_points = _safe_int(data.get("limit_points"))
+        with _get_db() as conn:
+            stats = _backfill_terrain_altitudes(conn, limit_sessions, limit_points)
+            conn.commit()
+        return jsonify({"status": "ok", **stats})
 
     @app.route("/api/upload_photo", methods=["POST"])
     @_require_auth
@@ -1539,7 +1990,8 @@ def create_app() -> Flask:
                 f"""
                 SELECT timestamp, session_id, raw, user,
                        user_id, user_initials, user_snapshot_json,
-                       gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+                       gps_lat, gps_lon, gps_alt, terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
+                       gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                        solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
                 FROM {TELEMETRY_TABLE}
                 WHERE device_id = ? AND session_id = ? AND mode = ?
@@ -1567,17 +2019,20 @@ def create_app() -> Flask:
                 "gps_lat": r[7],
                 "gps_lon": r[8],
                 "gps_alt": r[9],
-                "gps_speed_kph": r[10],
-                "gps_track_deg": r[11],
-                "gps_fix": r[12],
-                "gps_sats": r[13],
-                "gps_hdop": r[14],
-                "solar_current_a": r[15],
-                "solar_bus_v": r[16],
-                "solar_shunt_v": r[17],
-                "solar_power_w": r[18],
-                "solar_temperature_c": r[19],
-                "solar_enabled": r[20],
+                "terrain_alt_m": r[10],
+                "terrain_alt_source": r[11],
+                "terrain_alt_updated_at": r[12],
+                "gps_speed_kph": r[13],
+                "gps_track_deg": r[14],
+                "gps_fix": r[15],
+                "gps_sats": r[16],
+                "gps_hdop": r[17],
+                "solar_current_a": r[18],
+                "solar_bus_v": r[19],
+                "solar_shunt_v": r[20],
+                "solar_power_w": r[21],
+                "solar_temperature_c": r[22],
+                "solar_enabled": r[23],
             }
             for r in rows
         ]
@@ -1606,13 +2061,14 @@ def create_app() -> Flask:
         device_id = request.args.get("device_id")
         session_id = request.args.get("session_id")
         mode = request.args.get("mode", "default")
+        altitude_mode = (request.args.get("altitude") or "terrain").strip().lower()
         if not device_id or not session_id:
             return jsonify({"error": "missing device_id or session_id"}), 400
 
         with _get_db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT timestamp, gps_lat, gps_lon, gps_alt
+                SELECT timestamp, gps_lat, gps_lon, gps_alt, terrain_alt_m
                 FROM {TELEMETRY_TABLE}
                 WHERE device_id = ? AND session_id = ? AND mode = ?
                   AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
@@ -1630,9 +2086,12 @@ def create_app() -> Flask:
             except Exception:
                 continue
             alt = None
-            if row["gps_alt"] is not None:
+            alt_value = row["gps_alt"] if altitude_mode == "gps" else row["terrain_alt_m"]
+            if alt_value is None:
+                alt_value = row["gps_alt"]
+            if alt_value is not None:
                 try:
-                    alt = float(row["gps_alt"])
+                    alt = float(alt_value)
                 except Exception:
                     alt = None
             points.append(
@@ -1902,7 +2361,8 @@ def create_app() -> Flask:
                 f"""
                 SELECT timestamp, raw, user,
                        user_id, user_initials, user_snapshot_json,
-                       gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+                       gps_lat, gps_lon, gps_alt, terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
+                       gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                        solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
                 FROM {TELEMETRY_TABLE}
                 WHERE device_id = ? AND session_id = ? AND mode = ?
@@ -1924,6 +2384,9 @@ def create_app() -> Flask:
                 "gps_lat": row["gps_lat"],
                 "gps_lon": row["gps_lon"],
                 "gps_alt": row["gps_alt"],
+                "terrain_alt_m": row["terrain_alt_m"],
+                "terrain_alt_source": row["terrain_alt_source"],
+                "terrain_alt_updated_at": row["terrain_alt_updated_at"],
                 "gps_speed_kph": row["gps_speed_kph"],
                 "gps_track_deg": row["gps_track_deg"],
                 "gps_fix": row["gps_fix"],
@@ -1945,11 +2408,22 @@ def create_app() -> Flask:
             if lat == 0 or lon == 0:
                 continue
             point = {"lat": lat, "lon": lon}
-            if row["gps_alt"] is not None:
+            alt_value = row["terrain_alt_m"] if row["terrain_alt_m"] is not None else row["gps_alt"]
+            if alt_value is not None:
                 try:
-                    point["alt"] = float(row["gps_alt"])
+                    point["alt"] = float(alt_value)
                 except Exception:
                     point["alt"] = None
+            if row["gps_alt"] is not None:
+                try:
+                    point["gps_alt"] = float(row["gps_alt"])
+                except Exception:
+                    point["gps_alt"] = None
+            if row["terrain_alt_m"] is not None:
+                try:
+                    point["terrain_alt_m"] = float(row["terrain_alt_m"])
+                except Exception:
+                    point["terrain_alt_m"] = None
             time_str = _format_gpx_time(row["timestamp"])
             if time_str:
                 point["time"] = time_str

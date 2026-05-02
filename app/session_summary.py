@@ -8,6 +8,7 @@ from typing import Any, Callable, Iterable
 MAX_SUMMARY_DT_SECONDS = 5.0
 ELEVATION_DEADBAND_M = 5.0
 _ELEVATION_ANCHOR_KEY = "_elevation_anchor_m"
+_RAW_GPS_ELEVATION_ANCHOR_KEY = "_raw_gps_elevation_anchor_m"
 
 
 def parse_raw_values(raw: str | None) -> list[float] | None:
@@ -75,6 +76,13 @@ def _valid_gps(lat: Any, lon: Any) -> tuple[float, float] | None:
     return lat_f, lon_f
 
 
+def _sample_altitude(sample: dict[str, Any]) -> float | None:
+    terrain_alt = _safe_float(sample.get("terrain_alt_m"))
+    if terrain_alt is not None:
+        return terrain_alt
+    return _safe_float(sample.get("gps_alt"))
+
+
 def _haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
     lat1, lon1 = math.radians(a[0]), math.radians(a[1])
     lat2, lon2 = math.radians(b[0]), math.radians(b[1])
@@ -117,6 +125,10 @@ def _empty_metrics() -> dict[str, Any]:
         "gps_downhill_m": 0.0,
         "gps_alt_min": None,
         "gps_alt_max": None,
+        "raw_gps_uphill_m": 0.0,
+        "raw_gps_downhill_m": 0.0,
+        "raw_gps_alt_min": None,
+        "raw_gps_alt_max": None,
         "gps_speed_sum": 0.0,
         "gps_speed_max": 0.0,
         "gps_speed_count": 0,
@@ -136,26 +148,54 @@ def _finalize_metrics(m: dict[str, Any]) -> dict[str, Any]:
     if m["power_min"] == float("inf"):
         m["power_min"] = 0.0
     m.pop(_ELEVATION_ANCHOR_KEY, None)
+    m.pop(_RAW_GPS_ELEVATION_ANCHOR_KEY, None)
     return m
 
 
-def _add_elevation_sample(m: dict[str, Any], alt: Any) -> None:
+def _add_elevation_sample(
+    m: dict[str, Any],
+    alt: Any,
+    *,
+    uphill_key: str = "gps_uphill_m",
+    downhill_key: str = "gps_downhill_m",
+    anchor_key: str = _ELEVATION_ANCHOR_KEY,
+) -> None:
     alt_f = _safe_float(alt)
     if alt_f is None:
         return
 
-    anchor = m.get(_ELEVATION_ANCHOR_KEY)
+    anchor = m.get(anchor_key)
     if anchor is None:
-        m[_ELEVATION_ANCHOR_KEY] = alt_f
+        m[anchor_key] = alt_f
         return
 
     diff = alt_f - float(anchor)
     if diff >= ELEVATION_DEADBAND_M:
-        m["gps_uphill_m"] += diff
-        m[_ELEVATION_ANCHOR_KEY] = alt_f
+        m[uphill_key] += diff
+        m[anchor_key] = alt_f
     elif diff <= -ELEVATION_DEADBAND_M:
-        m["gps_downhill_m"] += abs(diff)
-        m[_ELEVATION_ANCHOR_KEY] = alt_f
+        m[downhill_key] += abs(diff)
+        m[anchor_key] = alt_f
+
+
+def _add_altitude_metrics(m: dict[str, Any], sample: dict[str, Any]) -> None:
+    alt = _sample_altitude(sample)
+    if alt is not None:
+        m["gps_alt_min"] = alt if m["gps_alt_min"] is None else min(m["gps_alt_min"], alt)
+        m["gps_alt_max"] = alt if m["gps_alt_max"] is None else max(m["gps_alt_max"], alt)
+        _add_elevation_sample(m, alt)
+
+    raw_alt = _safe_float(sample.get("gps_alt"))
+    if raw_alt is not None:
+        m["raw_gps_alt_min"] = raw_alt if m["raw_gps_alt_min"] is None else min(m["raw_gps_alt_min"], raw_alt)
+        m["raw_gps_alt_max"] = raw_alt if m["raw_gps_alt_max"] is None else max(m["raw_gps_alt_max"], raw_alt)
+        _add_elevation_sample(
+            m,
+            raw_alt,
+            uphill_key="raw_gps_uphill_m",
+            downhill_key="raw_gps_downhill_m",
+            anchor_key=_RAW_GPS_ELEVATION_ANCHOR_KEY,
+        )
 
 
 def _sample_user(sample: dict[str, Any]) -> str | None:
@@ -225,11 +265,7 @@ def _add_instant_metrics(m: dict[str, Any], sample: dict[str, Any], values: list
     gps = _valid_gps(sample.get("gps_lat"), sample.get("gps_lon"))
     if gps is not None:
         m["gps_points"] += 1
-        alt = _safe_float(sample.get("gps_alt"))
-        if alt is not None:
-            m["gps_alt_min"] = alt if m["gps_alt_min"] is None else min(m["gps_alt_min"], alt)
-            m["gps_alt_max"] = alt if m["gps_alt_max"] is None else max(m["gps_alt_max"], alt)
-            _add_elevation_sample(m, alt)
+        _add_altitude_metrics(m, sample)
         gps_speed = _safe_float(sample.get("gps_speed_kph"))
         if gps_speed is not None and gps_speed >= 0:
             m["gps_speed_sum"] += gps_speed
@@ -372,11 +408,7 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
                 m["gps_distance_km"] += _haversine_km(last_gps, gps)
             last_gps = gps
 
-            alt = _safe_float(sample.get("gps_alt"))
-            if alt is not None:
-                m["gps_alt_min"] = alt if m["gps_alt_min"] is None else min(m["gps_alt_min"], alt)
-                m["gps_alt_max"] = alt if m["gps_alt_max"] is None else max(m["gps_alt_max"], alt)
-                _add_elevation_sample(m, alt)
+            _add_altitude_metrics(m, sample)
 
             gps_speed = _safe_float(sample.get("gps_speed_kph"))
             if gps_speed is not None and gps_speed >= 0:
@@ -512,10 +544,14 @@ SUMMARY_GROUPS: list[tuple[str, list[MetricSpec]]] = [
         [
             ("GPS points", "", lambda m: m["gps_points"]),
             ("GPS fix coverage", "%", lambda m: 100 * safe_div(m["gps_fix_count"], m["gps_fix_samples"])),
-            ("GPS climb", "m", lambda m: m["gps_uphill_m"]),
-            ("GPS descent", "m", lambda m: m["gps_downhill_m"]),
+            ("Uphill", "m", lambda m: m["gps_uphill_m"]),
+            ("Raw GPS uphill", "m", lambda m: m["raw_gps_uphill_m"]),
+            ("Downhill", "m", lambda m: m["gps_downhill_m"]),
+            ("Raw GPS downhill", "m", lambda m: m["raw_gps_downhill_m"]),
             ("Min altitude", "m", lambda m: m["gps_alt_min"] or 0.0),
             ("Max altitude", "m", lambda m: m["gps_alt_max"] or 0.0),
+            ("Raw GPS min altitude", "m", lambda m: m["raw_gps_alt_min"] or 0.0),
+            ("Raw GPS max altitude", "m", lambda m: m["raw_gps_alt_max"] or 0.0),
             ("Avg GPS satellites", "", lambda m: safe_div(m["gps_sats_sum"], m["gps_sats_count"])),
             ("Avg GPS HDOP", "", lambda m: safe_div(m["gps_hdop_sum"], m["gps_hdop_count"])),
         ],

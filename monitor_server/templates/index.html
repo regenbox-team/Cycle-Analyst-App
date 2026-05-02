@@ -389,6 +389,10 @@
             <div class="stat-value">{{ "%.0f"|format(total_uphill_30 or 0) }} m</div>
           </div>
           <div class="stat">
+            <div class="stat-label">Raw GPS uphill (last 30 days)</div>
+            <div class="stat-value">{{ "%.0f"|format(raw_gps_total_uphill_30 or 0) }} m</div>
+          </div>
+          <div class="stat">
             <div class="stat-label">Average speed</div>
             <div class="stat-value">{{ "%.1f"|format(avg_speed or 0) }} km/h</div>
             <div class="stat-sub">All sessions</div>
