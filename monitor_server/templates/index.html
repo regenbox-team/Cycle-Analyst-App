@@ -229,12 +229,12 @@
       }
       .summary-card {
         display: grid;
-        grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+        grid-template-columns: 1fr;
         gap: 16px;
       }
       .summary-stats {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 12px;
       }
       .stat {
@@ -265,9 +265,13 @@
         background: var(--accent-soft);
         font-weight: 600;
       }
-      #distance-chart { width: 100%; height: 160px; }
+      #distance-chart { width: 100%; height: 240px; }
       .chart-bg { fill: #fffaf2; }
       .chart-bar { fill: #0d9488; opacity: 0.85; }
+      .chart-axis { stroke: #9f9282; stroke-width: 1; }
+      .chart-grid { stroke: #dfd4c4; stroke-width: 1; stroke-dasharray: 3 4; }
+      .chart-label { fill: #6f665b; font-size: 11px; font-weight: 600; }
+      .chart-axis-title { fill: #3c342c; font-size: 11px; font-weight: 700; }
       .photo-card {
         display: grid;
         grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
@@ -299,6 +303,7 @@
         main { padding: 24px 16px 40px; }
         table { font-size: 13px; }
         .summary-card { grid-template-columns: 1fr; }
+        .summary-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .photo-card { grid-template-columns: 1fr; }
       }
     </style>
@@ -379,6 +384,17 @@
 
       <h2>Summary</h2>
       <div class="card summary-card">
+        <div class="chart-wrap">
+          <div class="chart-header">
+            <div class="pill">Distance per day</div>
+            <div class="chart-toggle">
+              <button class="toggle-btn active" data-range="30">Last 30 days</button>
+              <button class="toggle-btn" data-range="all">All data</button>
+            </div>
+          </div>
+          <svg id="distance-chart" viewBox="0 0 1200 240" role="img" aria-label="Distance per day chart"></svg>
+          <div class="muted">Daily distance (km)</div>
+        </div>
         <div class="summary-stats">
           <div class="stat">
             <div class="stat-label">Total distance (last 30 days)</div>
@@ -402,17 +418,6 @@
             <div class="stat-value">{{ "%.1f"|format(avg_session_distance or 0) }} km</div>
             <div class="stat-sub">All sessions</div>
           </div>
-        </div>
-        <div class="chart-wrap">
-          <div class="chart-header">
-            <div class="pill">Distance per day</div>
-            <div class="chart-toggle">
-              <button class="toggle-btn active" data-range="30">Last 30 days</button>
-              <button class="toggle-btn" data-range="all">All data</button>
-            </div>
-          </div>
-          <svg id="distance-chart" viewBox="0 0 600 160" role="img" aria-label="Distance per day chart"></svg>
-          <div class="muted">Daily distance (km)</div>
         </div>
       </div>
 
@@ -764,27 +769,102 @@
       const chart = document.getElementById("distance-chart");
       const toggleButtons = document.querySelectorAll(".toggle-btn");
 
+      const parseDay = (day) => {
+        const parsed = Date.parse(`${day}T00:00:00`);
+        return Number.isNaN(parsed) ? null : parsed;
+      };
+
+      const formatKmTick = (value) => {
+        if (value >= 100) return Math.round(value).toString();
+        if (value >= 10) return value.toFixed(0);
+        return value.toFixed(1);
+      };
+
+      const formatDayLabel = (time, includeYear = false) => {
+        const date = new Date(time);
+        return date.toLocaleDateString("fr-FR", {
+          day: "2-digit",
+          month: "short",
+          ...(includeYear ? { year: "2-digit" } : {})
+        });
+      };
+
+      const niceMax = (value) => {
+        if (!Number.isFinite(value) || value <= 0) return 1;
+        const exponent = Math.floor(Math.log10(value));
+        const fraction = value / Math.pow(10, exponent);
+        const niceFraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+        return niceFraction * Math.pow(10, exponent);
+      };
+
       const renderChart = (rangeKey) => {
-        const data = distanceSeries[rangeKey] || [];
-        const width = 600;
-        const height = 160;
-        const padding = 20;
+        const rawData = distanceSeries[rangeKey] || [];
+        const measuredWidth = Math.round(chart.getBoundingClientRect().width || 1200);
+        const width = Math.max(600, measuredWidth);
+        const height = 240;
+        chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        const margin = { top: 18, right: 18, bottom: 44, left: 52 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const data = rawData
+          .map((d) => ({ ...d, time: parseDay(d.day), distance_km: Number(d.distance_km || 0) }))
+          .filter((d) => d.time !== null)
+          .sort((a, b) => a.time - b.time);
         if (!data.length) {
           chart.innerHTML = `<rect x="0" y="0" width="${width}" height="${height}" rx="12" class="chart-bg"></rect>` +
             `<text x="24" y="32" fill="#6f665b" font-size="12">No data yet.</text>`;
           return;
         }
-        const maxVal = Math.max(...data.map((d) => d.distance_km), 1);
-        const gap = 4;
-        const barWidth = Math.max(2, (width - padding * 2 - gap * (data.length - 1)) / data.length);
+        const dayMs = 24 * 60 * 60 * 1000;
+        let minTime = data[0].time;
+        let maxTime = data[data.length - 1].time;
+        if (rangeKey === "30") {
+          maxTime = Math.max(maxTime, Date.now());
+          minTime = maxTime - 29 * dayMs;
+        }
+        if (minTime === maxTime) {
+          minTime -= dayMs;
+          maxTime += dayMs;
+        }
+        const timeSpan = maxTime - minTime;
+        const maxVal = niceMax(Math.max(...data.map((d) => d.distance_km), 1));
+        const xForTime = (time) => margin.left + ((time - minTime) / timeSpan) * plotWidth;
+        const yForValue = (value) => margin.top + plotHeight - (Math.max(0, value) / maxVal) * plotHeight;
+        const barWidth = Math.max(3, Math.min(18, plotWidth / Math.max(12, timeSpan / dayMs + 1) * 0.62));
+
+        let grid = "";
+        const yTicks = 4;
+        for (let i = 0; i <= yTicks; i++) {
+          const value = (maxVal / yTicks) * i;
+          const y = yForValue(value);
+          grid += `<line x1="${margin.left}" y1="${y.toFixed(1)}" x2="${(width - margin.right).toFixed(1)}" y2="${y.toFixed(1)}" class="chart-grid"></line>`;
+          grid += `<text x="${margin.left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="chart-label">${formatKmTick(value)}</text>`;
+        }
+
+        const xTickCount = rangeKey === "30" ? 5 : Math.min(6, Math.max(2, data.length));
+        const includeYear = maxTime - minTime > 180 * dayMs;
+        for (let i = 0; i < xTickCount; i++) {
+          const time = minTime + (timeSpan * i) / Math.max(1, xTickCount - 1);
+          const x = xForTime(time);
+          grid += `<line x1="${x.toFixed(1)}" y1="${margin.top}" x2="${x.toFixed(1)}" y2="${(margin.top + plotHeight).toFixed(1)}" class="chart-grid"></line>`;
+          grid += `<text x="${x.toFixed(1)}" y="${height - 18}" text-anchor="middle" class="chart-label">${formatDayLabel(time, includeYear)}</text>`;
+        }
+
         let bars = "";
-        data.forEach((point, index) => {
-          const x = padding + index * (barWidth + gap);
-          const barHeight = ((point.distance_km || 0) / maxVal) * (height - padding * 2);
-          const y = height - padding - barHeight;
+        data.forEach((point) => {
+          if (point.time < minTime || point.time > maxTime) return;
+          const x = xForTime(point.time) - barWidth / 2;
+          const y = yForValue(point.distance_km);
+          const barHeight = margin.top + plotHeight - y;
           bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="3" class="chart-bar"></rect>`;
         });
-        chart.innerHTML = `<rect x="0" y="0" width="${width}" height="${height}" rx="12" class="chart-bg"></rect>` + bars;
+        const axes = [
+          `<line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}" class="chart-axis"></line>`,
+          `<line x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${width - margin.right}" y2="${margin.top + plotHeight}" class="chart-axis"></line>`,
+          `<text x="${margin.left}" y="13" class="chart-axis-title">km / jour</text>`,
+          `<text x="${width - margin.right}" y="${height - 4}" text-anchor="end" class="chart-axis-title">temps</text>`
+        ].join("");
+        chart.innerHTML = `<rect x="0" y="0" width="${width}" height="${height}" rx="12" class="chart-bg"></rect>` + grid + axes + bars;
       };
 
       toggleButtons.forEach((btn) => {
@@ -796,6 +876,10 @@
       });
 
       renderChart("30");
+      window.addEventListener("resize", () => {
+        const activeButton = document.querySelector(".toggle-btn.active");
+        renderChart(activeButton?.dataset.range || "30");
+      });
     </script>
   </body>
 </html>
