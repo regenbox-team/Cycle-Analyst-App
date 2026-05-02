@@ -452,6 +452,7 @@ def _migrate_db() -> None:
             ON {TELEMETRY_TABLE}(device_id, session_id, mode, timestamp)
             """
         )
+        _backfill_session_distances(conn)
         conn.commit()
 
 
@@ -488,6 +489,84 @@ def _parse_distance_km(raw: str | None) -> float | None:
         return float(parts[4])
     except Exception:
         return None
+
+
+def _compute_session_distance_km(samples: list[dict[str, Any]]) -> float | None:
+    if not samples:
+        return None
+    if not any(_parse_distance_km(sample.get("raw")) is not None for sample in samples):
+        return None
+    try:
+        metrics = compute_session_metrics(samples)
+        distance = metrics.get("distance")
+        if distance is not None:
+            return float(distance)
+    except Exception:
+        pass
+    return None
+
+
+def _telemetry_samples_for_session(
+    conn: sqlite3.Connection,
+    device_id: str,
+    session_id: str,
+    mode: str,
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        f"""
+        SELECT timestamp, raw, solar_enabled
+        FROM {TELEMETRY_TABLE}
+        WHERE device_id = ? AND session_id = ? AND mode = ?
+        ORDER BY id
+        """,
+        (device_id, session_id, mode),
+    ).fetchall()
+    return [
+        {
+            "timestamp": row["timestamp"],
+            "raw": row["raw"],
+            "solar_enabled": row["solar_enabled"],
+        }
+        for row in rows
+    ]
+
+
+def _backfill_session_distances(conn: sqlite3.Connection) -> None:
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, device_id, session_id, mode, distance_km, duration_sec, avg_speed_kph
+            FROM sessions
+            """
+        ).fetchall()
+        for row in rows:
+            samples = _telemetry_samples_for_session(
+                conn,
+                row["device_id"],
+                row["session_id"],
+                row["mode"],
+            )
+            distance_km = _compute_session_distance_km(samples)
+            if distance_km is None:
+                continue
+            current = row["distance_km"]
+            if current is not None and abs(float(current) - distance_km) < 0.001:
+                continue
+            avg_speed_kph = None
+            if row["duration_sec"] and row["duration_sec"] > 0:
+                avg_speed_kph = distance_km / (float(row["duration_sec"]) / 3600)
+            else:
+                avg_speed_kph = row["avg_speed_kph"]
+            conn.execute(
+                """
+                UPDATE sessions
+                SET distance_km = ?, avg_speed_kph = ?
+                WHERE id = ?
+                """,
+                (distance_km, avg_speed_kph, row["id"]),
+            )
+    except Exception:
+        pass
 
 
 def _photo_extension(filename: str | None, mime_type: str | None) -> str:
@@ -1144,9 +1223,11 @@ def create_app() -> Flask:
             rows_count = len(samples)
             start_ts = samples[0].get("timestamp") if samples else None
             end_ts = samples[-1].get("timestamp") if samples else None
-            distance_km = _parse_distance_km(samples[-1].get("raw") if samples else None)
+            distance_km = _compute_session_distance_km(samples)
             if distance_km is None and isinstance(data.get("metrics"), dict):
                 distance_km = payload_metrics.get("distance_km")
+            if distance_km is None:
+                distance_km = _parse_distance_km(samples[-1].get("raw") if samples else None)
             duration_sec = None
             avg_speed_kph = None
             start_dt = _parse_ts(start_ts)
@@ -1847,6 +1928,9 @@ def create_app() -> Flask:
             points.append(point)
         metrics_by_user = compute_timeline_metrics_by_user(samples)
         metrics_by_user["Total"] = compute_session_metrics(samples)
+        display_distance_km = metrics_by_user["Total"].get("distance")
+        if display_distance_km is None and session_row:
+            display_distance_km = session_row["distance_km"]
         session_users = [user for user in metrics_by_user.keys() if user != "Total"]
         all_users = ["Total"] if len(session_users) <= 1 else ["Total"] + session_users
 
@@ -1864,7 +1948,7 @@ def create_app() -> Flask:
             ),
             start_ts=_format_dt(session_row["start_ts"]) if session_row else "",
             end_ts=_format_dt(session_row["end_ts"]) if session_row else "",
-            distance_km=session_row["distance_km"] if session_row else None,
+            distance_km=display_distance_km,
             rows_count=session_row["rows_count"] if session_row else None,
             sections=build_summary_sections(metrics_by_user, all_users),
             users=all_users,

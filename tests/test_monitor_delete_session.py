@@ -19,10 +19,15 @@ class MonitorDeleteSessionTest(unittest.TestCase):
         os.environ["MONITOR_USER"] = "admin"
         os.environ["MONITOR_PASS"] = "secret"
 
-        if "flask" not in sys.modules and importlib.util.find_spec("flask") is None:
+        try:
+            flask_available = importlib.util.find_spec("flask") is not None
+        except ValueError:
+            flask_available = False
+
+        if not flask_available:
             class DummyApp:
                 def __init__(self, *args, **kwargs):
-                    pass
+                    self.jinja_loader = None
 
                 def route(self, *args, **kwargs):
                     return lambda fn: fn
@@ -39,12 +44,38 @@ class MonitorDeleteSessionTest(unittest.TestCase):
             flask_stub.send_from_directory = lambda *args, **kwargs: None
             flask_stub.url_for = lambda *args, **kwargs: None
             sys.modules["flask"] = flask_stub
+        elif "flask" in sys.modules:
+            original_flask = sys.modules["flask"]
+            try:
+                has_jinja_loader = hasattr(original_flask.Flask(__name__), "jinja_loader")
+            except Exception:
+                has_jinja_loader = False
+            if not has_jinja_loader:
 
-        from monitor_server.app import _delete_session_data, _delete_sessions_data, _init_db, _is_deleted_session
+                class DummyApp:
+                    def __init__(self, *args, **kwargs):
+                        self.jinja_loader = None
+
+                    def route(self, *args, **kwargs):
+                        return lambda fn: fn
+
+                    def run(self, *args, **kwargs):
+                        pass
+
+                original_flask.Flask = DummyApp
+
+        from monitor_server.app import (
+            _delete_session_data,
+            _delete_sessions_data,
+            _init_db,
+            _is_deleted_session,
+            _migrate_db,
+        )
 
         self.delete_session_data = _delete_session_data
         self.delete_sessions_data = _delete_sessions_data
         self.is_deleted_session = _is_deleted_session
+        self.migrate_db = _migrate_db
         _init_db()
 
     def tearDown(self):
@@ -142,6 +173,59 @@ class MonitorDeleteSessionTest(unittest.TestCase):
             self.assertTrue(self.is_deleted_session(conn, "bike", "2026-05-01_10-00-00", "default"))
             self.assertTrue(self.is_deleted_session(conn, "bike", "2026-05-01_11-00-00", "default"))
         self.assertEqual(tombstone_count, 2)
+
+    def test_migration_recomputes_session_distance_from_ca_delta(self):
+        raw_start = "0 52 1 10 124.75 20 0 0 0 0 0 0 0 0 flags"
+        raw_end = "0 52 1 10 145.77 20 0 0 0 0 0 0 0 0 flags"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (
+                    device_id, session_id, mode, start_ts, end_ts,
+                    rows_count, distance_km, duration_sec, avg_speed_kph
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "bike",
+                    "2026-05-02_10-00-00",
+                    "default",
+                    "2026-05-02 10:00:00",
+                    "2026-05-02 12:00:00",
+                    2,
+                    145.77,
+                    7200,
+                    72.885,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO telemetry_samples (device_id, session_id, mode, timestamp, raw)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("bike", "2026-05-02_10-00-00", "default", "2026-05-02 10:00:00", raw_start),
+            )
+            conn.execute(
+                """
+                INSERT INTO telemetry_samples (device_id, session_id, mode, timestamp, raw)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("bike", "2026-05-02_10-00-00", "default", "2026-05-02 12:00:00", raw_end),
+            )
+            conn.commit()
+
+        self.migrate_db()
+
+        with sqlite3.connect(self.db_path) as conn:
+            distance_km, avg_speed_kph = conn.execute(
+                """
+                SELECT distance_km, avg_speed_kph
+                FROM sessions
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                """,
+                ("bike", "2026-05-02_10-00-00", "default"),
+            ).fetchone()
+        self.assertAlmostEqual(distance_km, 21.02, places=2)
+        self.assertAlmostEqual(avg_speed_kph, 10.51, places=2)
 
 
 if __name__ == "__main__":
