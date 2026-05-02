@@ -335,6 +335,23 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 .map-controls-top { margin-bottom: 0.4rem; }
 .map-controls-bottom { margin-top: 0.4rem; }
 
+.map-altitude-strip {
+  display: flex;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+  color: #555;
+  font-size: var(--font-small);
+  line-height: 1.15;
+  text-align: left;
+}
+
+.map-altitude-strip strong {
+  color: var(--text-dark);
+  font-weight: bold;
+}
+
 .map-controls-top label {
   color: var(--text-light);
   font-size: 0.85rem;
@@ -371,7 +388,8 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   display: inline-flex;
 }
 .map-box.reduced .map-controls-top,
-.map-box.reduced .map-controls-bottom {
+.map-box.reduced .map-controls-bottom,
+.map-box.reduced .map-altitude-strip {
   display: none !important;
 }
 /* Half height map when reduced */

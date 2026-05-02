@@ -14,6 +14,9 @@
   let headingMode = HEADING_MODES.NORTH;
   let filteredBearing = 0; // smoothed map bearing
   let bearingInitialized = false;
+  const PHONE_ALTITUDE_REFRESH_MS = 15000;
+  const PHONE_ALTITUDE_OPTIONS = { enableHighAccuracy: true, maximumAge: 30000, timeout: 8000 };
+  let phoneAltitudeTimer = null;
   const pmtilesPath = '/tiles/basemap.pmtiles';
   const BASEMAPS = { AUTO: 'auto', VECTOR_DARK: 'vector_dark', VECTOR_LIGHT: 'vector_light', RASTER_OSM: 'raster_osm', TERRAIN_3D: 'terrain_3d' };
   const OFFLINE_PM_TILES_DEFAULT = false; // set to true if you always ship offline tiles
@@ -51,6 +54,74 @@
     const btn = document.getElementById('map-follow-toggle');
     if (!btn) return;
     btn.textContent = `Follow: ${follow ? 'On' : 'Off'}`;
+  }
+
+  function formatAltitudeMeters(value) {
+    const alt = Number(value);
+    if (!isFinite(alt)) return '-';
+    return `${alt.toFixed(1)} m`;
+  }
+
+  function setText(id, text, title) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    if (title) el.title = title;
+    else el.removeAttribute('title');
+  }
+
+  function setPiAltitudeFromStatus(status) {
+    if (!status || status.stale || !status.has_fix) {
+      setText('pi-gps-altitude', '-', 'No fresh GPS fix from the Pi');
+      return;
+    }
+    setText('pi-gps-altitude', formatAltitudeMeters(status.alt));
+  }
+
+  function mapIsExpanded() {
+    const mapBox = document.querySelector('.map-box');
+    return !mapBox || !mapBox.classList.contains('reduced');
+  }
+
+  function setPhoneAltitudeMessage(text, title) {
+    setText('phone-gps-altitude', text, title);
+  }
+
+  function refreshPhoneAltitude() {
+    if (!mapIsExpanded()) return;
+    if (!('geolocation' in navigator)) {
+      setPhoneAltitudeMessage('-', 'Phone/browser geolocation is not available');
+      return;
+    }
+    if (window.isSecureContext === false) {
+      setPhoneAltitudeMessage('-', 'Phone altitude requires HTTPS or localhost in most browsers');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const coords = position && position.coords;
+        const altitude = coords ? coords.altitude : null;
+        if (altitude == null || !isFinite(Number(altitude))) {
+          setPhoneAltitudeMessage('-', 'Phone GPS did not provide altitude');
+          return;
+        }
+        const accuracy = coords.altitudeAccuracy;
+        const title = isFinite(Number(accuracy)) ? `Altitude accuracy: +/- ${Number(accuracy).toFixed(1)} m` : '';
+        setPhoneAltitudeMessage(formatAltitudeMeters(altitude), title);
+      },
+      (error) => {
+        const message = error && error.message ? error.message : 'Phone GPS unavailable';
+        setPhoneAltitudeMessage('-', message);
+      },
+      PHONE_ALTITUDE_OPTIONS
+    );
+  }
+
+  function startPhoneAltitudePolling() {
+    refreshPhoneAltitude();
+    if (phoneAltitudeTimer) return;
+    phoneAltitudeTimer = setInterval(refreshPhoneAltitude, PHONE_ALTITUDE_REFRESH_MS);
   }
 
   function toggleFollow() {
@@ -573,6 +644,7 @@
     try {
       const res = await fetch('/gps_status', { cache: 'no-store' });
       const s = await res.json();
+      setPiAltitudeFromStatus(s);
       if (!s || !s.has_fix || s.stale) return;
       const lon = Number(s.lon), lat = Number(s.lat);
       if (!isFinite(lon) || !isFinite(lat)) return;
@@ -634,6 +706,7 @@
     try {
       const res = await fetch('/gps_status', { cache: 'no-store' });
       const s = await res.json();
+      setPiAltitudeFromStatus(s);
       if (!s || !s.has_fix || s.stale) return;
       const lon = Number(s.lon), lat = Number(s.lat);
       if (!isFinite(lon) || !isFinite(lat)) return;
@@ -774,7 +847,9 @@
     if (extendBtn && mapBox) {
       extendBtn.addEventListener('click', () => {
         mapBox.classList.remove('reduced');
+        refreshPhoneAltitude();
       });
     }
+    startPhoneAltitudePolling();
   });
 })();
