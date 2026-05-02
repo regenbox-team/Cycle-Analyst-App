@@ -857,6 +857,8 @@ def create_app() -> Flask:
                         "y": y,
                         "device_id": s["device_id"],
                         "session_id": s["session_id"],
+                        "start_ts": s["start_ts"],
+                        "start_ts_fmt": _format_dt(s["start_ts"]),
                     }
                 )
         devices = []
