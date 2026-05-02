@@ -491,6 +491,15 @@ def _parse_distance_km(raw: str | None) -> float | None:
         return None
 
 
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
 def _compute_session_distance_km(samples: list[dict[str, Any]]) -> float | None:
     if not samples:
         return None
@@ -506,6 +515,21 @@ def _compute_session_distance_km(samples: list[dict[str, Any]]) -> float | None:
     return None
 
 
+def _compute_session_uphill_m(samples: list[dict[str, Any]]) -> float | None:
+    if not samples:
+        return None
+    if not any(_safe_float(sample.get("gps_alt")) is not None for sample in samples):
+        return None
+    try:
+        metrics = compute_session_metrics(samples)
+        uphill = metrics.get("gps_uphill_m")
+        if uphill is not None:
+            return float(uphill)
+    except Exception:
+        pass
+    return None
+
+
 def _telemetry_samples_for_session(
     conn: sqlite3.Connection,
     device_id: str,
@@ -514,7 +538,7 @@ def _telemetry_samples_for_session(
 ) -> list[dict[str, Any]]:
     rows = conn.execute(
         f"""
-        SELECT timestamp, raw, solar_enabled
+        SELECT timestamp, raw, solar_enabled, gps_lat, gps_lon, gps_alt
         FROM {TELEMETRY_TABLE}
         WHERE device_id = ? AND session_id = ? AND mode = ?
         ORDER BY id
@@ -526,6 +550,9 @@ def _telemetry_samples_for_session(
             "timestamp": row["timestamp"],
             "raw": row["raw"],
             "solar_enabled": row["solar_enabled"],
+            "gps_lat": row["gps_lat"],
+            "gps_lon": row["gps_lon"],
+            "gps_alt": row["gps_alt"],
         }
         for row in rows
     ]
@@ -535,7 +562,7 @@ def _backfill_session_distances(conn: sqlite3.Connection) -> None:
     try:
         rows = conn.execute(
             """
-            SELECT id, device_id, session_id, mode, distance_km, duration_sec, avg_speed_kph
+            SELECT id, device_id, session_id, mode, distance_km, duration_sec, avg_speed_kph, uphill_m
             FROM sessions
             """
         ).fetchall()
@@ -547,23 +574,37 @@ def _backfill_session_distances(conn: sqlite3.Connection) -> None:
                 row["mode"],
             )
             distance_km = _compute_session_distance_km(samples)
-            if distance_km is None:
+            uphill_m = _compute_session_uphill_m(samples)
+            if distance_km is None and uphill_m is None:
                 continue
             current = row["distance_km"]
-            if current is not None and abs(float(current) - distance_km) < 0.001:
+            current_uphill = row["uphill_m"]
+            distance_unchanged = (
+                distance_km is None
+                or (current is not None and abs(float(current) - distance_km) < 0.001)
+            )
+            uphill_unchanged = (
+                uphill_m is None
+                or (current_uphill is not None and abs(float(current_uphill) - uphill_m) < 0.001)
+            )
+            if distance_unchanged and uphill_unchanged:
                 continue
+            if distance_km is None:
+                distance_km = current
+            if uphill_m is None:
+                uphill_m = current_uphill
             avg_speed_kph = None
-            if row["duration_sec"] and row["duration_sec"] > 0:
+            if distance_km is not None and row["duration_sec"] and row["duration_sec"] > 0:
                 avg_speed_kph = distance_km / (float(row["duration_sec"]) / 3600)
             else:
                 avg_speed_kph = row["avg_speed_kph"]
             conn.execute(
                 """
                 UPDATE sessions
-                SET distance_km = ?, avg_speed_kph = ?
+                SET distance_km = ?, avg_speed_kph = ?, uphill_m = ?
                 WHERE id = ?
                 """,
-                (distance_km, avg_speed_kph, row["id"]),
+                (distance_km, avg_speed_kph, uphill_m, row["id"]),
             )
     except Exception:
         pass
@@ -1234,20 +1275,7 @@ def create_app() -> Flask:
             end_dt = _parse_ts(end_ts)
             if start_dt and end_dt:
                 duration_sec = max(0.0, (end_dt - start_dt).total_seconds())
-            prev_alt = None
-            total_uphill = 0.0
-            for row in samples:
-                alt = row.get("gps_alt")
-                if alt is None:
-                    continue
-                try:
-                    alt_val = float(alt)
-                except Exception:
-                    continue
-                if prev_alt is not None and alt_val > prev_alt:
-                    total_uphill += alt_val - prev_alt
-                prev_alt = alt_val
-            uphill_m = total_uphill
+            uphill_m = _compute_session_uphill_m(samples) or 0.0
             if duration_sec and distance_km is not None and duration_sec > 0:
                 avg_speed_kph = float(distance_km) / (duration_sec / 3600)
             user_ids = sorted({

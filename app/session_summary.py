@@ -6,6 +6,8 @@ from collections import defaultdict
 from typing import Any, Callable, Iterable
 
 MAX_SUMMARY_DT_SECONDS = 5.0
+ELEVATION_DEADBAND_M = 5.0
+_ELEVATION_ANCHOR_KEY = "_elevation_anchor_m"
 
 
 def parse_raw_values(raw: str | None) -> list[float] | None:
@@ -133,7 +135,27 @@ def _finalize_metrics(m: dict[str, Any]) -> dict[str, Any]:
         m["power_max"] = 0.0
     if m["power_min"] == float("inf"):
         m["power_min"] = 0.0
+    m.pop(_ELEVATION_ANCHOR_KEY, None)
     return m
+
+
+def _add_elevation_sample(m: dict[str, Any], alt: Any) -> None:
+    alt_f = _safe_float(alt)
+    if alt_f is None:
+        return
+
+    anchor = m.get(_ELEVATION_ANCHOR_KEY)
+    if anchor is None:
+        m[_ELEVATION_ANCHOR_KEY] = alt_f
+        return
+
+    diff = alt_f - float(anchor)
+    if diff >= ELEVATION_DEADBAND_M:
+        m["gps_uphill_m"] += diff
+        m[_ELEVATION_ANCHOR_KEY] = alt_f
+    elif diff <= -ELEVATION_DEADBAND_M:
+        m["gps_downhill_m"] += abs(diff)
+        m[_ELEVATION_ANCHOR_KEY] = alt_f
 
 
 def _sample_user(sample: dict[str, Any]) -> str | None:
@@ -207,6 +229,7 @@ def _add_instant_metrics(m: dict[str, Any], sample: dict[str, Any], values: list
         if alt is not None:
             m["gps_alt_min"] = alt if m["gps_alt_min"] is None else min(m["gps_alt_min"], alt)
             m["gps_alt_max"] = alt if m["gps_alt_max"] is None else max(m["gps_alt_max"], alt)
+            _add_elevation_sample(m, alt)
         gps_speed = _safe_float(sample.get("gps_speed_kph"))
         if gps_speed is not None and gps_speed >= 0:
             m["gps_speed_sum"] += gps_speed
@@ -268,15 +291,6 @@ def _add_interval_metrics(
     if gps is not None and previous_gps is not None:
         m["gps_distance_km"] += _haversine_km(previous_gps, gps)
 
-    alt = _safe_float(sample.get("gps_alt"))
-    previous_alt = _safe_float(previous_sample.get("gps_alt")) if previous_sample else None
-    if alt is not None and previous_alt is not None:
-        diff = alt - previous_alt
-        if diff > 0.5:
-            m["gps_uphill_m"] += diff
-        elif diff < -0.5:
-            m["gps_downhill_m"] += abs(diff)
-
 
 def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]:
     m = _empty_metrics()
@@ -287,7 +301,6 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
     distance_offset = 0.0
     last_raw_distance = None
     last_gps = None
-    last_alt = None
 
     for sample in samples:
         values = parse_raw_values(sample.get("raw"))
@@ -363,13 +376,7 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
             if alt is not None:
                 m["gps_alt_min"] = alt if m["gps_alt_min"] is None else min(m["gps_alt_min"], alt)
                 m["gps_alt_max"] = alt if m["gps_alt_max"] is None else max(m["gps_alt_max"], alt)
-                if last_alt is not None:
-                    diff = alt - last_alt
-                    if diff > 0.5:
-                        m["gps_uphill_m"] += diff
-                    elif diff < -0.5:
-                        m["gps_downhill_m"] += abs(diff)
-                last_alt = alt
+                _add_elevation_sample(m, alt)
 
             gps_speed = _safe_float(sample.get("gps_speed_kph"))
             if gps_speed is not None and gps_speed >= 0:

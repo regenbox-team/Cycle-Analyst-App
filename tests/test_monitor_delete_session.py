@@ -182,8 +182,8 @@ class MonitorDeleteSessionTest(unittest.TestCase):
                 """
                 INSERT INTO sessions (
                     device_id, session_id, mode, start_ts, end_ts,
-                    rows_count, distance_km, duration_sec, avg_speed_kph
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rows_count, distance_km, duration_sec, avg_speed_kph, uphill_m
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "bike",
@@ -195,30 +195,31 @@ class MonitorDeleteSessionTest(unittest.TestCase):
                     145.77,
                     7200,
                     72.885,
+                    1035.0,
                 ),
             )
             conn.execute(
                 """
-                INSERT INTO telemetry_samples (device_id, session_id, mode, timestamp, raw)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO telemetry_samples (device_id, session_id, mode, timestamp, raw, gps_lat, gps_lon, gps_alt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("bike", "2026-05-02_10-00-00", "default", "2026-05-02 10:00:00", raw_start),
+                ("bike", "2026-05-02_10-00-00", "default", "2026-05-02 10:00:00", raw_start, 48.0, 2.0, 100.0),
             )
             conn.execute(
                 """
-                INSERT INTO telemetry_samples (device_id, session_id, mode, timestamp, raw)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO telemetry_samples (device_id, session_id, mode, timestamp, raw, gps_lat, gps_lon, gps_alt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("bike", "2026-05-02_10-00-00", "default", "2026-05-02 12:00:00", raw_end),
+                ("bike", "2026-05-02_10-00-00", "default", "2026-05-02 12:00:00", raw_end, 48.1, 2.0, 106.0),
             )
             conn.commit()
 
         self.migrate_db()
 
         with sqlite3.connect(self.db_path) as conn:
-            distance_km, avg_speed_kph = conn.execute(
+            distance_km, avg_speed_kph, uphill_m = conn.execute(
                 """
-                SELECT distance_km, avg_speed_kph
+                SELECT distance_km, avg_speed_kph, uphill_m
                 FROM sessions
                 WHERE device_id = ? AND session_id = ? AND mode = ?
                 """,
@@ -226,6 +227,7 @@ class MonitorDeleteSessionTest(unittest.TestCase):
             ).fetchone()
         self.assertAlmostEqual(distance_km, 21.02, places=2)
         self.assertAlmostEqual(avg_speed_kph, 10.51, places=2)
+        self.assertAlmostEqual(uphill_m, 6.0, places=2)
 
 
 if __name__ == "__main__":
