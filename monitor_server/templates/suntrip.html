@@ -321,11 +321,107 @@
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 12px;
+        align-items: stretch;
       }
 
       .metric {
+        position: relative;
         box-shadow: none;
         background: var(--panel-soft);
+        height: 100%;
+        min-height: 118px;
+      }
+
+      .metric.is-efficiency {
+        gap: 8px;
+      }
+
+      .metric-help {
+        position: absolute;
+        z-index: 5;
+        top: 50%;
+        right: calc(100% + 10px);
+        width: min(260px, 72vw);
+        padding: 10px 12px;
+        border: 1px solid rgba(20, 20, 20, 0.18);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.84);
+        color: var(--ink);
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.14);
+        font-size: 12px;
+        line-height: 1.25;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-50%) translateX(4px);
+        transition: opacity 160ms ease, transform 160ms ease;
+        backdrop-filter: blur(8px);
+      }
+
+      .metric-help strong {
+        font-weight: 800;
+      }
+
+      .metric.is-efficiency:hover .metric-help,
+      .metric.is-efficiency:focus-within .metric-help {
+        opacity: 1;
+        transform: translateY(-50%) translateX(0);
+      }
+
+      .unit-toggle {
+        appearance: none;
+        display: inline-grid;
+        place-items: center;
+        flex: none;
+        width: 22px;
+        height: 22px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+        font-size: 15px;
+        font-weight: 800;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .unit-toggle:hover,
+      .unit-toggle:focus-visible {
+        border-color: var(--ink);
+        outline: none;
+      }
+
+      .metric-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .efficiency-stack {
+        display: grid;
+        gap: 6px;
+      }
+
+      .efficiency-line {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .efficiency-kind {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .efficiency-number {
+        font-size: clamp(20px, 2.5vw, 32px);
+        line-height: 1;
+        font-weight: 800;
       }
 
       .action-links {
@@ -507,6 +603,17 @@
         .metrics {
           grid-template-columns: 1fr;
         }
+        .metric-help {
+          top: calc(100% + 8px);
+          right: 10px;
+          left: 10px;
+          width: auto;
+          transform: translateY(0) translateX(0);
+        }
+        .metric.is-efficiency:hover .metric-help,
+        .metric.is-efficiency:focus-within .metric-help {
+          transform: translateY(0) translateX(0);
+        }
         .metrics-box-head {
           align-items: flex-start;
           flex-direction: column;
@@ -608,9 +715,30 @@
               <div class="metric-label">Distance parcourue aujourd'hui</div>
               <div class="metric-value"><span id="distance">--</span><span class="metric-unit">km</span></div>
             </div>
-            <div class="metric">
-              <div class="metric-label">Dénivelé du jour</div>
-              <div class="metric-value"><span id="uphill">--</span><span class="metric-unit">m</span></div>
+            <div class="metric is-efficiency">
+              <div class="metric-title-row">
+                <div class="metric-label">Consommation journalière</div>
+                <button class="unit-toggle" id="efficiency-unit-toggle" type="button" aria-label="Changer l'unité" title="Changer l'unité">↻</button>
+              </div>
+              <div class="efficiency-stack">
+                <div class="efficiency-line">
+                  <span class="efficiency-kind">Brute</span>
+                  <span>
+                    <span class="efficiency-number" id="gross-consumption">--</span>
+                    <span class="metric-unit" id="gross-consumption-unit">Wh/km</span>
+                  </span>
+                </div>
+                <div class="efficiency-line">
+                  <span class="efficiency-kind">Nette</span>
+                  <span>
+                    <span class="efficiency-number" id="net-consumption">--</span>
+                    <span class="metric-unit" id="net-consumption-unit">Wh/km</span>
+                  </span>
+                </div>
+              </div>
+              <div class="metric-help" role="tooltip">
+                <strong>Brute</strong> mesure l'énergie électrique consommée par le moteur par kilomètre. <strong>Nette</strong> retire la récupération, l'apport musculaire et le solaire pour donner l'énergie réellement tirée de la batterie.
+              </div>
             </div>
           </div>
         </div>
@@ -682,6 +810,8 @@
       let map;
       let markers = [];
       let latestImageUrl = "";
+      let efficiencyUnit = localStorage.getItem("suntrip-efficiency-unit") || "wh";
+      const WH_PER_LITER_GASOLINE = 8900;
 
       function initFrameCanvas() {
         const totalFrames = 20;
@@ -797,6 +927,56 @@
         if (el) el.textContent = value;
       }
 
+      function consumptionValue(whPerKm) {
+        if (whPerKm == null) return null;
+        const value = Number(whPerKm);
+        if (!Number.isFinite(value)) return null;
+        if (efficiencyUnit === "l100") return value * 100 / WH_PER_LITER_GASOLINE;
+        return value;
+      }
+
+      function consumptionDecimals() {
+        return efficiencyUnit === "l100" ? 2 : 1;
+      }
+
+      function consumptionUnitLabel() {
+        return efficiencyUnit === "l100" ? "L/100" : "Wh/km";
+      }
+
+      function setConsumptionMetric(prefix, whPerKm) {
+        const value = consumptionValue(whPerKm);
+        setText(`${prefix}-consumption`, value == null ? "--" : formatNumber(value, consumptionDecimals()));
+        setText(`${prefix}-consumption-unit`, consumptionUnitLabel());
+      }
+
+      function renderConsumptionMetrics(metrics) {
+        const distance = Number(metrics.distance_km);
+        const positiveWh = Number(metrics.positive_Wh);
+        const regenWh = Number(metrics.regen_Wh || 0);
+        const humanWh = Number(metrics.human_Wh || 0);
+        const solarWh = Number(metrics.solar_wh || metrics.solar_Wh || 0);
+        if (!Number.isFinite(distance) || distance <= 0 || !Number.isFinite(positiveWh)) {
+          setConsumptionMetric("gross", null);
+          setConsumptionMetric("net", null);
+          return;
+        }
+
+        const grossWhPerKm = positiveWh / distance;
+        const netWhPerKm = (positiveWh - regenWh - humanWh - solarWh) / distance;
+        setConsumptionMetric("gross", grossWhPerKm);
+        setConsumptionMetric("net", netWhPerKm);
+      }
+
+      function initEfficiencyUnitToggle() {
+        const button = document.getElementById("efficiency-unit-toggle");
+        if (!button) return;
+        button.addEventListener("click", () => {
+          efficiencyUnit = efficiencyUnit === "wh" ? "l100" : "wh";
+          localStorage.setItem("suntrip-efficiency-unit", efficiencyUnit);
+          loadSuntrip();
+        });
+      }
+
       function initProjectInfoToggle() {
         const button = document.getElementById("project-info-toggle");
         const section = document.getElementById("project-info");
@@ -872,7 +1052,7 @@
         const metrics = latest.metrics || {};
         setText("speed", formatNumber(metrics.speed_kph, 1));
         setText("distance", formatNumber(metrics.distance_km, 1));
-        setText("uphill", formatNumber(metrics.gps_uphill_m, 0));
+        renderConsumptionMetrics(metrics);
         setText("solar-power", formatNumber(metrics.solar_power_w, 0));
         setText("generator-power", formatNumber(metrics.generator_power_w, 0));
         setText("solar-total", formatNumber(metrics.solar_wh, 1));
@@ -880,6 +1060,7 @@
       }
 
       initFrameCanvas();
+      initEfficiencyUnitToggle();
       initProjectInfoToggle();
       loadSuntrip();
       setInterval(loadSuntrip, 30000);
