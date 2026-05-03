@@ -119,6 +119,7 @@ class SessionMetricsTest(unittest.TestCase):
 
     def test_ca_reset_prompt_high_voltage(self):
         sm = cycle_server.session_metrics
+        sm["solar_enabled"] = False
         base = [0] * 15
         base[1] = 54.0  # fully charged voltage
         base[2] = 0

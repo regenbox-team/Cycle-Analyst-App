@@ -227,6 +227,19 @@ def read_serial():
 
         if now - last_db_write_time >= 1 and (data is not None or solar_sample is not None):
             last_db_write_time = now
+            if bool(state.session_metrics.get("solar_enabled", state.solar_roof_enabled)):
+                try:
+                    from .solar_range import persist_estimate
+                    voltage = state.latest_raw_values[1] if state.latest_raw_values else None
+                    persist_estimate(
+                        state.session_id,
+                        state.session_metrics,
+                        voltage,
+                        gps_state=getattr(state, "gps_state", None),
+                        solar_voltage=state.solar_sensor.get("bus_v"),
+                    )
+                except Exception:
+                    pass
             state.save_session_metrics_to_file()
             raw_line = " ".join(map(str, data)) if data is not None else None
             timestamp = datetime.utcnow().isoformat()

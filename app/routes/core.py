@@ -9,6 +9,7 @@ from app import state
 from app.metrics import update_metrics  # re-export compatibility
 from app.photo_capture import latest_local_photo_path
 from app.reader import parse_line
+from app.solar_range import build_estimate
 
 
 POWER_HISTORY_DEFAULT_SECONDS = 180
@@ -46,7 +47,18 @@ def _get_metrics_payload():
     ah_used = max(0.0, ah_used_gross - ah_recovered)
     voltage = state.latest_raw_values[1] if state.latest_raw_values else 0
     capacity_ah = VEHICLE_CONFIGS.get(vehicle_mode, {}).get("battery_capacity_ah", 64)
-    Wh_remaining = (capacity_ah - ah_used) * voltage
+    standard_Wh_remaining = max(0.0, (capacity_ah - ah_used) * voltage)
+    solar_battery = None
+    Wh_remaining = standard_Wh_remaining
+    if solar_enabled:
+        solar_battery = build_estimate(
+            sm,
+            voltage,
+            capacity_ah,
+            solar_voltage=solar_sensor.get("bus_v", 0.0),
+            gps_state=getattr(state, "gps_state", None),
+        )
+        Wh_remaining = solar_battery["remaining_wh"]
 
     net_list = sm.get("net_Wh_per_km_last", [])
     net_last_km = net_list[-1] if net_list else 0
@@ -58,6 +70,13 @@ def _get_metrics_payload():
         autonomy["range_last_km"] = Wh_remaining / max(0.1, net_last_km)
     if len(net_list) >= 10:
         autonomy["range_10km_avg"] = Wh_remaining / max(0.1, net_10km_avg)
+    if solar_battery:
+        solar_today_wh = Wh_remaining + solar_battery["potential_remaining_today_wh"]
+        autonomy["solar_today_session_avg"] = solar_today_wh / max(0.1, session_avg_net)
+        if len(net_list) >= 1:
+            autonomy["solar_today_last_km"] = solar_today_wh / max(0.1, net_last_km)
+        if len(net_list) >= 10:
+            autonomy["solar_today_10km_avg"] = solar_today_wh / max(0.1, net_10km_avg)
 
     return {
         "raw_CA_values": state.latest_raw_values,
@@ -81,6 +100,7 @@ def _get_metrics_payload():
         "solar_sensor": state.solar_sensor if solar_enabled else {"enabled": False},
         "battery_ah_used_gross": ah_used_gross,
         "battery_ah_used_net": ah_used,
+        "solar_battery": solar_battery,
         "calculated_CA_values": {
             "speed_avg": sm["speed_sum"] / max(1, sm["speed_count"]),
             "speed_max": sm["speed_max"],
@@ -134,7 +154,12 @@ def _get_metrics_payload():
             "battery_ah_used_gross": ah_used_gross,
             "battery_ah_used_net": ah_used,
             "battery_ah_recovered": ah_recovered,
-            "battery_Wh_remaining": Wh_remaining
+            "battery_Wh_remaining": Wh_remaining,
+            "battery_Wh_remaining_ca": standard_Wh_remaining,
+            "battery_percent_remaining": (
+                solar_battery["percent"] if solar_battery else max(0.0, min(100.0, 100.0 * (1 - (ah_used / max(1e-6, capacity_ah)))))
+            ),
+            "solar_battery": solar_battery
         }
     }
 

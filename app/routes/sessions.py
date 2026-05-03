@@ -9,6 +9,7 @@ from app import state
 from app.reader import parse_line
 from app.metrics import reset_session_state, restore_session_metrics
 from app.photo_capture import configure_session_photo_capture, normalize_interval_km
+from app.solar_range import initialize_solar_session, persist_estimate
 from app.session_summary import build_summary_sections, build_summary_table, compute_session_metrics, compute_timeline_metrics_by_user
 from app.user_profiles import active_profiles, get_profile
 
@@ -57,6 +58,13 @@ def start_session():
     state.session_metrics["solar_enabled"] = solar_enabled
     state.session_metrics["user_id"] = state.current_user_id
     state.session_metrics["user_initials"] = state.current_user
+    if solar_enabled:
+        voltage = state.latest_raw_values[1] if state.latest_raw_values else None
+        initialize_solar_session(
+            state.session_metrics,
+            voltage,
+            solar_voltage=state.solar_sensor.get("bus_v"),
+        )
     configure_session_photo_capture(photo_enabled, photo_interval_km)
     state.save_session_metrics_to_file()
 
@@ -81,6 +89,15 @@ def resume_session():
 
 
 def end_session():
+    if bool(state.session_metrics.get("solar_enabled", state.solar_roof_enabled)):
+        voltage = state.latest_raw_values[1] if state.latest_raw_values else None
+        persist_estimate(
+            state.session_id,
+            state.session_metrics,
+            voltage,
+            gps_state=getattr(state, "gps_state", None),
+            solar_voltage=state.solar_sensor.get("bus_v"),
+        )
     state.session_active = False
     state.save_session_active(False)
     # Erase any uploaded GPX track at end of session

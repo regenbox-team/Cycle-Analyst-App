@@ -1177,20 +1177,34 @@ async function fetchMetrics() {
     document.getElementById("pv-percent").textContent = `${pvPercent.toFixed(1)}`;
 
     // Battery / Ah
+    const solarBattery = json.calculated_CA_values?.solar_battery ?? json.solar_battery ?? null;
     const ahConsumed = num(
       json.calculated_CA_values?.battery_ah_used_net ?? json.battery_ah_used_net,
       0
     );
     const capacityAh = Number(json.battery_capacity_ah ?? 64);
-    const pctRemaining = Math.max(0, Math.min(1, 1 - (capacityAh > 0 ? (ahConsumed / capacityAh) : 0)));
+    const pctRemaining = solarBattery?.enabled
+      ? Math.max(0, Math.min(1, num(solarBattery.percent, 0) / 100))
+      : Math.max(0, Math.min(1, 1 - (capacityAh > 0 ? (ahConsumed / capacityAh) : 0)));
     document.getElementById('ah-bar').style.width = `${pctRemaining * 100}%`;
-    document.getElementById('ah-bar-value').innerText = `${ahConsumed.toFixed(1)} Ah`;
+    document.getElementById('ah-bar-value').innerText = solarBattery?.enabled
+      ? `${(pctRemaining * 100).toFixed(0)}%`
+      : `${ahConsumed.toFixed(1)} Ah`;
     const grossAh = num(json.calculated_CA_values?.battery_ah_used_gross, ahConsumed);
     const recoveredAh = num(json.calculated_CA_values?.battery_ah_recovered, 0);
-    document.getElementById('ah-bar-detail').innerText = `gross ${grossAh.toFixed(1)} Ah / recovered ${recoveredAh.toFixed(1)} Ah`;
+    if (solarBattery?.enabled) {
+      const remainingWh = num(solarBattery.remaining_wh, 0);
+      const potentialWh = num(solarBattery.potential_remaining_today_wh, 0);
+      document.getElementById('ah-bar-detail').innerText = `${remainingWh.toFixed(0)} Wh left / solar today +${potentialWh.toFixed(0)} Wh`;
+    } else {
+      document.getElementById('ah-bar-detail').innerText = `gross ${grossAh.toFixed(1)} Ah / recovered ${recoveredAh.toFixed(1)} Ah`;
+    }
 
-    const voltage = num(json.raw_CA_values?.[1], 0);
-    document.getElementById('ah-voltage-value').innerText = `${voltage.toFixed(1)} V`;
+    const voltage = solarBattery?.enabled
+      ? num(solarBattery.voltage_used, 0)
+      : num(json.raw_CA_values?.[1], 0);
+    const voltageLabel = solarBattery?.voltage_source === "solar_sensor" ? " solar" : "";
+    document.getElementById('ah-voltage-value').innerText = `${voltage.toFixed(1)} V${voltageLabel}`;
 
     // Human cumulative & kcal
     const solarWh = num(json.calculated_CA_values?.human_Wh ?? json.calculated_CA_values?.solar_Wh, 0);
@@ -1223,6 +1237,24 @@ async function fetchMetrics() {
     document.getElementById("range-10").textContent = range10 > 0 ? range10.toFixed(1) : "–";
     const rangeAvg = num(autonomy.range_session_avg, 0);
     document.getElementById("range-avg").textContent = rangeAvg > 0 ? rangeAvg.toFixed(1) : "–";
+
+    const rangeSolarRow = document.getElementById("range-solar-row");
+    const rangeSolarToday = document.getElementById("range-solar-today");
+    if (rangeSolarRow && rangeSolarToday) {
+      const solarTodayRange = num(autonomy.solar_today_session_avg, 0);
+      rangeSolarRow.style.display = solarEnabled && solarTodayRange > 0 ? "flex" : "none";
+      rangeSolarToday.textContent = solarTodayRange > 0 ? solarTodayRange.toFixed(1) : "-";
+    }
+    const solarPotentialRow = document.getElementById("solar-potential-row");
+    const solarPotentialNow = document.getElementById("solar-potential-now");
+    const solarPotentialToday = document.getElementById("solar-potential-today");
+    if (solarPotentialRow && solarPotentialNow && solarPotentialToday) {
+      const potentialNow = num(solarBattery?.potential_power_now_w, 0);
+      const potentialToday = num(solarBattery?.potential_remaining_today_wh, 0);
+      solarPotentialRow.style.display = solarEnabled && solarBattery?.enabled ? "flex" : "none";
+      solarPotentialNow.textContent = potentialNow.toFixed(0);
+      solarPotentialToday.textContent = potentialToday.toFixed(0);
+    }
 
     // Charts (10 or 50)
     const range = isLongRange ? 50 : 10;

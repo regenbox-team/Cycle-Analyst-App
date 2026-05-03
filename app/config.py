@@ -9,6 +9,7 @@ LIVE_PHOTO_DIR = os.path.join(BASE_DIR, "live_photo")
 TEST_MODE_FILE = os.path.join(BASE_DIR, "test_mode.txt")
 VEHICLE_MODE_FILE = os.path.join(BASE_DIR, "vehicle_mode.txt")
 SOLAR_ROOF_FILE = os.path.join(BASE_DIR, "solar_roof.txt")
+SOLAR_BATTERY_STATE_FILE = os.path.join(BASE_DIR, "solar_battery_state.json")
 SESSION_FILE = os.path.join(BASE_DIR, "current_session.txt")
 SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.txt")
 SESSION_METRICS_DIR = os.path.join(BASE_DIR, "session_metrics")
@@ -47,13 +48,22 @@ VEHICLE_CONFIGS = {
         "serial_port": "/dev/ttyUSB0",
         "test_mode": False,
         "battery_capacity_ah": 64,
+        "battery_nominal_voltage": 48.1,
     },
     "supercycle_test": {
         "serial_port": "/dev/ttyUSB0",
         "test_mode": True,
         "battery_capacity_ah": 64,
+        "battery_nominal_voltage": 48.1,
     },
 }
+
+# --- Solar range estimation ---
+# These defaults are intentionally conservative and can be overridden on the Pi.
+SOLAR_PANEL_MAX_W = float(os.getenv("APP_SOLAR_PANEL_MAX_W", "690"))
+SOLAR_LOCATION_LAT = float(os.getenv("APP_SOLAR_LAT", "48.8566"))
+SOLAR_LOCATION_LON = float(os.getenv("APP_SOLAR_LON", "2.3522"))
+SOLAR_BATTERY_CURVE_FILE = os.getenv("APP_BATTERY_DISCHARGE_CURVE_FILE", "")
 
 # --- DB per mode helpers ---
 def db_filename_for_mode(mode: str) -> str:
