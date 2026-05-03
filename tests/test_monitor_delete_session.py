@@ -3,6 +3,8 @@ import os
 import shutil
 import sqlite3
 import sys
+import threading
+import time
 import types
 import unittest
 
@@ -80,7 +82,14 @@ class MonitorDeleteSessionTest(unittest.TestCase):
         _init_db()
 
     def tearDown(self):
-        for key in ("MONITOR_DB", "MONITOR_MEDIA_DIR", "MONITOR_USER", "MONITOR_PASS", "MONITOR_TERRAIN_ELEVATION_ENABLED"):
+        for key in (
+            "MONITOR_DB",
+            "MONITOR_MEDIA_DIR",
+            "MONITOR_USER",
+            "MONITOR_PASS",
+            "MONITOR_TERRAIN_ELEVATION_ENABLED",
+            "MONITOR_DB_TIMEOUT_SEC",
+        ):
             os.environ.pop(key, None)
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
@@ -230,6 +239,27 @@ class MonitorDeleteSessionTest(unittest.TestCase):
         self.assertAlmostEqual(avg_speed_kph, 10.51, places=2)
         self.assertAlmostEqual(uphill_m, 6.0, places=2)
         self.assertAlmostEqual(raw_gps_uphill_m, 6.0, places=2)
+
+    def test_migration_waits_for_temporary_database_lock(self):
+        os.environ["MONITOR_DB_TIMEOUT_SEC"] = "2"
+        locker = sqlite3.connect(self.db_path, timeout=1, check_same_thread=False)
+        locker.execute("BEGIN EXCLUSIVE")
+
+        def release_lock():
+            time.sleep(0.2)
+            locker.rollback()
+            locker.close()
+
+        release_thread = threading.Thread(target=release_lock)
+        release_thread.start()
+        try:
+            self.migrate_db()
+        finally:
+            release_thread.join()
+
+        with sqlite3.connect(self.db_path) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        self.assertEqual(count, 0)
 
     def test_fetches_and_caches_terrain_altitude_for_samples(self):
         import monitor_server.app as monitor_app

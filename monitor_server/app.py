@@ -43,6 +43,7 @@ TERRAIN_FALLBACK_API_URL = os.getenv(
 TERRAIN_FALLBACK_BATCH_SIZE = int(os.getenv("MONITOR_TERRAIN_FALLBACK_BATCH_SIZE", "100"))
 TERRAIN_FALLBACK_THROTTLE_SEC = float(os.getenv("MONITOR_TERRAIN_FALLBACK_THROTTLE_SEC", "1.0"))
 TERRAIN_BACKFILL_LIMIT_POINTS = int(os.getenv("MONITOR_TERRAIN_BACKFILL_LIMIT_POINTS", "500"))
+DEFAULT_DB_TIMEOUT_SEC = 30.0
 
 
 def _db_path() -> str:
@@ -54,8 +55,17 @@ def _db_path() -> str:
     return path
 
 
+def _db_timeout_sec() -> float:
+    try:
+        return max(0.1, float(os.getenv("MONITOR_DB_TIMEOUT_SEC", str(DEFAULT_DB_TIMEOUT_SEC))))
+    except (TypeError, ValueError):
+        return DEFAULT_DB_TIMEOUT_SEC
+
+
 def _get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(_db_path())
+    timeout_sec = _db_timeout_sec()
+    conn = sqlite3.connect(_db_path(), timeout=timeout_sec)
+    conn.execute(f"PRAGMA busy_timeout = {int(timeout_sec * 1000)}")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -244,6 +254,7 @@ def _init_db() -> None:
 
 def _migrate_db() -> None:
     with _get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS deleted_sessions (
