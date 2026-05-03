@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Battery Curve Lab</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Battery Curve Lab</h1>
+      <p>Standalone session viewer and LG MH1 curve extractor</p>
+    </div>
+    <div class="db-picker">
+      <label for="db-select">Database</label>
+      <select id="db-select"></select>
+      <button id="reload-btn">Load</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sessions-panel">
+      <div class="panel-title">
+        <span>Sessions</span>
+        <button id="select-visible-btn">Select visible</button>
+      </div>
+      <input id="session-filter" placeholder="Filter sessions">
+      <div id="sessions-list" class="sessions-list"></div>
+    </aside>
+
+    <section class="workspace">
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2 id="preview-title">Session preview</h2>
+            <p id="preview-meta">Choose a session to inspect voltage, Ah, power and distance.</p>
+          </div>
+          <div class="plot-controls">
+            <label>Samples <input id="preview-samples" type="number" value="1600" min="200" max="5000"></label>
+          </div>
+        </div>
+        <div id="session-chart" class="multi-chart"></div>
+      </section>
+
+      <section class="card controls-card">
+        <div class="card-head">
+          <div>
+            <h2>Extract stable points</h2>
+            <p>Use stopped, low-current sections and the tail of each stop as settled voltage.</p>
+          </div>
+          <button id="generate-btn">Generate Curve</button>
+        </div>
+        <div class="controls-grid">
+          <label>Capacity Ah <input id="capacity-ah" type="number" value="64" step="0.1"></label>
+          <label>Max speed km/h <input id="max-speed-kph" type="number" value="1" step="0.1"></label>
+          <label>Max abs current A <input id="max-abs-current-a" type="number" value="1.5" step="0.1"></label>
+          <label>Min rest seconds <input id="min-rest-seconds" type="number" value="120" step="5"></label>
+          <label>Tail seconds <input id="tail-seconds" type="number" value="60" step="5"></label>
+          <label>Max voltage std <input id="max-voltage-std" type="number" value="0.05" step="0.01"></label>
+          <label>Min samples <input id="min-samples" type="number" value="20" step="1"></label>
+          <label>SOC bin % <input id="bin-percent" type="number" value="5" step="1"></label>
+        </div>
+      </section>
+
+      <section class="card results-card">
+        <div class="card-head">
+          <div>
+            <h2>Result</h2>
+            <p id="result-meta">No curve generated yet.</p>
+          </div>
+          <div class="downloads">
+            <a id="csv-link" href="#" hidden>CSV</a>
+            <a id="json-link" href="#" hidden>JSON</a>
+          </div>
+        </div>
+        <div id="curve-chart" class="curve-chart"></div>
+        <div class="snippet-grid">
+          <div>
+            <h3>Python segment</h3>
+            <textarea id="python-snippet" readonly></textarea>
+          </div>
+          <div>
+            <h3>Stable points</h3>
+            <div id="points-table" class="points-table"></div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -17,17 +17,15 @@ from .config import (
 
 
 DEFAULT_DISCHARGE_CURVE = [
-    (42.9, 0.0),
-    (45.5, 10.0),
-    (46.8, 20.0),
-    (47.8, 30.0),
-    (48.6, 40.0),
-    (49.3, 50.0),
-    (50.1, 60.0),
-    (51.0, 70.0),
-    (52.0, 80.0),
-    (53.3, 90.0),
-    (54.6, 100.0),
+    (43.820, 10.0),
+    (46.610, 40.0),
+    (47.345, 45.0),
+    (47.625, 50.0),
+    (48.620, 55.0),
+    (50.360, 70.0),
+    (51.535, 80.0),
+    (52.430, 90.0),
+    (53.740, 100.0),
 ]
 
 
@@ -58,15 +56,15 @@ def battery_capacity_wh(capacity_ah: float | int | None = None) -> float:
 
 def select_estimation_voltage(ca_voltage: float | int | None, solar_voltage: float | int | None = None) -> tuple[float | None, str]:
     try:
-        sv = float(solar_voltage)
-        if sv > 0:
-            return sv, "solar_sensor"
-    except Exception:
-        pass
-    try:
         cv = float(ca_voltage)
         if cv > 0:
             return cv, "cycle_analyst"
+    except Exception:
+        pass
+    try:
+        sv = float(solar_voltage)
+        if sv > 0:
+            return sv, "solar_sensor"
     except Exception:
         pass
     return None, "none"
