@@ -118,17 +118,17 @@ sudo apt upgrade -y
 sudo apt install -y git python3 python3-venv python3-pip nginx avahi-daemon curl i2c-tools
 ```
 
-Si tu utilises une camera USB avec `fswebcam` :
+Installer les outils pour la camera USB :
 
 ```bash
-sudo apt install -y fswebcam
+sudo apt install -y fswebcam v4l-utils
 ```
 
-Si tu utilises la camera Raspberry Pi officielle, `libcamera-still` est en
-general deja disponible sur Raspberry Pi OS recent. Verifie avec :
+Verifier que la camera USB est visible :
 
 ```bash
-which libcamera-still
+lsusb
+v4l2-ctl --list-devices
 ```
 
 Activer mDNS :
@@ -349,9 +349,10 @@ APP_BATTERY_DISCHARGE_CURVE_FILE=/home/jeandard/Cycle-Analyst-App/var/battery_cu
 # Decommenter seulement si le courant solaire apparait avec le mauvais signe.
 # APP_SOLAR_INVERT_SIGN=true
 
-# Camera pour capture photo pendant les sessions.
-# Si vide, l'app essaie libcamera-still puis fswebcam.
-APP_CAMERA_COMMAND=libcamera-still -n --width 1280 --height 720 --quality 85 -o {output}
+# Camera USB pour capture photo pendant les sessions.
+# -S 60 saute les premieres images pour laisser l'exposition se stabiliser.
+# --palette YUYV evite les images grises observees avec le flux MJPEG de cette camera.
+APP_CAMERA_COMMAND=fswebcam -d /dev/video0 -q -S 60 --palette YUYV -r 640x480 --jpeg 85 --no-banner {output}
 
 # Synchronisation vers monitor_server. Laisser MONITOR_URL vide pour desactiver.
 MONITOR_DEVICE_ID=sc-vehicule-1
@@ -650,19 +651,27 @@ APP_SOLAR_INVERT_SIGN=true
 
 ### Camera
 
-Tester la camera Raspberry Pi :
+Verifier que la camera USB est detectee :
 
 ```bash
-libcamera-still -n -o /tmp/cycle-test.jpg --width 1280 --height 720 --quality 85
+lsusb
+v4l2-ctl --list-devices
+ls -l /dev/video*
+```
+
+Tester la capture avec la meme commande que l'app :
+
+```bash
+fswebcam -d /dev/video0 -q -S 60 --palette YUYV -r 640x480 --jpeg 85 --no-banner /tmp/cycle-test.jpg
 ls -lh /tmp/cycle-test.jpg
 ```
 
-Tester une camera USB :
+Si l'image est uniformement grise, verifier que `--palette YUYV` est bien
+present. Sur cette camera, le mode MJPEG peut produire une image grise meme si
+la camera est correctement detectee.
 
-```bash
-fswebcam -q -r 1280x720 --jpeg 85 --no-banner /tmp/cycle-test.jpg
-ls -lh /tmp/cycle-test.jpg
-```
+Si la camera apparait sur un autre device, par exemple `/dev/video1`, adapter
+`APP_CAMERA_COMMAND` dans `/etc/cycle-analyst/cycle-analyst.env`.
 
 ## 13. Creer le service systemd de l'app
 
