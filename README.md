@@ -28,7 +28,7 @@
 ## Running the App
 
 - Development: `python cycle_server.py`
-  - Starts the background reader thread and Flask dev server on port 5000.
+  - Starts the background reader thread and Flask dev server on port 5050.
 
 - WSGI (gunicorn/uwsgi): use `wsgi:application`
   - Example: `gunicorn -w 2 wsgi:application`

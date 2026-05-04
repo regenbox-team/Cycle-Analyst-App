@@ -1,122 +1,100 @@
-# Guide de setup Raspberry Pi pour Cycle Analyst App
+# Guide complet d'installation Raspberry Pi - Cycle Analyst App
 
-## Objectif
+Derniere mise a jour : 2026-05-04.
 
-Ce guide decrit un setup reproductible pour installer le repo sur plusieurs Raspberry Pi, un par vehicule, en partant d'une carte SD vierge.
+Ce guide decrit une installation propre d'un nouveau Raspberry Pi avec le repo
+`Cycle-Analyst-App`, les variables d'environnement utiles et les services
+`systemd`.
 
-Objectifs du setup :
+Le setup recommande installe :
 
-- chaque Pi a un nom unique sur le reseau local
-- l'app demarre automatiquement au boot
-- l'interface web est accessible depuis un navigateur sans taper l'IP
-- l'URL reste la meme sur le hotspot du Pi et sur un autre reseau local, par exemple le hotspot du telephone, tant que le reseau laisse passer le mDNS
+- l'app embarquee Cycle Analyst sur le port `5050`
+- un nom local stable en `.local` via mDNS
+- un proxy `nginx` sur le port `80`
+- un service `systemd` `cycle-analyst.service`
+- un fichier de variables dedie : `/etc/cycle-analyst/cycle-analyst.env`
+- optionnellement le `monitor_server` sur le port `8080`
 
-Exemple de convention :
+## 1. Hypotheses et conventions
 
-- vehicule 1 -> `sc-vehicule-1.local`
-- vehicule 2 -> `sc-vehicule-2.local`
-- vehicule 3 -> `sc-vehicule-3.local`
+Adapte ces valeurs si besoin, mais garde une convention identique sur tous les
+Pi.
 
-## Hypotheses
+- utilisateur Linux : `jeandard`
+- dossier du repo : `/home/jeandard/Cycle-Analyst-App`
+- environnement Python : `/home/jeandard/Cycle-Analyst-App/.venv`
+- dossier runtime : `/home/jeandard/Cycle-Analyst-App/var`
+- app locale : `http://127.0.0.1:5050`
+- app exposee via nginx : `http://sc-vehicule-1.local`
+- service app : `cycle-analyst.service`
+- fichier env app : `/etc/cycle-analyst/cycle-analyst.env`
 
-- Raspberry Pi OS 64-bit
-- acces SSH active
-- utilisateur Linux commun sur tous les Pi, par exemple `jeandard`
-- repo installe dans `/home/jeandard/Cycle-Analyst-App`
-- l'app Flask principale tourne sur le port `5050`
-- on veut exposer l'app sur le port `80` via `nginx` pour acceder a `http://sc-vehicule-1.local` sans saisir `:5050`
+Exemple de noms par vehicule :
 
-## Vue d'ensemble
+- Pi 1 : `sc-vehicule-1`
+- Pi 2 : `sc-vehicule-2`
+- Pi 3 : `sc-vehicule-3`
 
-Le setup final repose sur 4 briques :
+Le nom complet sur le reseau sera ensuite :
 
-- un hostname unique par Pi
-- `avahi-daemon` pour publier `*.local` en mDNS
-- un service `systemd` pour lancer l'app au boot
-- `nginx` pour faire le proxy de `127.0.0.1:5050` vers le port `80`
+- `sc-vehicule-1.local`
+- `sc-vehicule-2.local`
+- `sc-vehicule-3.local`
 
-## Etape 1 - Preparer la carte SD
+## 2. Preparer la carte SD
 
-### Avec Raspberry Pi Imager
+Avec Raspberry Pi Imager :
 
-1. Inserer la carte SD dans le Mac.
-2. Ouvrir Raspberry Pi Imager.
-3. Choisir le modele de Pi si l'outil le demande.
-4. Choisir l'OS :
+1. Choisir le modele de Raspberry Pi.
+2. Choisir `Raspberry Pi OS Lite (64-bit)` pour un Pi sans ecran local.
+3. Choisir la carte SD.
+4. Ouvrir les options avancees avant l'ecriture.
+5. Definir le hostname, par exemple `sc-vehicule-1`.
+6. Activer SSH.
+7. Definir l'utilisateur `jeandard`.
+8. Definir un mot de passe ou ajouter ta cle SSH publique.
+9. Regler le pays Wi-Fi, la locale et le fuseau horaire.
+10. Ajouter le Wi-Fi du hotspot telephone si tu veux que le Pi s'y connecte au premier boot.
 
-- recommande : `Raspberry Pi OS Lite (64-bit)` si le Pi n'a pas besoin d'interface graphique locale
-- acceptable : `Raspberry Pi OS (64-bit)` si tu veux aussi un bureau local
+Ecrire la carte SD, l'inserer dans le Pi puis demarrer.
 
-5. Choisir la carte SD.
-6. Cliquer sur les options avancees avant l'ecriture.
+## 3. Premier acces SSH
 
-### Parametres conseilles dans les options avancees
-
-- definir un hostname unique des l'image SD :
-- Pi 1 -> `sc-vehicule-1`
-- Pi 2 -> `sc-vehicule-2`
-- Pi 3 -> `sc-vehicule-3`
-- activer SSH
-- definir le nom d'utilisateur, par exemple `jeandard`
-- definir le mot de passe
-- si tu as deja une cle publique SSH, l'ajouter directement
-- regler le pays Wi-Fi
-- regler la locale et le fuseau horaire
-- si tu connais deja le SSID et le mot de passe du hotspot du telephone, tu peux aussi les preconfigurer
-
-### Remarque importante
-
-Si tu definis deja le hostname dans Raspberry Pi Imager, tu t'evites une etape ensuite. Si un Pi a deja ete boote avec le nom `cycle`, il faudra corriger le hostname plus tard.
-
-## Etape 2 - Premier boot
-
-1. Inserer la carte SD dans le Pi.
-2. Brancher l'alimentation.
-3. Attendre le premier boot.
-4. Connecter le Pi a un reseau :
-
-- soit le hotspot du telephone
-- soit le hotspot Wi-Fi cree par le Pi
-- soit un autre reseau local de test
-
-5. Depuis le Mac, tester l'acces SSH :
+Depuis ton Mac ou ton PC :
 
 ```bash
 ssh jeandard@sc-vehicule-1.local
 ```
 
-Si le nom `.local` ne repond pas au premier boot, utiliser l'IP pour terminer la config initiale :
+Si le `.local` ne repond pas encore, connecte-toi avec l'IP du Pi :
 
 ```bash
 ssh jeandard@IP_DU_PI
 ```
 
-Pour trouver l'IP depuis le Pi :
+Pour afficher l'IP depuis le Pi :
 
 ```bash
 hostname -I
 ```
 
-## Etape 3 - Verification de base
+## 4. Verifier ou corriger le hostname
 
-Une fois connecte en SSH :
+Sur le Pi :
 
 ```bash
 hostname
 hostnamectl
 cat /etc/hostname
-hostname -I
 ```
 
-Le resultat attendu pour le Pi 1 :
+Resultat attendu pour le Pi 1 :
 
-- `hostname` -> `sc-vehicule-1`
-- `hostnamectl` -> `Static hostname: sc-vehicule-1`
-- `/etc/hostname` -> `sc-vehicule-1`
+- `hostname` : `sc-vehicule-1`
+- `hostnamectl` : `Static hostname: sc-vehicule-1`
+- `/etc/hostname` : `sc-vehicule-1`
 
-## Etape 4 - Corriger ou changer le hostname si besoin
-
-Si le Pi porte encore un ancien nom, par exemple `cycle` :
+Si le nom est incorrect :
 
 ```bash
 sudo hostnamectl set-hostname sc-vehicule-1
@@ -124,7 +102,7 @@ echo 'preserve_hostname: true' | sudo tee /etc/cloud/cloud.cfg.d/99-preserve-hos
 sudo reboot
 ```
 
-Apres reboot, verifier a nouveau :
+Apres reboot :
 
 ```bash
 hostname
@@ -132,74 +110,569 @@ hostnamectl
 cat /etc/hostname
 ```
 
-Faire la meme chose sur les autres Pi en adaptant le nom.
-
-## Etape 5 - Mise a jour systeme et paquets utiles
-
-Sur chaque Pi :
+## 5. Mettre a jour le systeme et installer les paquets
 
 ```bash
 sudo apt update
 sudo apt upgrade -y
-sudo apt install -y git python3 python3-venv python3-pip nginx avahi-daemon
+sudo apt install -y git python3 python3-venv python3-pip nginx avahi-daemon curl i2c-tools
 ```
 
-Puis activer `avahi-daemon` :
+Si tu utilises une camera USB avec `fswebcam` :
 
 ```bash
-sudo systemctl enable avahi-daemon
-sudo systemctl start avahi-daemon
+sudo apt install -y fswebcam
+```
+
+Si tu utilises la camera Raspberry Pi officielle, `libcamera-still` est en
+general deja disponible sur Raspberry Pi OS recent. Verifie avec :
+
+```bash
+which libcamera-still
+```
+
+Activer mDNS :
+
+```bash
+sudo systemctl enable --now avahi-daemon
 systemctl status avahi-daemon --no-pager
 ```
 
-## Etape 6 - Installer le repo
+Ajouter l'utilisateur aux groupes utiles pour les ports serie, I2C et camera :
 
-Depuis le home de l'utilisateur :
+```bash
+sudo usermod -aG dialout,i2c,video jeandard
+```
+
+Activer I2C si le capteur solaire INA228 est utilise :
+
+```bash
+sudo raspi-config nonint do_i2c 0
+```
+
+Redemarrer pour appliquer les groupes et I2C :
+
+```bash
+sudo reboot
+```
+
+Reconnecte-toi ensuite en SSH.
+
+## 6. Installer le repo
+
+### 6.1 Connecter le Pi a GitHub en SSH
+
+Si le repo est heberge sur GitHub, le plus pratique est de donner au Raspberry
+Pi sa propre cle SSH. Comme ca, le Pi peut cloner et faire les futurs `git pull`
+sans mot de passe.
+
+Sur le Pi, generer une cle dediee :
+
+```bash
+ssh-keygen -t ed25519 -C "sc-vehicule-1@github" -f ~/.ssh/github_sc_vehicule_1
+```
+
+Pour le Pi 2, utilise plutot :
+
+```bash
+ssh-keygen -t ed25519 -C "sc-vehicule-2@github" -f ~/.ssh/github_sc_vehicule_2
+```
+
+Quand `ssh-keygen` demande une passphrase, tu peux laisser vide pour un Pi qui
+doit faire des `git pull` sans interaction.
+
+Afficher la cle publique :
+
+```bash
+cat ~/.ssh/github_sc_vehicule_1.pub
+```
+
+Copier toute la ligne affichee, qui commence par `ssh-ed25519`.
+
+Dans GitHub :
+
+1. Ouvrir ton profil utilisateur.
+2. Aller dans `Settings` puis `SSH / GPG Keys`.
+3. Cliquer sur `Add Key`.
+4. Nommer la cle, par exemple `sc-vehicule-1`.
+5. Coller le contenu de `~/.ssh/github_sc_vehicule_1.pub`.
+6. Enregistrer.
+
+Si tu veux limiter la cle a un seul repo, utilise plutot une Deploy Key dans
+le repo GitHub :
+
+1. Ouvrir le repo dans GitHub.
+2. Aller dans `Settings` puis `Deploy Keys`.
+3. Ajouter la cle publique du Pi.
+4. Laisser l'ecriture desactivee si le Pi doit seulement cloner et pull.
+
+Creer ensuite une config SSH locale sur le Pi :
+
+```bash
+nano ~/.ssh/config
+```
+
+Configuration GitHub :
+
+```sshconfig
+Host github
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/github_sc_vehicule_1
+    IdentitiesOnly yes
+    Port 22
+```
+
+Proteger les fichiers SSH :
+
+```bash
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/config ~/.ssh/github_sc_vehicule_1
+chmod 644 ~/.ssh/github_sc_vehicule_1.pub
+```
+
+Tester la connexion :
+
+```bash
+ssh -T github
+```
+
+Au premier test, SSH peut demander de confirmer l'empreinte du serveur GitHub.
+Repondre `yes` seulement si c'est bien ton serveur.
+
+Si GitHub repond avec un message du type `Hi <user>! You've successfully
+authenticated`, c'est bon. GitHub precise aussi qu'il ne fournit pas de shell
+interactif, c'est normal.
+
+L'URL de clone SSH ressemble ensuite a :
+
+```text
+git@github.com:regenbox-team/Cycle-Analyst-App.git
+```
+
+Avec l'alias `Host github`, tu peux aussi utiliser :
+
+```text
+github:regenbox-team/Cycle-Analyst-App.git
+```
+
+### 6.2 Cloner et installer les dependances
 
 ```bash
 cd /home/jeandard
-git clone <URL_DU_REPO> Cycle-Analyst-App
+git clone github:regenbox-team/Cycle-Analyst-App.git Cycle-Analyst-App
 cd /home/jeandard/Cycle-Analyst-App
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-Remplace `<URL_DU_REPO>` par l'URL Git du projet.
+Si tu ne veux pas configurer d'alias SSH, utilise directement l'URL GitHub :
 
-## Etape 7 - Tester l'app manuellement
+```bash
+git clone git@github.com:regenbox-team/Cycle-Analyst-App.git Cycle-Analyst-App
+```
 
-Toujours depuis le repo :
+## 7. Creer le dossier runtime
+
+Le code cree `var/` automatiquement, mais c'est plus clair de le preparer :
+
+```bash
+cd /home/jeandard/Cycle-Analyst-App
+mkdir -p var var/session_metrics var/live_photo
+```
+
+Les fichiers runtime principaux sont :
+
+- `var/ride_data_supercycle_live.db`
+- `var/ride_data_supercycle_test.db`
+- `var/session_metrics/*.json`
+- `var/current_session.txt`
+- `var/session_state.txt`
+- `var/current_user.txt`
+- `var/current_user_id.txt`
+- `var/users.json`
+- `var/vehicle_mode.txt`
+- `var/test_mode.txt`
+- `var/solar_roof.txt`
+- `var/solar_battery_state.json`
+- `var/route.gpx`
+- `var/live_photo/*.jpg`
+
+## 8. Creer le fichier de variables d'environnement
+
+Creer le dossier de configuration :
+
+```bash
+sudo install -d -m 0755 /etc/cycle-analyst
+sudo nano /etc/cycle-analyst/cycle-analyst.env
+```
+
+Exemple complet pour le Pi 1 :
+
+```ini
+# Cycle Analyst App - variables chargees par systemd
+
+# Runtime local
+APP_VAR_DIR=/home/jeandard/Cycle-Analyst-App/var
+
+# A utiliser seulement si l'app est lancee via wsgi/gunicorn.
+# Avec "python cycle_server.py", le reader demarre deja automatiquement.
+# APP_START_READER=1
+
+# GPS USB NMEA. Les dongles VK-162 apparaissent souvent en /dev/ttyACM0.
+APP_GPS_PORT=/dev/ttyACM0
+APP_GPS_BAUDRATE=9600
+
+# Carte offline PMTiles servie par /tiles/basemap.pmtiles.
+APP_PMTILES_PATH=/home/jeandard/Documents/tiles.pmtiles
+
+# Estimation solaire / batterie.
+# Si la position exacte n'est pas encore connue, laisse les valeurs par defaut
+# ou remplace-les par la latitude/longitude du depart.
+APP_SOLAR_PANEL_MAX_W=590
+APP_SOLAR_LAT=48.8566
+APP_SOLAR_LON=2.3522
+APP_BATTERY_NOMINAL_VOLTAGE=48.1
+APP_BATTERY_DISCHARGE_CURVE_FILE=/home/jeandard/Cycle-Analyst-App/var/battery_curve_lg_mh1_from_trip.json
+
+# Capteur solaire INA228. Laisser commente si le Pi n'a pas ce capteur.
+# APP_SOLAR_SENSOR=ina228
+# APP_SOLAR_I2C_BUS=1
+# APP_SOLAR_I2C_ADDR=0x45
+# APP_SOLAR_SHUNT_OHMS=0.0002
+# APP_SOLAR_MAX_AMPS=204.8
+# APP_SOLAR_CURRENT_GAIN=1.0
+# APP_SOLAR_CURRENT_OFFSET=0.0
+# APP_SOLAR_CURRENT_DEADBAND_A=0.15
+# Decommenter seulement si le courant solaire apparait avec le mauvais signe.
+# APP_SOLAR_INVERT_SIGN=true
+
+# Camera pour capture photo pendant les sessions.
+# Si vide, l'app essaie libcamera-still puis fswebcam.
+APP_CAMERA_COMMAND=libcamera-still -n --width 1280 --height 720 --quality 85 -o {output}
+
+# Synchronisation vers monitor_server. Laisser MONITOR_URL vide pour desactiver.
+MONITOR_DEVICE_ID=sc-vehicule-1
+MONITOR_URL=http://91.134.243.157:8080
+MONITOR_USER=jean
+MONITOR_PASS=oklm
+```
+
+Proteger le fichier si tu y mets `MONITOR_PASS` :
+
+```bash
+sudo chown root:root /etc/cycle-analyst/cycle-analyst.env
+sudo chmod 0640 /etc/cycle-analyst/cycle-analyst.env
+```
+
+## 9. Variables disponibles pour l'app embarquee
+
+| Variable | Defaut dans le code | Usage |
+| --- | --- | --- |
+| `APP_VAR_DIR` | `var` | Dossier des DB, sessions, profils, photos locales et etat runtime. |
+| `APP_START_READER` | `0` | Force le reader au moment de l'import `cycle_server`. Utile avec WSGI, inutile avec `python cycle_server.py`. |
+| `APP_GPS_PORT` | `/dev/ttyACM0` | Port serie du GPS NMEA. |
+| `APP_GPS_BAUDRATE` | `9600` | Baudrate du GPS. |
+| `APP_PMTILES_PATH` | `/home/jeandard/Documents/tiles.pmtiles` | Fichier `.pmtiles` offline. |
+| `APP_SOLAR_PANEL_MAX_W` | `590` | Puissance max panneaux pour estimation solaire. |
+| `APP_SOLAR_LAT` | `48.8566` | Latitude par defaut pour estimation solaire. |
+| `APP_SOLAR_LON` | `2.3522` | Longitude par defaut pour estimation solaire. |
+| `APP_BATTERY_NOMINAL_VOLTAGE` | `48.1` | Tension nominale batterie pour calcul Wh. |
+| `APP_BATTERY_DISCHARGE_CURVE_FILE` | vide | Fichier JSON optionnel de courbe voltage/SOC. |
+| `APP_SOLAR_SENSOR` | vide | Mettre `ina228` pour activer le capteur solaire I2C. |
+| `APP_SOLAR_I2C_BUS` | `1` | Bus I2C INA228. |
+| `APP_SOLAR_I2C_ADDR` | `0x45` | Adresse INA228. `0` probe `0x41`, `0x44`, `0x45`. |
+| `APP_SOLAR_SHUNT_OHMS` | `0.0002` | Valeur du shunt. |
+| `APP_SOLAR_MAX_AMPS` | `204.8` | Courant pleine echelle pour `CURRENT_LSB`. |
+| `APP_SOLAR_CURRENT_GAIN` | `1.0` | Correction multiplicative courant. |
+| `APP_SOLAR_CURRENT_OFFSET` | `0.0` | Offset courant en amperes. |
+| `APP_SOLAR_CURRENT_DEADBAND_A` | `0.15` | Zone morte des petits courants. |
+| `APP_SOLAR_INVERT_SIGN` | vide | `true` pour inverser le signe du courant solaire. |
+| `APP_CAMERA_COMMAND` | auto | Commande custom camera. `{output}` est remplace par le fichier JPEG. |
+| `MONITOR_DEVICE_ID` | hostname | ID unique envoye au monitor. |
+| `MONITOR_URL` | vide | URL du monitor. Vide = sync desactivee. |
+| `MONITOR_USER` | vide | Login Basic Auth monitor. |
+| `MONITOR_PASS` | vide | Mot de passe Basic Auth monitor. |
+
+## 10. Telecharger les tiles PMTiles pour la basemap vectorielle
+
+L'app cherche la carte offline a l'emplacement configure par :
+
+```ini
+APP_PMTILES_PATH=/home/jeandard/Documents/tiles.pmtiles
+```
+
+Le frontend sert ensuite ce fichier avec l'URL interne `/tiles/basemap.pmtiles`.
+Le style actuel est prevu pour une basemap vectorielle compatible Protomaps.
+
+Le fichier planet complet Protomaps est tres gros. Il vaut mieux extraire une
+zone avec `pmtiles extract`, par exemple une region autour de l'itineraire.
+
+References utiles :
+
+- `https://docs.protomaps.com/guide/getting-started`
+- `https://docs.protomaps.com/pmtiles/cli`
+- `https://docs.protomaps.com/basemaps/downloads`
+
+### 10.1 Choisir la zone a extraire
+
+Il faut definir une bounding box au format :
+
+```text
+MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
+```
+
+Exemple :
+
+```bash
+BBOX="-6.0,41.0,10.0,52.5"
+```
+
+Cette bbox couvre grossierement une grande partie de l'Europe de l'Ouest. Pour
+reduire le poids du fichier, utilise une bbox plus petite autour du parcours.
+Tu peux trouver une bbox avec un outil comme :
+
+```text
+https://bboxfinder.com
+```
+
+### 10.2 Choisir la source Protomaps
+
+Aller sur :
+
+```text
+https://maps.protomaps.com/builds
+```
+
+Choisir un build recent, puis copier son URL `.pmtiles`.
+
+Exemple :
+
+```bash
+SOURCE_PMTILES_URL="https://build.protomaps.com/YYYYMMDD.pmtiles"
+```
+
+Remplace `YYYYMMDD` par le build choisi sur la page Protomaps.
+
+### 10.3 Methode A - Telecharger directement depuis le Pi
+
+Installer le CLI `pmtiles` sur le Pi.
+
+Le plus simple est d'ouvrir la page suivante depuis un navigateur :
+
+```text
+https://github.com/protomaps/go-pmtiles/releases/latest
+```
+
+Telecharger l'asset Linux ARM64 pour Raspberry Pi OS 64-bit, puis copier le
+binaire `pmtiles` dans `/usr/local/bin`.
+
+Verifier :
+
+```bash
+pmtiles --help
+```
+
+Creer le dossier cible :
+
+```bash
+mkdir -p /home/jeandard/Documents
+```
+
+Extraire la zone :
+
+```bash
+SOURCE_PMTILES_URL="https://build.protomaps.com/YYYYMMDD.pmtiles"
+BBOX="-6.0,41.0,10.0,52.5"
+pmtiles extract "$SOURCE_PMTILES_URL" /home/jeandard/Documents/tiles.pmtiles --bbox="$BBOX"
+```
+
+Verifier le fichier :
+
+```bash
+ls -lh /home/jeandard/Documents/tiles.pmtiles
+pmtiles show /home/jeandard/Documents/tiles.pmtiles
+```
+
+Redemarrer l'app pour etre sur que le chemin est pris en compte :
+
+```bash
+sudo systemctl restart cycle-analyst.service
+```
+
+Tester depuis le Pi :
+
+```bash
+curl -I http://127.0.0.1:5050/tiles/basemap.pmtiles
+```
+
+### 10.4 Methode B - Telecharger sur un PC puis envoyer au Pi
+
+Cette methode est souvent plus confortable si le PC a une meilleure connexion.
+
+Sur le PC, installer le CLI `pmtiles` depuis :
+
+```text
+https://github.com/protomaps/go-pmtiles/releases/latest
+```
+
+Telecharger l'asset Windows AMD64, puis verifier dans PowerShell :
+
+```powershell
+pmtiles.exe --help
+```
+
+Depuis PowerShell, extraire la zone :
+
+```powershell
+$SOURCE_PMTILES_URL = "https://build.protomaps.com/YYYYMMDD.pmtiles"
+$BBOX = "-6.0,41.0,10.0,52.5"
+.\pmtiles.exe extract $SOURCE_PMTILES_URL .\tiles.pmtiles --bbox=$BBOX
+```
+
+Verifier :
+
+```powershell
+Get-Item .\tiles.pmtiles
+.\pmtiles.exe show .\tiles.pmtiles
+```
+
+Envoyer le fichier vers le Pi 1 :
+
+```powershell
+ssh jeandard@sc-vehicule-1.local "mkdir -p /home/jeandard/Documents"
+scp .\tiles.pmtiles jeandard@sc-vehicule-1.local:/home/jeandard/Documents/tiles.pmtiles
+```
+
+Pour le Pi 2 :
+
+```powershell
+ssh jeandard@sc-vehicule-2.local "mkdir -p /home/jeandard/Documents"
+scp .\tiles.pmtiles jeandard@sc-vehicule-2.local:/home/jeandard/Documents/tiles.pmtiles
+```
+
+Puis sur le Pi :
+
+```bash
+ls -lh /home/jeandard/Documents/tiles.pmtiles
+sudo systemctl restart cycle-analyst.service
+curl -I http://127.0.0.1:5050/tiles/basemap.pmtiles
+```
+
+### 10.5 Remplacer les tiles plus tard
+
+Pour mettre a jour la carte, remplace simplement :
+
+```text
+/home/jeandard/Documents/tiles.pmtiles
+```
+
+Puis :
+
+```bash
+sudo systemctl restart cycle-analyst.service
+```
+
+Si le navigateur garde l'ancien rendu, recharge la page avec un refresh force.
+
+## 11. Tester l'app manuellement
 
 ```bash
 cd /home/jeandard/Cycle-Analyst-App
 source .venv/bin/activate
+set -a
+. /etc/cycle-analyst/cycle-analyst.env
+set +a
 python cycle_server.py
 ```
 
-Le repo expose l'app sur `0.0.0.0:5050`, donc l'acces brut est :
+Le code lance Flask sur `0.0.0.0:5050`.
 
-- localement sur le Pi : `http://127.0.0.1:5050`
-- depuis un autre appareil du meme reseau : `http://IP_DU_PI:5050`
-
-Pour verifier depuis le Pi :
+Tester depuis le Pi dans un second terminal :
 
 ```bash
 curl http://127.0.0.1:5050
+curl http://127.0.0.1:5050/metrics
+curl http://127.0.0.1:5050/gps_status
+curl http://127.0.0.1:5050/sys_metrics
 ```
 
-Arreter ensuite le process avec `Ctrl+C`.
+Arreter avec `Ctrl+C`.
 
-## Etape 8 - Creer le service systemd
+## 12. Tester les peripheriques optionnels
 
-Creer un service pour demarrer l'app au boot :
+### Port Cycle Analyst
+
+Le mode live lit par defaut `/dev/ttyUSB0` a `9600` bauds via `pyserial`.
+
+Voir les ports detectes :
+
+```bash
+ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
+```
+
+Si le Cycle Analyst n'est pas sur `/dev/ttyUSB0`, il faut modifier
+`VEHICLE_CONFIGS` dans `app/config.py` ou creer une regle udev stable.
+
+### GPS
+
+```bash
+ls -l /dev/ttyACM* /dev/ttyUSB* 2>/dev/null
+timeout 5 cat /dev/ttyACM0
+```
+
+Tu dois voir des lignes NMEA commencant par `$GPGGA`, `$GNGGA`, `$GPRMC` ou
+`$GNRMC`.
+
+### INA228 solaire
+
+Verifier le bus I2C :
+
+```bash
+i2cdetect -y 1
+```
+
+Debugger le capteur avec le script du repo :
+
+```bash
+cd /home/jeandard/Cycle-Analyst-App
+source .venv/bin/activate
+python scripts/ina228_debug.py --addr 0 --interval 1 --once
+```
+
+Si le courant est inverse, ajouter dans le fichier env :
+
+```ini
+APP_SOLAR_INVERT_SIGN=true
+```
+
+### Camera
+
+Tester la camera Raspberry Pi :
+
+```bash
+libcamera-still -n -o /tmp/cycle-test.jpg --width 1280 --height 720 --quality 85
+ls -lh /tmp/cycle-test.jpg
+```
+
+Tester une camera USB :
+
+```bash
+fswebcam -q -r 1280x720 --jpeg 85 --no-banner /tmp/cycle-test.jpg
+ls -lh /tmp/cycle-test.jpg
+```
+
+## 13. Creer le service systemd de l'app
+
+Creer le service :
 
 ```bash
 sudo nano /etc/systemd/system/cycle-analyst.service
 ```
 
-Contenu :
+Contenu recommande :
 
 ```ini
 [Unit]
@@ -208,57 +681,77 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+Type=simple
 User=jeandard
+Group=jeandard
+SupplementaryGroups=dialout i2c video
 WorkingDirectory=/home/jeandard/Cycle-Analyst-App
+EnvironmentFile=-/etc/cycle-analyst/cycle-analyst.env
+Environment=PYTHONUNBUFFERED=1
 Environment=PATH=/home/jeandard/Cycle-Analyst-App/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/home/jeandard/Cycle-Analyst-App/.venv/bin/python /home/jeandard/Cycle-Analyst-App/cycle_server.py
 Restart=always
 RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Activer le service :
+Activer et demarrer :
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable cycle-analyst.service
-sudo systemctl start cycle-analyst.service
+sudo systemctl enable --now cycle-analyst.service
 sudo systemctl status cycle-analyst.service --no-pager
 ```
 
-Verifier ensuite :
+Voir les logs :
+
+```bash
+journalctl -u cycle-analyst.service -f
+```
+
+Tester :
 
 ```bash
 curl http://127.0.0.1:5050
+curl http://127.0.0.1:5050/metrics
 ```
 
-## Etape 9 - Exposer l'app avec une URL locale sans l'IP
+## 14. Autoriser le bouton de redemarrage de l'UI
 
-### 9.1 Verifier le mDNS `.local`
-
-Avec `avahi-daemon`, le Pi doit etre resolvable comme :
-
-- `sc-vehicule-1.local`
-- `sc-vehicule-2.local`
-
-Verification sur le Pi :
+L'endpoint `/restart_service` execute :
 
 ```bash
-avahi-resolve-host-name sc-vehicule-1.local
+sudo systemctl restart cycle-analyst.service
 ```
 
-Verification depuis le Mac :
+Sans regle sudoers, le bouton de l'interface ne peut pas redemarrer le service.
+
+Creer une regle dediee :
 
 ```bash
-ping sc-vehicule-1.local
-ssh jeandard@sc-vehicule-1.local
+sudo visudo -f /etc/sudoers.d/cycle-analyst
 ```
 
-### 9.2 Configurer nginx
+Contenu :
 
-Creer le fichier de site :
+```sudoers
+jeandard ALL=NOPASSWD: /bin/systemctl restart cycle-analyst.service
+jeandard ALL=NOPASSWD: /usr/bin/systemctl restart cycle-analyst.service
+```
+
+Verifier :
+
+```bash
+sudo -l -U jeandard
+```
+
+## 15. Configurer nginx pour l'URL locale
+
+Creer le site :
 
 ```bash
 sudo nano /etc/nginx/sites-available/cycle-analyst
@@ -269,10 +762,11 @@ Contenu pour le Pi 1 :
 ```nginx
 server {
     listen 80;
-    server_name sc-vehicule-1.local;
+    server_name sc-vehicule-1.local sc-vehicule-1;
 
     location / {
         proxy_pass http://127.0.0.1:5050;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -281,45 +775,56 @@ server {
 }
 ```
 
-Contenu pour le Pi 2 :
-
-```nginx
-server {
-    listen 80;
-    server_name sc-vehicule-2.local;
-
-    location / {
-        proxy_pass http://127.0.0.1:5050;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-Activer le site :
+Activer :
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/cycle-analyst /etc/nginx/sites-enabled/cycle-analyst
+sudo ln -sf /etc/nginx/sites-available/cycle-analyst /etc/nginx/sites-enabled/cycle-analyst
+sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
+sudo systemctl enable --now nginx
 sudo systemctl reload nginx
 ```
 
-Verification :
+Tester depuis le Pi :
 
 ```bash
 curl http://127.0.0.1
 ```
 
-Depuis le telephone ou le Mac :
+Tester depuis un autre appareil du meme reseau :
 
-- `http://sc-vehicule-1.local`
-- `http://sc-vehicule-2.local`
+```bash
+curl http://sc-vehicule-1.local
+```
 
-## Etape 10 - Config SSH pour VS Code
+Ou ouvrir :
 
-Sur le Mac, editer `~/.ssh/config` :
+```text
+http://sc-vehicule-1.local
+```
+
+## 16. Verifier le mDNS `.local`
+
+Sur le Pi :
+
+```bash
+avahi-resolve-host-name sc-vehicule-1.local
+hostname -I
+```
+
+Depuis le Mac ou PC :
+
+```bash
+ping sc-vehicule-1.local
+ssh jeandard@sc-vehicule-1.local
+```
+
+Important : certains hotspots telephone bloquent le multicast ou l'isolation
+client. Dans ce cas, l'IP peut fonctionner alors que `.local` ne se resout pas.
+
+## 17. Config SSH pour VS Code
+
+Sur ton Mac ou PC, editer `~/.ssh/config` :
 
 ```sshconfig
 Host sc1 sc-vehicule-1.local
@@ -341,143 +846,266 @@ Host sc2 sc-vehicule-2.local
     ServerAliveCountMax 6
 ```
 
-Ensuite, dans VS Code :
+Ensuite dans VS Code :
 
 - `Remote-SSH: Connect to Host...`
 - choisir `sc1` ou `sc2`
 
-## Etape 11 - Option monitor multi-vehicules
-
-Si tu utilises aussi le `monitor_server`, il peut etre utile de fixer explicitement un identifiant unique par Pi plutot que de dependre uniquement du hostname.
-
-Exemple, dans le service `systemd`, ajouter :
-
-```ini
-Environment=MONITOR_DEVICE_ID=sc-vehicule-1
-```
-
-et sur un autre Pi :
-
-```ini
-Environment=MONITOR_DEVICE_ID=sc-vehicule-2
-```
-
-Ce n'est pas obligatoire pour l'acces URL, mais c'est utile si plusieurs Pi uploadent vers le meme monitor.
-
-## Etape 12 - Cas du hotspot du Pi et du hotspot du telephone
-
-### Ce qui marche bien
-
-Le meilleur nom local hors ligne est :
-
-- `sc-vehicule-1.local`
-- `sc-vehicule-2.local`
-
-Ce nom peut marcher :
-
-- sur le hotspot du Pi
-- sur le hotspot du telephone
-- sur un autre reseau Wi-Fi local
-
-### La limite importante
-
-Le suffixe `.local` repose sur le mDNS. Certains hotspots de telephone filtrent :
-
-- le multicast
-- la communication entre clients Wi-Fi
-
-Dans ce cas :
-
-- SSH par IP peut marcher
-- le navigateur via IP peut marcher
-- `sc-vehicule-1.local` peut ne pas se resoudre
-
-Conclusion pratique :
-
-- si le hotspot du telephone laisse passer le mDNS, tu gardes la meme URL
-- sinon, il faut passer par l'IP sur ce reseau-la
-- si tu veux un comportement garanti hors ligne avec un nom de domaine stable, il faut controler le DNS du reseau, donc plutot utiliser le hotspot du Pi
-
-## Etape 13 - Strategie pour deployer plusieurs Pi
-
-### Option A - Une SD preparee individuellement par vehicule
-
-Avantages :
-
-- simple
-- propre
-- chaque Pi a son hostname des le premier boot
-- evite les collisions de cle SSH
-
-Procedure :
-
-1. preparer chaque SD avec Raspberry Pi Imager
-2. definir le hostname correct avant le premier boot
-3. installer le repo
-4. activer `systemd`, `avahi`, `nginx`
-
-### Option B - Cloner une SD deja configuree
-
-Possible, mais plus fragile.
-
-Apres clonage, sur chaque Pi clone, verifier au minimum :
-
-- hostname unique
-- cle SSH hote unique
-- eventuel `MONITOR_DEVICE_ID` unique
-
-Pour verifier l'empreinte SSH hote :
+## 18. Mise a jour du repo sur un Pi deja installe
 
 ```bash
-sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+cd /home/jeandard/Cycle-Analyst-App
+git status
+git pull
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+sudo systemctl restart cycle-analyst.service
+sudo systemctl status cycle-analyst.service --no-pager
 ```
 
-Si deux Pi clones ont la meme empreinte, regenerer les clefs SSH sur l'un d'eux :
+Si tu modifies `/etc/cycle-analyst/cycle-analyst.env` :
 
 ```bash
-sudo rm /etc/ssh/ssh_host_*
-sudo dpkg-reconfigure openssh-server
-sudo systemctl restart ssh
+sudo systemctl restart cycle-analyst.service
 ```
 
-## Checklist finale par vehicule
+Si tu modifies le fichier `.service` :
 
-- hostname correct
-- acces SSH OK
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart cycle-analyst.service
+```
+
+## 19. Option : installer monitor_server
+
+Le `monitor_server` peut tourner sur un serveur distant, un laptop ou un Pi.
+Il recoit les uploads des vehicules quand `MONITOR_URL` est configure cote app
+embarquee.
+
+Si tu veux le lancer sur le meme repo :
+
+```bash
+cd /home/jeandard/Cycle-Analyst-App
+source .venv/bin/activate
+MONITOR_USER=jean MONITOR_PASS=oklm python monitor_server/app.py
+```
+
+Par defaut il ecoute sur `0.0.0.0:8080`.
+
+### Variables du monitor_server
+
+| Variable | Defaut | Usage |
+| --- | --- | --- |
+| `MONITOR_PORT` | `8080` | Port HTTP du monitor. |
+| `MONITOR_DB` | `monitor_server/monitor.db` | DB SQLite du monitor. |
+| `MONITOR_MEDIA_DIR` | `monitor_server/media` | Stockage des photos recues. |
+| `MONITOR_USER` | vide | Login Basic Auth requis pour les APIs protegees. |
+| `MONITOR_PASS` | vide | Mot de passe Basic Auth. |
+| `MONITOR_TERRAIN_RESOURCE` | `ign_rge_alti_wld` | Ressource altimetrie IGN. |
+| `MONITOR_TERRAIN_CACHE_DECIMALS` | `5` | Precision cache altitude. |
+| `MONITOR_TERRAIN_BATCH_SIZE` | `5000` | Taille batch IGN. |
+| `MONITOR_TERRAIN_TIMEOUT_SEC` | `8` | Timeout IGN. |
+| `MONITOR_TERRAIN_FALLBACK_DATASET` | `srtm30m` | Dataset OpenTopoData fallback. |
+| `MONITOR_TERRAIN_FALLBACK_API_URL` | `https://api.opentopodata.org/v1/srtm30m` | URL fallback altitude. |
+| `MONITOR_TERRAIN_FALLBACK_BATCH_SIZE` | `100` | Taille batch fallback. |
+| `MONITOR_TERRAIN_FALLBACK_THROTTLE_SEC` | `1.0` | Pause entre batchs fallback. |
+| `MONITOR_TERRAIN_BACKFILL_LIMIT_POINTS` | `500` | Points max par backfill altitude. |
+
+### Service systemd optionnel du monitor
+
+Creer un fichier env separe :
+
+```bash
+sudo nano /etc/cycle-analyst/monitor.env
+```
+
+Exemple :
+
+```ini
+MONITOR_PORT=8080
+MONITOR_DB=/home/jeandard/Cycle-Analyst-App/var/monitor.db
+MONITOR_MEDIA_DIR=/home/jeandard/Cycle-Analyst-App/var/monitor_media
+MONITOR_USER=jean
+MONITOR_PASS=oklm
+MONITOR_TERRAIN_RESOURCE=ign_rge_alti_wld
+MONITOR_TERRAIN_CACHE_DECIMALS=5
+MONITOR_TERRAIN_BATCH_SIZE=5000
+MONITOR_TERRAIN_TIMEOUT_SEC=8
+MONITOR_TERRAIN_FALLBACK_DATASET=srtm30m
+MONITOR_TERRAIN_FALLBACK_BATCH_SIZE=100
+MONITOR_TERRAIN_FALLBACK_THROTTLE_SEC=1.0
+MONITOR_TERRAIN_BACKFILL_LIMIT_POINTS=500
+```
+
+Proteger :
+
+```bash
+sudo chown root:root /etc/cycle-analyst/monitor.env
+sudo chmod 0640 /etc/cycle-analyst/monitor.env
+```
+
+Creer le service :
+
+```bash
+sudo nano /etc/systemd/system/cycle-monitor.service
+```
+
+Contenu :
+
+```ini
+[Unit]
+Description=Cycle Monitor Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jeandard
+Group=jeandard
+WorkingDirectory=/home/jeandard/Cycle-Analyst-App
+EnvironmentFile=-/etc/cycle-analyst/monitor.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/jeandard/Cycle-Analyst-App/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/jeandard/Cycle-Analyst-App/.venv/bin/python /home/jeandard/Cycle-Analyst-App/monitor_server/app.py
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Activer :
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now cycle-monitor.service
+sudo systemctl status cycle-monitor.service --no-pager
+```
+
+Tester :
+
+```bash
+curl http://127.0.0.1:8080
+```
+
+## 20. Brancher un Pi vehicule au monitor
+
+Dans `/etc/cycle-analyst/cycle-analyst.env` sur chaque Pi vehicule :
+
+```ini
+MONITOR_DEVICE_ID=sc-vehicule-1
+MONITOR_URL=http://91.134.243.157:8080
+MONITOR_USER=jean
+MONITOR_PASS=oklm
+```
+
+Puis :
+
+```bash
+sudo systemctl restart cycle-analyst.service
+journalctl -u cycle-analyst.service -f
+```
+
+La sync tourne toutes les 60 secondes quand `MONITOR_URL` est defini.
+
+## 21. Checklist finale par Pi
+
+- hostname unique OK
+- SSH OK
 - `avahi-daemon` actif
+- utilisateur dans les groupes `dialout`, `i2c`, `video`
 - repo clone dans `/home/jeandard/Cycle-Analyst-App`
-- venv Python cree
-- dependances installees
+- cle SSH GitHub du Pi ajoutee dans GitHub ou comme Deploy Key
+- `.venv` cree
+- dependances Python installees
+- `/etc/cycle-analyst/cycle-analyst.env` cree
+- `APP_VAR_DIR` pointe vers le `var/` du repo
+- `/home/jeandard/Documents/tiles.pmtiles` existe si la basemap offline est utilisee
+- `MONITOR_DEVICE_ID` unique
 - `cycle-analyst.service` actif
 - `nginx` actif
-- `http://127.0.0.1` repond sur le Pi
-- `http://sc-vehicule-X.local` repond depuis un autre appareil du meme reseau
+- `curl http://127.0.0.1:5050/metrics` repond sur le Pi
+- `http://sc-vehicule-X.local` repond depuis un autre appareil
+- si solaire : `i2cdetect -y 1` et `scripts/ina228_debug.py` OK
+- si GPS : `/gps_status` recoit des donnees
+- si camera : capture test OK
+- si monitor : heartbeat visible cote monitor
 
-## Depannage
+## 22. Depannage
 
-### Le nom `.local` ne marche pas
+### Le service ne demarre pas
+
+```bash
+sudo systemctl status cycle-analyst.service --no-pager
+journalctl -u cycle-analyst.service -n 100 --no-pager
+```
 
 Verifier :
+
+- chemin du repo
+- chemin du venv
+- syntaxe de `/etc/cycle-analyst/cycle-analyst.env`
+- permissions sur les ports serie/I2C/camera
+
+### La page web locale marche, mais pas `.local`
 
 ```bash
 systemctl status avahi-daemon --no-pager
 hostname
-hostnamectl
 hostname -I
+avahi-resolve-host-name sc-vehicule-1.local
 ```
 
-Tester depuis le Mac :
+Si l'IP marche mais pas `.local`, le reseau bloque probablement le mDNS.
+
+### Le Cycle Analyst ne donne pas de donnees
 
 ```bash
-ping sc-vehicule-1.local
-ssh jeandard@sc-vehicule-1.local
+ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
+groups
+sudo systemctl restart cycle-analyst.service
+journalctl -u cycle-analyst.service -f
 ```
 
-Si l'IP marche mais pas le nom `.local`, le reseau bloque probablement le mDNS.
+Verifier que l'utilisateur est dans `dialout` et que le port live du code est
+bien `/dev/ttyUSB0`.
 
-### VS Code se connecte en SSH mais pas en Remote-SSH
+### Le GPS ne donne pas de fix
 
-Si le SSH simple marche mais pas VS Code, supprimer l'ancien serveur distant :
+```bash
+curl http://127.0.0.1:5050/gps_status
+timeout 5 cat /dev/ttyACM0
+```
+
+Adapter `APP_GPS_PORT` si le GPS est sur un autre port.
+
+### Le capteur INA228 ne repond pas
+
+```bash
+sudo raspi-config nonint do_i2c 0
+i2cdetect -y 1
+cd /home/jeandard/Cycle-Analyst-App
+source .venv/bin/activate
+python scripts/ina228_debug.py --addr 0 --once
+```
+
+Si aucune adresse `0x41`, `0x44` ou `0x45` n'apparait, verifier le cablage et
+l'alimentation du capteur.
+
+### Le bouton restart de l'interface echoue
+
+```bash
+sudo -l -U jeandard
+sudo systemctl restart cycle-analyst.service
+```
+
+Verifier `/etc/sudoers.d/cycle-analyst`.
+
+### VS Code Remote-SSH bloque
+
+Sur le Pi :
 
 ```bash
 rm -rf ~/.vscode-server ~/.vscode-remote
@@ -487,7 +1115,7 @@ Puis retenter la connexion depuis VS Code.
 
 ### Changement de cle SSH dans `known_hosts`
 
-Si le Mac affiche `REMOTE HOST IDENTIFICATION HAS CHANGED`, nettoyer l'entree :
+Sur le Mac ou PC :
 
 ```bash
 ssh-keygen -R sc-vehicule-1.local
@@ -495,37 +1123,41 @@ ssh-keygen -R sc-vehicule-2.local
 ssh-keygen -R cycle.local
 ```
 
-## Resume minimal a reutiliser pour chaque nouveau Pi
-
-1. preparer la SD avec un hostname unique et SSH actif
-2. booter le Pi et verifier le hostname
-3. installer `git`, `python3-venv`, `nginx`, `avahi-daemon`
-4. cloner le repo et installer les dependances Python
-5. tester `python cycle_server.py`
-6. creer le service `systemd`
-7. creer la conf `nginx`
-8. verifier `http://sc-vehicule-X.local`
-
-## Fichiers et commandes utiles
-
-- service app : `/etc/systemd/system/cycle-analyst.service`
-- site nginx : `/etc/nginx/sites-available/cycle-analyst`
-- config SSH Mac : `~/.ssh/config`
-- verifier le service app :
+## 23. Resume ultra-court
 
 ```bash
-sudo systemctl status cycle-analyst.service --no-pager
+sudo apt update
+sudo apt upgrade -y
+sudo apt install -y git python3 python3-venv python3-pip nginx avahi-daemon curl i2c-tools
+sudo usermod -aG dialout,i2c,video jeandard
+sudo raspi-config nonint do_i2c 0
+sudo reboot
 ```
 
-- verifier nginx :
+```bash
+cd /home/jeandard
+git clone github:regenbox-team/Cycle-Analyst-App.git Cycle-Analyst-App
+cd Cycle-Analyst-App
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+mkdir -p var var/session_metrics var/live_photo
+mkdir -p /home/jeandard/Documents
+```
+
+Puis creer :
+
+- `/etc/cycle-analyst/cycle-analyst.env`
+- `/etc/systemd/system/cycle-analyst.service`
+- `/etc/nginx/sites-available/cycle-analyst`
+- `/etc/sudoers.d/cycle-analyst` si tu veux le bouton restart
+
+Et activer :
 
 ```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now cycle-analyst.service
 sudo nginx -t
-sudo systemctl status nginx --no-pager
-```
-
-- verifier avahi :
-
-```bash
-systemctl status avahi-daemon --no-pager
+sudo systemctl enable --now nginx
 ```

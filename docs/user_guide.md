@@ -7,7 +7,7 @@
 ## Quick Start
 - Install deps: `pip install -r requirements.txt`
 - Run dev server: `python cycle_server.py`
-- Open: `http://localhost:5000`
+- Open: `http://localhost:5050`
 - Switch mode: Dashboard UI or POST `{"mode":"supercycle_test"}` to `/set_vehicle_mode`
 - Start session: Use Start page → choose user and click Start
 
@@ -157,7 +157,7 @@
 - WSGI entrypoint: `wsgi:application`
   - Example: `gunicorn -w 2 wsgi:application`
   - For test mode demo under WSGI: POST `/set_test_mode` `{"enabled": true}` → the reader auto‑starts.
-- Dev: `python cycle_server.py` (port 5000). Starts reader thread automatically.
+- Dev: `python cycle_server.py` (port 5050). Starts reader thread automatically.
 
 ## Development
 - App factory: `create_app(start_reader=False)` registers blueprints and initializes state/DB. Use `start_reader=True` for dev runs.
