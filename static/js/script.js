@@ -382,15 +382,15 @@ function updatePowerHistoryControls() {
   if (cumulativeButton) cumulativeButton.classList.toggle("active-chart", powerHistoryState.cumulative);
 }
 
-function traceSmoothLine(ctx, coords) {
+function traceSmoothLine(ctx, coords, continuePath = false) {
   if (!coords.length) return;
   if (coords.length === 1) {
-    ctx.moveTo(coords[0].x, coords[0].y);
+    if (!continuePath) ctx.moveTo(coords[0].x, coords[0].y);
     ctx.lineTo(coords[0].x + 0.01, coords[0].y);
     return;
   }
 
-  ctx.moveTo(coords[0].x, coords[0].y);
+  if (!continuePath) ctx.moveTo(coords[0].x, coords[0].y);
   for (let i = 0; i < coords.length - 1; i++) {
     const current = coords[i];
     const next = coords[i + 1];
@@ -422,7 +422,7 @@ function drawFilledBand(ctx, xs, lowerValues, upperValues, yForValue, color) {
   traceSmoothLine(ctx, upper);
   if (lower.length) {
     ctx.lineTo(lower[0].x, lower[0].y);
-    traceSmoothLine(ctx, lower);
+    traceSmoothLine(ctx, lower, true);
   }
   ctx.closePath();
   ctx.fill();
