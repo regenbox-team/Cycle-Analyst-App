@@ -100,6 +100,24 @@ class SessionSummaryTest(unittest.TestCase):
         self.assertEqual(metrics["ca_reset_count"], 1)
         self.assertAlmostEqual(metrics["distance"], 2.0)
 
+    def test_ignores_isolated_cycle_analyst_distance_spikes(self):
+        samples = [
+            {"timestamp": "2026-05-04T12:14:02", "raw": raw_line(distance=33.8)},
+            {"timestamp": "2026-05-04T12:14:03", "raw": raw_line(distance=33.909)},
+            {"timestamp": "2026-05-04T12:14:04", "raw": raw_line(distance=3946.0)},
+            {"timestamp": "2026-05-04T12:14:05", "raw": raw_line(distance=33.953)},
+            {"timestamp": "2026-05-04T12:16:00", "raw": raw_line(distance=34.652)},
+            {"timestamp": "2026-05-04T12:16:01", "raw": raw_line(distance=346.0)},
+            {"timestamp": "2026-05-04T12:16:02", "raw": raw_line(distance=34.692)},
+            {"timestamp": "2026-05-04T16:20:05", "raw": raw_line(distance=103.18)},
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertEqual(metrics["ca_reset_count"], 0)
+        self.assertAlmostEqual(metrics["distance"], 103.18 - 33.8)
+        self.assertEqual(metrics["distance_glitch_count"], 2)
+
     def test_filters_small_gps_altitude_noise_from_uphill(self):
         samples = [
             {

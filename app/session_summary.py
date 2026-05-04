@@ -5,6 +5,8 @@ import math
 from collections import defaultdict
 from typing import Any, Callable, Iterable
 
+from .distance import update_ca_distance
+
 MAX_SUMMARY_DT_SECONDS = 5.0
 ELEVATION_DEADBAND_M = 5.0
 _ELEVATION_ANCHOR_KEY = "_elevation_anchor_m"
@@ -333,9 +335,6 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
     last_ts = None
     first_ts = None
     final_ts = None
-    distance_start = None
-    distance_offset = 0.0
-    last_raw_distance = None
     last_gps = None
 
     for sample in samples:
@@ -370,14 +369,13 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
             power = v * a
             human_power = v * human_a
 
-            if distance_start is None:
-                distance_start = raw_distance
-            if last_raw_distance is not None and raw_distance < last_raw_distance - 0.1:
-                m["ca_reset_count"] += 1
-                distance_offset = m["distance"]
-                distance_start = raw_distance
-            last_raw_distance = raw_distance
-            m["distance"] = max(0.0, raw_distance - distance_start + distance_offset)
+            update_ca_distance(
+                m,
+                raw_distance,
+                now=current_ts,
+                distance_key="distance",
+                reset_count_key="ca_reset_count",
+            )
 
             if speed >= 1:
                 m["speed_sum"] += speed

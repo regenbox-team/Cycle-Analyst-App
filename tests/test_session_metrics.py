@@ -84,7 +84,7 @@ class SessionMetricsTest(unittest.TestCase):
 
         sm["positive_Wh"] = 300
         data[4] = 4.0
-        cycle_server.update_metrics(data, now=1)
+        cycle_server.update_metrics(data, now=121)
 
         self.assertEqual(sm["last_km_checkpoints"], [0, 100, 200, 300])
         self.assertEqual(sm["Wh_per_km_last"], [100, 100, 100])
@@ -110,12 +110,52 @@ class SessionMetricsTest(unittest.TestCase):
 
         data[4] = 0.2  # CA reset
         cycle_server.update_metrics(data, now=2)
-        self.assertTrue(sm["ca_reset_detected"])
+        self.assertFalse(sm["ca_reset_detected"])
+        self.assertEqual(sm.get("pending_distance_reset_raw"), 0.2)
         self.assertAlmostEqual(sm["distance_km"], 1.0)
 
         data[4] = 1.2
         cycle_server.update_metrics(data, now=3)
+        self.assertTrue(sm["ca_reset_detected"])
         self.assertAlmostEqual(sm["distance_km"], 2.0)
+
+    def test_ignores_isolated_distance_spikes(self):
+        sm = cycle_server.session_metrics
+        base = [0] * 15
+        base[1] = 50
+        base[2] = 10
+        base[3] = 25
+        base[5] = 25
+        base[13] = 0
+        base[14] = "2B"
+
+        for now, distance in enumerate([33.9, 34.0, 3946.0, 34.1, 34.2]):
+            data = base.copy()
+            data[4] = distance
+            cycle_server.update_metrics(data, now=now)
+
+        self.assertAlmostEqual(sm["distance_km"], 0.3)
+        self.assertEqual(sm["distance_glitch_count"], 1)
+        self.assertEqual(sm["Wh_per_km_last"], [])
+
+    def test_ignores_one_sample_drop_without_reset(self):
+        sm = cycle_server.session_metrics
+        base = [0] * 15
+        base[1] = 50
+        base[2] = 0
+        base[3] = 20
+        base[5] = 25
+        base[13] = 0
+        base[14] = "2B"
+
+        for now, distance in enumerate([10.0, 11.0, 0.1, 11.2]):
+            data = base.copy()
+            data[4] = distance
+            cycle_server.update_metrics(data, now=now)
+
+        self.assertFalse(sm["ca_reset_detected"])
+        self.assertAlmostEqual(sm["distance_km"], 1.2)
+        self.assertIsNone(sm.get("pending_distance_reset_raw"))
 
     def test_ca_reset_prompt_high_voltage(self):
         sm = cycle_server.session_metrics
