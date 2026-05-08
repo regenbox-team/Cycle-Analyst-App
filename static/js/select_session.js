@@ -1,6 +1,14 @@
+function currentMode() {
+  const uploadButton = document.getElementById("upload-session-button");
+  if (uploadButton?.dataset.mode) return uploadButton.dataset.mode;
+  return new URLSearchParams(window.location.search).get("mode") || "";
+}
+
 async function fetchSessions() {
   try {
-    const res = await fetch('/sessions');
+    const mode = currentMode();
+    const url = mode ? `/sessions?mode=${encodeURIComponent(mode)}` : "/sessions";
+    const res = await fetch(url);
     const sessions = await res.json();
     const select = document.getElementById("session-select");
     select.innerHTML = "";
@@ -27,11 +35,12 @@ async function deleteSelectedSession() {
   if (!confirm(`Delete ${selected.length} session(s)?\n\n${selected.join("\n")}`)) return;
 
   try {
+    const mode = currentMode();
     const results = await Promise.all(selected.map(session =>
       fetch("/delete_session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session })
+        body: JSON.stringify({ session, mode })
       }).then(res => res.json())
     ));
     alert(results.map(r => r.status || r.error).join("\n"));

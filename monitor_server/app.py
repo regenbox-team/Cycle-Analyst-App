@@ -567,6 +567,17 @@ def _safe_float(value: Any) -> float | None:
     return number
 
 
+def _parse_upload_ts(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(ts, fmt)
+        except Exception:
+            continue
+    return None
+
+
 def _terrain_enabled() -> bool:
     value = os.getenv("MONITOR_TERRAIN_ELEVATION_ENABLED", "1").strip().lower()
     return value not in {"0", "false", "no", "off"}
@@ -852,8 +863,11 @@ def _telemetry_samples_for_session(
 ) -> list[dict[str, Any]]:
     rows = conn.execute(
         f"""
-        SELECT timestamp, raw, solar_enabled, gps_lat, gps_lon, gps_alt,
-               terrain_alt_m, terrain_alt_source, terrain_alt_updated_at
+        SELECT timestamp, raw, user, user_id, user_initials, user_snapshot_json,
+               solar_enabled, gps_lat, gps_lon, gps_alt,
+               terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
+               gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+               solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c
         FROM {TELEMETRY_TABLE}
         WHERE device_id = ? AND session_id = ? AND mode = ?
         ORDER BY id
@@ -864,6 +878,10 @@ def _telemetry_samples_for_session(
         {
             "timestamp": row["timestamp"],
             "raw": row["raw"],
+            "user": row["user"],
+            "user_id": row["user_id"],
+            "user_initials": row["user_initials"],
+            "user_snapshot_json": row["user_snapshot_json"],
             "solar_enabled": row["solar_enabled"],
             "gps_lat": row["gps_lat"],
             "gps_lon": row["gps_lon"],
@@ -871,9 +889,178 @@ def _telemetry_samples_for_session(
             "terrain_alt_m": row["terrain_alt_m"],
             "terrain_alt_source": row["terrain_alt_source"],
             "terrain_alt_updated_at": row["terrain_alt_updated_at"],
+            "gps_speed_kph": row["gps_speed_kph"],
+            "gps_track_deg": row["gps_track_deg"],
+            "gps_fix": row["gps_fix"],
+            "gps_sats": row["gps_sats"],
+            "gps_hdop": row["gps_hdop"],
+            "solar_current_a": row["solar_current_a"],
+            "solar_bus_v": row["solar_bus_v"],
+            "solar_shunt_v": row["solar_shunt_v"],
+            "solar_power_w": row["solar_power_w"],
+            "solar_temperature_c": row["solar_temperature_c"],
         }
         for row in rows
     ]
+
+
+def _sanitize_upload_samples(data: dict[str, Any]) -> list[dict[str, Any]]:
+    samples = data.get("telemetry_samples") or data.get("logs") or []
+    return [dict(row) for row in samples if isinstance(row, dict)]
+
+
+def _payload_solar_enabled(data: dict[str, Any]) -> int:
+    payload_metrics = data.get("metrics") if isinstance(data.get("metrics"), dict) else {}
+    return 1 if data.get("solar_enabled", payload_metrics.get("solar_enabled", True)) else 0
+
+
+def _insert_telemetry_samples(
+    conn: sqlite3.Connection,
+    device_id: str,
+    session_id: str,
+    mode: str,
+    samples: list[dict[str, Any]],
+    solar_enabled: int,
+) -> None:
+    if not samples:
+        return
+    conn.executemany(
+        f"""
+        INSERT INTO {TELEMETRY_TABLE} (
+            device_id, session_id, mode, timestamp, raw, user,
+            user_id, user_initials, user_snapshot_json,
+            gps_lat, gps_lon, gps_alt, terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
+            gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
+            solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                device_id,
+                session_id,
+                mode,
+                row.get("timestamp"),
+                row.get("raw"),
+                row.get("user"),
+                row.get("user_id"),
+                row.get("user_initials") or row.get("user"),
+                row.get("user_snapshot_json"),
+                row.get("gps_lat"),
+                row.get("gps_lon"),
+                row.get("gps_alt"),
+                row.get("terrain_alt_m"),
+                row.get("terrain_alt_source"),
+                row.get("terrain_alt_updated_at"),
+                row.get("gps_speed_kph"),
+                row.get("gps_track_deg"),
+                row.get("gps_fix"),
+                row.get("gps_sats"),
+                row.get("gps_hdop"),
+                row.get("solar_current_a"),
+                row.get("solar_bus_v"),
+                row.get("solar_shunt_v"),
+                row.get("solar_power_w"),
+                row.get("solar_temperature_c"),
+                1 if row.get("solar_enabled", solar_enabled) else 0,
+            )
+            for row in samples
+        ],
+    )
+
+
+def _insert_uploaded_session_summary(
+    conn: sqlite3.Connection,
+    data: dict[str, Any],
+    samples: list[dict[str, Any]],
+) -> dict[str, Any]:
+    device_id = data.get("device_id")
+    session_id = data.get("session_id")
+    mode = data.get("mode", "default")
+    payload_metrics = data.get("metrics") if isinstance(data.get("metrics"), dict) else {}
+    solar_enabled = _payload_solar_enabled(data)
+    rows_count = len(samples)
+    start_ts = samples[0].get("timestamp") if samples else None
+    end_ts = samples[-1].get("timestamp") if samples else None
+    distance_km = _compute_session_distance_km(samples)
+    if distance_km is None:
+        distance_km = payload_metrics.get("distance_km")
+    if distance_km is None:
+        distance_km = _parse_distance_km(samples[-1].get("raw") if samples else None)
+    duration_sec = None
+    avg_speed_kph = None
+    start_dt = _parse_upload_ts(start_ts)
+    end_dt = _parse_upload_ts(end_ts)
+    if start_dt and end_dt:
+        duration_sec = max(0.0, (end_dt - start_dt).total_seconds())
+    uphill_m = _compute_session_uphill_m(samples) or 0.0
+    raw_gps_uphill_m = _compute_raw_gps_uphill_m(samples) or 0.0
+    if duration_sec and distance_km is not None and duration_sec > 0:
+        avg_speed_kph = float(distance_km) / (duration_sec / 3600)
+    user_ids = sorted({str(row.get("user_id")) for row in samples if row.get("user_id")})
+    user_ids_json = json.dumps(user_ids) if user_ids else None
+    metrics_json = None
+    if data.get("metrics") is not None:
+        try:
+            metrics_json = json.dumps(data.get("metrics"))
+        except Exception:
+            metrics_json = None
+
+    conn.execute(
+        """
+        INSERT INTO sessions (
+            device_id, session_id, mode, start_ts, end_ts,
+            rows_count, distance_km, duration_sec, avg_speed_kph, uphill_m, raw_gps_uphill_m,
+            solar_enabled, user_ids_json, metrics_json, uploaded_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            device_id,
+            session_id,
+            mode,
+            start_ts,
+            end_ts,
+            rows_count,
+            distance_km,
+            duration_sec,
+            avg_speed_kph,
+            uphill_m,
+            raw_gps_uphill_m,
+            solar_enabled,
+            user_ids_json,
+            metrics_json,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+    return {"rows_count": rows_count, "distance_km": distance_km}
+
+
+def _upsert_upload_device(conn: sqlite3.Connection, data: dict[str, Any], solar_enabled: int, remote_addr: str | None) -> None:
+    conn.execute(
+        """
+        INSERT INTO devices (device_id, last_seen, last_ip, last_session, mode, test_mode, solar_enabled, current_user_id, current_user_initials)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(device_id) DO UPDATE SET
+            last_seen = excluded.last_seen,
+            last_ip = excluded.last_ip,
+            last_session = excluded.last_session,
+            mode = excluded.mode,
+            test_mode = excluded.test_mode,
+            solar_enabled = excluded.solar_enabled,
+            current_user_id = excluded.current_user_id,
+            current_user_initials = excluded.current_user_initials
+        """,
+        (
+            data.get("device_id"),
+            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            remote_addr,
+            data.get("session_id"),
+            data.get("mode", "default"),
+            int(data.get("test_mode") or 0),
+            solar_enabled,
+            data.get("user_id"),
+            data.get("user_initials"),
+        ),
+    )
 
 
 def _backfill_session_distances(conn: sqlite3.Connection) -> None:
@@ -1692,7 +1879,6 @@ def create_app() -> Flask:
         with _get_db() as conn:
             if _is_deleted_session(conn, device_id, session_id, mode):
                 return jsonify({"status": "exists", "deleted": True})
-
             existing = conn.execute(
                 "SELECT 1 FROM sessions WHERE device_id = ? AND session_id = ? AND mode = ?",
                 (device_id, session_id, mode),
@@ -1700,143 +1886,80 @@ def create_app() -> Flask:
             if existing:
                 return jsonify({"status": "exists"})
 
-            samples = data.get("telemetry_samples") or data.get("logs") or []
-            samples = [dict(row) for row in samples if isinstance(row, dict)]
+            samples = _sanitize_upload_samples(data)
             _enrich_samples_with_terrain_altitude(conn, samples, allow_fallback=False)
-            payload_metrics = data.get("metrics") if isinstance(data.get("metrics"), dict) else {}
-            solar_enabled = 1 if data.get("solar_enabled", payload_metrics.get("solar_enabled", True)) else 0
-            rows_count = len(samples)
-            start_ts = samples[0].get("timestamp") if samples else None
-            end_ts = samples[-1].get("timestamp") if samples else None
-            distance_km = _compute_session_distance_km(samples)
-            if distance_km is None and isinstance(data.get("metrics"), dict):
-                distance_km = payload_metrics.get("distance_km")
-            if distance_km is None:
-                distance_km = _parse_distance_km(samples[-1].get("raw") if samples else None)
-            duration_sec = None
-            avg_speed_kph = None
-            start_dt = _parse_ts(start_ts)
-            end_dt = _parse_ts(end_ts)
-            if start_dt and end_dt:
-                duration_sec = max(0.0, (end_dt - start_dt).total_seconds())
-            uphill_m = _compute_session_uphill_m(samples) or 0.0
-            raw_gps_uphill_m = _compute_raw_gps_uphill_m(samples) or 0.0
-            if duration_sec and distance_km is not None and duration_sec > 0:
-                avg_speed_kph = float(distance_km) / (duration_sec / 3600)
-            user_ids = sorted({
-                str(row.get("user_id"))
-                for row in samples
-                if row.get("user_id")
-            })
-            user_ids_json = json.dumps(user_ids) if user_ids else None
-            metrics_json = None
-            if data.get("metrics") is not None:
-                try:
-                    metrics_json = json.dumps(data.get("metrics"))
-                except Exception:
-                    metrics_json = None
+            solar_enabled = _payload_solar_enabled(data)
+            summary = _insert_uploaded_session_summary(conn, data, samples)
+            _insert_telemetry_samples(conn, device_id, session_id, mode, samples, solar_enabled)
+            _upsert_upload_device(conn, data, solar_enabled, request.remote_addr)
+            conn.commit()
 
-            conn.execute(
-                """
-                INSERT INTO sessions (
-                    device_id, session_id, mode, start_ts, end_ts,
-                    rows_count, distance_km, duration_sec, avg_speed_kph, uphill_m, raw_gps_uphill_m,
-                    solar_enabled, user_ids_json, metrics_json, uploaded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    device_id,
-                    session_id,
-                    mode,
-                    start_ts,
-                    end_ts,
-                    rows_count,
-                    distance_km,
-                    duration_sec,
-                    avg_speed_kph,
-                    uphill_m,
-                    raw_gps_uphill_m,
-                    solar_enabled,
-                    user_ids_json,
-                    metrics_json,
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                ),
-            )
+        return jsonify({"status": "ok", **summary})
 
-            if samples:
-                conn.executemany(
-                    f"""
-                    INSERT INTO {TELEMETRY_TABLE} (
-                        device_id, session_id, mode, timestamp, raw, user,
-                        user_id, user_initials, user_snapshot_json,
-                        gps_lat, gps_lon, gps_alt, terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
-                        gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
-                        solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    [
-                        (
-                            device_id,
-                            session_id,
-                            mode,
-                            row.get("timestamp"),
-                            row.get("raw"),
-                            row.get("user"),
-                            row.get("user_id"),
-                            row.get("user_initials") or row.get("user"),
-                            row.get("user_snapshot_json"),
-                            row.get("gps_lat"),
-                            row.get("gps_lon"),
-                            row.get("gps_alt"),
-                            row.get("terrain_alt_m"),
-                            row.get("terrain_alt_source"),
-                            row.get("terrain_alt_updated_at"),
-                            row.get("gps_speed_kph"),
-                            row.get("gps_track_deg"),
-                            row.get("gps_fix"),
-                            row.get("gps_sats"),
-                            row.get("gps_hdop"),
-                            row.get("solar_current_a"),
-                            row.get("solar_bus_v"),
-                            row.get("solar_shunt_v"),
-                            row.get("solar_power_w"),
-                            row.get("solar_temperature_c"),
-                            1 if row.get("solar_enabled", solar_enabled) else 0,
-                        )
-                        for row in samples
-                    ],
+    @app.route("/api/upload_session_chunk", methods=["POST"])
+    @_require_auth
+    def upload_session_chunk():
+        data = request.get_json(force=True) or {}
+        device_id = data.get("device_id")
+        session_id = data.get("session_id")
+        mode = data.get("mode", "default")
+        if not device_id or not session_id:
+            return jsonify({"error": "missing device_id or session_id"}), 400
+        try:
+            chunk_index = int(data.get("chunk_index", 0))
+            total_chunks = int(data.get("total_chunks", 1))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid chunk index"}), 400
+        if chunk_index < 0 or total_chunks < 1 or chunk_index >= total_chunks:
+            return jsonify({"error": "invalid chunk range"}), 400
+
+        samples = _sanitize_upload_samples(data)
+        solar_enabled = _payload_solar_enabled(data)
+        final = bool(data.get("final")) or chunk_index == total_chunks - 1
+
+        with _get_db() as conn:
+            if _is_deleted_session(conn, device_id, session_id, mode):
+                return jsonify({"status": "exists", "deleted": True})
+            existing = conn.execute(
+                "SELECT 1 FROM sessions WHERE device_id = ? AND session_id = ? AND mode = ?",
+                (device_id, session_id, mode),
+            ).fetchone()
+            if existing:
+                return jsonify({"status": "exists"})
+
+            if chunk_index == 0 and data.get("replace", True):
+                conn.execute(
+                    f"DELETE FROM {TELEMETRY_TABLE} WHERE device_id = ? AND session_id = ? AND mode = ?",
+                    (device_id, session_id, mode),
                 )
-            conn.commit()
 
-            conn.execute(
-                """
-                INSERT INTO devices (device_id, last_seen, last_ip, last_session, mode, test_mode, solar_enabled, current_user_id, current_user_initials)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(device_id) DO UPDATE SET
-                    last_seen = excluded.last_seen,
-                    last_ip = excluded.last_ip,
-                    last_session = excluded.last_session,
-                    mode = excluded.mode,
-                    test_mode = excluded.test_mode,
-                    solar_enabled = excluded.solar_enabled,
-                    current_user_id = excluded.current_user_id,
-                    current_user_initials = excluded.current_user_initials
+            _enrich_samples_with_terrain_altitude(conn, samples, allow_fallback=False)
+            _insert_telemetry_samples(conn, device_id, session_id, mode, samples, solar_enabled)
+            rows_received = conn.execute(
+                f"""
+                SELECT COUNT(*) FROM {TELEMETRY_TABLE}
+                WHERE device_id = ? AND session_id = ? AND mode = ?
                 """,
-                (
-                    device_id,
-                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                    request.remote_addr,
-                    session_id,
-                    mode,
-                    int(data.get("test_mode") or 0),
-                    solar_enabled,
-                    data.get("user_id"),
-                    data.get("user_initials"),
-                ),
-            )
+                (device_id, session_id, mode),
+            ).fetchone()[0]
+
+            summary = {}
+            if final:
+                all_samples = _telemetry_samples_for_session(conn, device_id, session_id, mode)
+                summary = _insert_uploaded_session_summary(conn, data, all_samples)
+                _upsert_upload_device(conn, data, solar_enabled, request.remote_addr)
             conn.commit()
 
-        return jsonify({"status": "ok"})
+        return jsonify(
+            {
+                "status": "ok",
+                "chunk_index": chunk_index,
+                "total_chunks": total_chunks,
+                "rows_received": rows_received,
+                "complete": final,
+                **summary,
+            }
+        )
 
     @app.route("/api/backfill_terrain_altitudes", methods=["POST"])
     @_require_auth

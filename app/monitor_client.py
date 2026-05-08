@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import time
 import urllib.request
+import urllib.error
 from typing import Any
 
 from .config import BASE_DIR, DB_FILE, SESSION_METRICS_DIR, get_db_file
@@ -14,6 +15,9 @@ from .gps import get_status
 from .modes import is_test_mode
 from . import state
 from .user_profiles import load_profiles, profile_snapshot
+
+
+DEFAULT_UPLOAD_CHUNK_SIZE = 1000
 
 
 def _device_id() -> str:
@@ -42,6 +46,13 @@ def _request_json(method: str, url: str, payload: dict[str, Any] | None = None, 
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8")
         return json.loads(body) if body else {}
+
+
+def _upload_chunk_size() -> int:
+    try:
+        return max(1, int(os.getenv("MONITOR_UPLOAD_CHUNK_SIZE", str(DEFAULT_UPLOAD_CHUNK_SIZE))))
+    except (TypeError, ValueError):
+        return DEFAULT_UPLOAD_CHUNK_SIZE
 
 
 def _list_db_files() -> list[str]:
@@ -153,12 +164,125 @@ def _known_sessions(url: str, device_id: str, mode: str) -> set[str] | None:
         return None
 
 
-def _upload_session(url: str, payload: dict[str, Any]) -> bool:
+def _upload_session_whole(url: str, payload: dict[str, Any], timeout: int = 60) -> dict[str, Any]:
     try:
-        resp = _request_json("POST", f"{url}/api/upload_session", payload)
-        return resp.get("status") in ("ok", "exists")
-    except Exception:
-        return False
+        resp = _request_json("POST", f"{url}/api/upload_session", payload, timeout=timeout)
+        return resp if isinstance(resp, dict) else {"status": "error", "error": "invalid monitor response"}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+def _upload_session_chunked(url: str, payload: dict[str, Any], chunk_size: int | None = None) -> dict[str, Any]:
+    samples = payload.get("telemetry_samples") or []
+    if not isinstance(samples, list):
+        return {"status": "error", "error": "invalid telemetry_samples"}
+    if not samples:
+        return _upload_session_whole(url, payload)
+
+    chunk_size = chunk_size or _upload_chunk_size()
+    total_chunks = max(1, (len(samples) + chunk_size - 1) // chunk_size)
+    upload_id = f"{payload.get('device_id')}:{payload.get('mode')}:{payload.get('session_id')}:{int(time.time())}"
+    last_resp: dict[str, Any] = {}
+    for chunk_index in range(total_chunks):
+        start = chunk_index * chunk_size
+        end = min(len(samples), start + chunk_size)
+        chunk_payload = dict(payload)
+        chunk_payload["telemetry_samples"] = samples[start:end]
+        chunk_payload["upload_id"] = upload_id
+        chunk_payload["chunk_index"] = chunk_index
+        chunk_payload["total_chunks"] = total_chunks
+        chunk_payload["total_rows"] = len(samples)
+        chunk_payload["final"] = chunk_index == total_chunks - 1
+        chunk_payload["replace"] = chunk_index == 0
+        try:
+            resp = _request_json("POST", f"{url}/api/upload_session_chunk", chunk_payload, timeout=60)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return {"status": "unsupported", "error": "monitor does not support chunked uploads"}
+            return {"status": "error", "error": str(exc)}
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
+        if not isinstance(resp, dict):
+            return {"status": "error", "error": "invalid monitor response"}
+        last_resp = resp
+        if resp.get("status") == "exists":
+            return resp
+        if resp.get("status") != "ok":
+            return resp
+    return last_resp or {"status": "ok", "chunks": total_chunks, "rows_count": len(samples)}
+
+
+def _upload_session(url: str, payload: dict[str, Any]) -> bool:
+    return _upload_session_with_status(url, payload).get("status") in ("ok", "exists")
+
+
+def _upload_session_with_status(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    samples = payload.get("telemetry_samples") or []
+    if isinstance(samples, list) and len(samples) > _upload_chunk_size():
+        chunked = _upload_session_chunked(url, payload)
+        if chunked.get("status") != "unsupported":
+            return chunked
+    return _upload_session_whole(url, payload)
+
+
+def _build_session_payload(db_path: str, session_id: str, device_id: str | None = None) -> dict[str, Any] | None:
+    rows = _fetch_session_rows(db_path, session_id)
+    if not rows:
+        return None
+    metrics = _metrics_for_session(session_id) or {}
+    solar_enabled = bool(metrics.get("solar_enabled", rows[0].get("solar_enabled", True)))
+    return {
+        "device_id": device_id or _device_id(),
+        "session_id": session_id,
+        "mode": _mode_from_db_path(db_path),
+        "test_mode": 1 if is_test_mode() else 0,
+        "solar_enabled": 1 if solar_enabled else 0,
+        "telemetry_samples": rows,
+        "metrics": metrics,
+    }
+
+
+def upload_session_now(session_id: str, mode: str | None = None) -> dict[str, Any]:
+    url = _monitor_url()
+    if not url:
+        return {"status": "missing_config", "error": "MONITOR_URL is not configured"}
+    if not session_id:
+        return {"status": "error", "error": "missing session"}
+    if state.session_active and session_id == state.session_id:
+        return {"status": "active_session", "error": "active session is not uploaded until it is ended"}
+
+    db_path = get_db_file(mode)
+    device_id = _device_id()
+    resolved_mode = _mode_from_db_path(db_path)
+    known = _known_sessions(url, device_id, resolved_mode)
+    if known is not None and session_id in known:
+        return {
+            "status": "already_uploaded",
+            "session": session_id,
+            "mode": resolved_mode,
+            "device_id": device_id,
+        }
+
+    payload = _build_session_payload(db_path, session_id, device_id)
+    if payload is None:
+        return {"status": "not_found", "error": "session has no rows", "session": session_id}
+
+    rows_count = len(payload["telemetry_samples"])
+    raw_bytes = sum(len(str(row.get("raw") or "")) for row in payload["telemetry_samples"])
+    resp = _upload_session_with_status(url, payload)
+    status = resp.get("status")
+    if status == "exists":
+        status = "already_uploaded"
+    return {
+        **resp,
+        "status": status,
+        "session": session_id,
+        "mode": resolved_mode,
+        "device_id": device_id,
+        "rows_count": rows_count,
+        "size_kb": round(raw_bytes / 1024, 2),
+        "chunk_size": _upload_chunk_size(),
+    }
 
 
 def _sync_users(url: str, device_id: str) -> None:
@@ -331,20 +455,9 @@ def _sync_once() -> None:
                 continue
             if known is not None and sid in known:
                 continue
-            rows = _fetch_session_rows(db_path, sid)
-            if not rows:
+            payload = _build_session_payload(db_path, sid, device_id)
+            if payload is None:
                 continue
-            metrics = _metrics_for_session(sid) or {}
-            solar_enabled = bool(metrics.get("solar_enabled", rows[0].get("solar_enabled", True)))
-            payload = {
-                "device_id": device_id,
-                "session_id": sid,
-                "mode": mode,
-                "test_mode": 1 if is_test_mode() else 0,
-                "solar_enabled": 1 if solar_enabled else 0,
-                "telemetry_samples": rows,
-                "metrics": metrics,
-            }
             if not _upload_session(url, payload):
                 return
 

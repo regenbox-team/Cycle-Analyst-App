@@ -711,6 +711,42 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   background-color: #530000;
 }
 
+.session-action-row,
+.summary-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+}
+
+.session-upload-status {
+  min-height: 1.2rem;
+  margin-top: 0.45rem;
+  color: var(--text-dark);
+  font-size: var(--font-medium);
+  line-height: 1.25;
+  text-align: center;
+}
+
+.summary-page .session-upload-status {
+  margin: -0.3rem 0 0.75rem;
+  color: var(--text-light);
+  text-align: left;
+}
+
+.session-upload-status.ok {
+  color: #008b38;
+}
+
+.session-upload-status.error {
+  color: #cc3333;
+}
+
+.session-upload-status.working {
+  color: var(--highlight);
+}
+
 /* FORMS + LINKS */
 form {
   margin: 1rem 0;

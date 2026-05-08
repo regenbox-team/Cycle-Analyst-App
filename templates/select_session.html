@@ -19,20 +19,28 @@
             <option value="{{ s }}">{{ s }}</option>
           {% endfor %}
         </select>
+        {% if mode %}
+          <input type="hidden" name="mode" value="{{ mode }}">
+        {% endif %}
         <button type="submit">View Summary</button>
       </form>
     </div>
 
     <div class="card">
       <div class="form-group">
-        <label for="session-select">Delete Session(s):</label>
+        <label for="session-select">Manage Session(s):</label>
         <select id="session-select" multiple></select>
-        <button id="delete-session-button">Delete</button>
+        <div class="session-action-row">
+          <button id="upload-session-button" data-upload-selected-sessions data-mode="{{ mode or '' }}">Upload monitor</button>
+          <button id="delete-session-button">Delete</button>
+        </div>
+        <div id="session-upload-status" class="session-upload-status" aria-live="polite"></div>
       </div>
     </div>
 
     <a class="dashboard-button" href="/dashboard">&larr; Back to Dashboard</a>
   </div>
+  <script src="{{ url_for('static', filename='js/session_upload.js') }}"></script>
   <script src="{{ url_for('static', filename='js/select_session.js') }}"></script>
 
 </body>

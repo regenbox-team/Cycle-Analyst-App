@@ -14,10 +14,19 @@
         <div class="summary-kicker">Session Summary</div>
         <h1>{{ session_id }}</h1>
       </div>
-      <a class="dashboard-button" href="/">New session</a>
+      <div class="summary-actions">
+        <button
+          type="button"
+          data-upload-session="{{ session_id }}"
+          data-mode="{{ mode or '' }}"
+        >Upload monitor</button>
+        <a class="dashboard-button" href="/">New session</a>
+      </div>
     </header>
+    <div id="session-upload-status" class="session-upload-status" aria-live="polite"></div>
 
     {% include "partials/summary_cards.html" %}
   </main>
+  <script src="{{ url_for('static', filename='js/session_upload.js') }}"></script>
 </body>
 </html>

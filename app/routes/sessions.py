@@ -114,10 +114,11 @@ def end_session():
 def delete_session():
     data = request.json
     session_to_delete = data.get("session")
+    mode = data.get("mode") or request.args.get("mode")
     if not session_to_delete:
         return jsonify({"error": "No session specified"}), 400
 
-    with sqlite3.connect(get_db_file()) as conn:
+    with sqlite3.connect(get_db_file(mode)) as conn:
         conn.execute("DELETE FROM logs WHERE session = ?", (session_to_delete,))
         conn.commit()
 
@@ -133,9 +134,10 @@ def delete_session():
 
 
 def select_session():
-    with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
+    mode = request.args.get('mode')
+    with sqlite3.connect(get_db_file(mode)) as conn:
         sessions = conn.execute("SELECT DISTINCT session FROM logs ORDER BY session DESC").fetchall()
-    return render_template("select_session.html", sessions=[s[0] for s in sessions])
+    return render_template("select_session.html", sessions=[s[0] for s in sessions], mode=mode)
 
 
 def edit_session_page():
@@ -164,6 +166,23 @@ def delete_row():
         conn.execute("DELETE FROM logs WHERE id = ?", (row_id,))
         conn.commit()
     return jsonify({"status": "deleted", "id": row_id})
+
+
+def upload_session_now():
+    data = request.get_json(silent=True) or {}
+    session_id = (data.get("session") or data.get("session_id") or request.form.get("session") or "").strip()
+    mode = data.get("mode") or request.args.get("mode")
+    try:
+        from app.monitor_client import upload_session_now as monitor_upload_session_now
+        result = monitor_upload_session_now(session_id, mode=mode)
+    except Exception as exc:
+        result = {"status": "error", "error": str(exc), "session": session_id}
+
+    status = result.get("status")
+    http_status = 200 if status in ("ok", "already_uploaded") else 400
+    if status == "error":
+        http_status = 502
+    return jsonify(result), http_status
 
 
 def summary():
@@ -223,7 +242,14 @@ def summary():
     table = build_summary_table(metrics_by_user, all_users)
     sections = build_summary_sections(metrics_by_user, all_users)
 
-    return render_template("summary.html", session_id=session_id, table=table, sections=sections, users=all_users)
+    return render_template(
+        "summary.html",
+        session_id=session_id,
+        table=table,
+        sections=sections,
+        users=all_users,
+        mode=request.args.get("mode"),
+    )
 
 
 def create_blueprint():
@@ -238,6 +264,7 @@ def create_blueprint():
     bp.add_url_rule("/edit_session", view_func=edit_session_page)
     bp.add_url_rule("/api/session_rows", view_func=session_rows)
     bp.add_url_rule("/api/delete_row", methods=["POST"], view_func=delete_row)
+    bp.add_url_rule("/api/upload_session_now", methods=["POST"], view_func=upload_session_now)
     bp.add_url_rule("/summary", view_func=summary)
     return bp
 
@@ -252,4 +279,5 @@ def register(app):
     app.add_url_rule("/edit_session", view_func=edit_session_page)
     app.add_url_rule("/api/session_rows", view_func=session_rows)
     app.add_url_rule("/api/delete_row", methods=["POST"], view_func=delete_row)
+    app.add_url_rule("/api/upload_session_now", methods=["POST"], view_func=upload_session_now)
     app.add_url_rule("/summary", view_func=summary)
