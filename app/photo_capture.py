@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 import mimetypes
 import os
 import shlex
@@ -7,16 +9,18 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from . import state
-from .config import LIVE_PHOTO_DIR
+from .config import LIVE_PHOTO_DIR, PENDING_PHOTO_DIR
 from .gps import get_status
-from .monitor_client import monitor_upload_photo
+from .monitor_client import build_photo_upload_payload, upload_photo_payload
 
 
 _capture_lock = threading.Lock()
+_pending_upload_lock = threading.Lock()
 
 
 def _photo_config() -> dict:
@@ -49,6 +53,7 @@ def configure_session_photo_capture(enabled: bool, interval_km) -> None:
             "last_uploaded_at": None,
             "latest_local_path": None,
             "latest_public_url": None,
+            "pending_upload_count": pending_photo_count(),
             "last_error": None,
         }
     )
@@ -115,7 +120,7 @@ def _capture_and_upload(trigger_distance_km: float, interval_km: float) -> None:
             mime_type = mimetypes.guess_type(temp_path)[0] or "image/jpeg"
             with open(temp_path, "rb") as f:
                 image_bytes = f.read()
-            response = monitor_upload_photo(
+            payload = build_photo_upload_payload(
                 image_bytes=image_bytes,
                 filename=os.path.basename(temp_path),
                 mime_type=mime_type,
@@ -127,12 +132,18 @@ def _capture_and_upload(trigger_distance_km: float, interval_km: float) -> None:
                 raw_values_snapshot=raw_values_snapshot,
                 solar_snapshot=solar_snapshot,
             )
+            _queue_photo(temp_path, payload)
             cfg["capture_count"] = int(cfg.get("capture_count") or 0) + 1
-            cfg["last_uploaded_at"] = captured_at
-            cfg["latest_public_url"] = response.get("public_latest_image_url") or response.get("image_url")
-            cfg["last_error"] = None
+            result = flush_pending_photo_uploads()
+            if result.get("sent"):
+                cfg["last_uploaded_at"] = result.get("latest_uploaded_at") or captured_at
+                if result.get("latest_public_url"):
+                    cfg["latest_public_url"] = result.get("latest_public_url")
+            cfg["pending_upload_count"] = result.get("remaining", pending_photo_count())
+            cfg["last_error"] = result.get("last_error")
         except Exception as exc:
             cfg["last_error"] = str(exc)
+            cfg["pending_upload_count"] = pending_photo_count()
         finally:
             state.save_session_metrics_to_file()
             if temp_path and os.path.exists(temp_path):
@@ -140,6 +151,54 @@ def _capture_and_upload(trigger_distance_km: float, interval_km: float) -> None:
                     os.remove(temp_path)
                 except Exception:
                     pass
+
+
+def pending_photo_count() -> int:
+    return len(_pending_photo_entries())
+
+
+def flush_pending_photo_uploads(limit: int | None = None) -> dict:
+    with _pending_upload_lock:
+        sent = 0
+        latest_uploaded_at = None
+        latest_public_url = None
+        last_error = None
+        entries = _pending_photo_entries()
+        if limit is not None:
+            entries = entries[: max(0, limit)]
+
+        for entry in entries:
+            try:
+                payload = _pending_payload(entry)
+                response = upload_photo_payload(payload)
+                _remove_pending_entry(entry)
+                sent += 1
+                latest_uploaded_at = payload.get("captured_at") or datetime.now(ZoneInfo("Europe/Paris")).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                latest_public_url = (
+                    response.get("public_latest_image_url") or response.get("image_url") or latest_public_url
+                )
+            except Exception as exc:
+                last_error = str(exc)
+                break
+
+        remaining = pending_photo_count()
+        cfg = _photo_config()
+        cfg["pending_upload_count"] = remaining
+        if sent:
+            cfg["last_uploaded_at"] = latest_uploaded_at
+            if latest_public_url:
+                cfg["latest_public_url"] = latest_public_url
+        cfg["last_error"] = last_error
+        state.save_session_metrics_to_file()
+        return {
+            "sent": sent,
+            "remaining": remaining,
+            "latest_uploaded_at": latest_uploaded_at,
+            "latest_public_url": latest_public_url,
+            "last_error": last_error,
+        }
 
 
 def latest_local_photo_path() -> str | None:
@@ -150,6 +209,82 @@ def latest_local_photo_path() -> str | None:
     if os.path.exists(path) and os.path.getsize(path) > 0:
         return path
     return None
+
+
+def _queue_photo(source_path: str, payload: dict) -> dict:
+    os.makedirs(PENDING_PHOTO_DIR, exist_ok=True)
+    ext = os.path.splitext(str(payload.get("filename") or ""))[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png"):
+        ext = ".jpg"
+    entry_id = _pending_entry_id(payload.get("captured_at"))
+    image_name = f"{entry_id}{ext}"
+    image_path = os.path.join(PENDING_PHOTO_DIR, image_name)
+    meta_path = os.path.join(PENDING_PHOTO_DIR, f"{entry_id}.json")
+    shutil.copyfile(source_path, image_path)
+
+    payload_meta = dict(payload)
+    payload_meta.pop("image_b64", None)
+    metadata = {
+        "queued_at": datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S"),
+        "image_file": image_name,
+        "payload": payload_meta,
+    }
+    tmp_meta_path = f"{meta_path}.tmp"
+    with open(tmp_meta_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, ensure_ascii=False)
+    os.replace(tmp_meta_path, meta_path)
+    return {"meta_path": meta_path, "image_path": image_path}
+
+
+def _pending_entry_id(captured_at) -> str:
+    raw_ts = str(captured_at or datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d %H:%M:%S"))
+    safe_ts = "".join(ch if ch.isalnum() else "-" for ch in raw_ts).strip("-")
+    return f"{safe_ts}-{uuid.uuid4().hex[:8]}"
+
+
+def _pending_photo_entries() -> list[dict]:
+    try:
+        names = sorted(name for name in os.listdir(PENDING_PHOTO_DIR) if name.endswith(".json"))
+    except Exception:
+        return []
+
+    entries = []
+    for name in names:
+        meta_path = os.path.join(PENDING_PHOTO_DIR, name)
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+            image_file = metadata.get("image_file")
+            if not image_file:
+                continue
+            entries.append(
+                {
+                    "meta_path": meta_path,
+                    "image_path": os.path.join(PENDING_PHOTO_DIR, os.path.basename(image_file)),
+                    "metadata": metadata,
+                }
+            )
+        except Exception:
+            continue
+    return entries
+
+
+def _pending_payload(entry: dict) -> dict:
+    image_path = entry["image_path"]
+    metadata = entry["metadata"]
+    payload = dict(metadata.get("payload") or {})
+    with open(image_path, "rb") as f:
+        payload["image_b64"] = base64.b64encode(f.read()).decode("ascii")
+    return payload
+
+
+def _remove_pending_entry(entry: dict) -> None:
+    for path in (entry.get("meta_path"), entry.get("image_path")):
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
 
 
 def _persist_local_preview(source_path: str) -> str:

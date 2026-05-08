@@ -60,6 +60,7 @@ def default_photo_capture_settings() -> dict:
         "last_uploaded_at": None,
         "latest_local_path": None,
         "latest_public_url": None,
+        "pending_upload_count": 0,
         "last_error": None,
     }
 

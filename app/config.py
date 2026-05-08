@@ -5,6 +5,7 @@ import os
 BASE_DIR = os.getenv("APP_VAR_DIR", "var")
 os.makedirs(BASE_DIR, exist_ok=True)
 LIVE_PHOTO_DIR = os.path.join(BASE_DIR, "live_photo")
+PENDING_PHOTO_DIR = os.path.join(BASE_DIR, "pending_photos")
 
 TEST_MODE_FILE = os.path.join(BASE_DIR, "test_mode.txt")
 VEHICLE_MODE_FILE = os.path.join(BASE_DIR, "vehicle_mode.txt")
@@ -25,6 +26,7 @@ GPX_ROUTE_FILE = os.path.join(BASE_DIR, "route.gpx")
 # Ensure directories exist
 os.makedirs(SESSION_METRICS_DIR, exist_ok=True)
 os.makedirs(LIVE_PHOTO_DIR, exist_ok=True)
+os.makedirs(PENDING_PHOTO_DIR, exist_ok=True)
 
 # --- Serial/Bridge Configuration ---
 SERIAL_PORT_DEFAULT = "/dev/ttyUSB0"

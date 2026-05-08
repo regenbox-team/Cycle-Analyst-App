@@ -308,7 +308,7 @@ def fetch_monitor_users() -> list[dict[str, Any]]:
         return []
 
 
-def monitor_upload_photo(
+def build_photo_upload_payload(
     *,
     image_bytes: bytes,
     filename: str,
@@ -321,10 +321,6 @@ def monitor_upload_photo(
     raw_values_snapshot: list[Any] | None = None,
     solar_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    url = _monitor_url()
-    if not url:
-        raise RuntimeError("MONITOR_URL is not configured")
-
     gps = gps_snapshot or get_status()
     gps_ok = (
         bool(gps.get("has_fix"))
@@ -391,10 +387,46 @@ def monitor_upload_photo(
             "generator_power_w": generator_power_w,
         },
     }
-    resp = _request_json("POST", f"{url}/api/upload_photo", payload, timeout=20)
+    return payload
+
+
+def upload_photo_payload(payload: dict[str, Any], timeout: int = 20) -> dict[str, Any]:
+    url = _monitor_url()
+    if not url:
+        raise RuntimeError("MONITOR_URL is not configured")
+
+    resp = _request_json("POST", f"{url}/api/upload_photo", payload, timeout=timeout)
     if resp.get("status") != "ok":
         raise RuntimeError(resp.get("error") or "photo upload failed")
     return resp
+
+
+def monitor_upload_photo(
+    *,
+    image_bytes: bytes,
+    filename: str,
+    mime_type: str,
+    captured_at: str,
+    distance_km: float,
+    interval_km: float,
+    gps_snapshot: dict[str, Any] | None = None,
+    metrics_snapshot: dict[str, Any] | None = None,
+    raw_values_snapshot: list[Any] | None = None,
+    solar_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = build_photo_upload_payload(
+        image_bytes=image_bytes,
+        filename=filename,
+        mime_type=mime_type,
+        captured_at=captured_at,
+        distance_km=distance_km,
+        interval_km=interval_km,
+        gps_snapshot=gps_snapshot,
+        metrics_snapshot=metrics_snapshot,
+        raw_values_snapshot=raw_values_snapshot,
+        solar_snapshot=solar_snapshot,
+    )
+    return upload_photo_payload(payload)
 
 
 def _safe_float(value) -> float | None:
@@ -443,6 +475,12 @@ def _sync_once() -> None:
     device_id = _device_id()
     _send_heartbeat(url, device_id)
     _sync_users(url, device_id)
+    try:
+        from .photo_capture import flush_pending_photo_uploads
+
+        flush_pending_photo_uploads()
+    except Exception:
+        pass
 
     current_session = state.session_id if state.session_active else None
 

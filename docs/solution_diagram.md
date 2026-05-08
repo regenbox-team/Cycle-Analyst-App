@@ -254,6 +254,7 @@ flowchart TB
 | `var/game_scores.db` | game score endpoint | leaderboard page | Mini-game scores |
 | `var/route.gpx` | GPX upload endpoint | map overlay and GPX endpoint | Planned route overlay for dashboard map |
 | `var/live_photo/*.jpg` | photo capture worker | `/photo_capture/latest`, dashboard metrics | Local photo preview |
+| `var/pending_photos/*` | photo capture worker | monitor sync, photo capture worker | Durable queue for photos waiting for network upload |
 | `monitor.db` | monitor server API handlers | monitor pages, public APIs, exports | Aggregated remote telemetry, sessions, devices, users, terrain cache, photos |
 | `media/photos` | monitor photo upload | public photo routes | Uploaded camera images |
 
@@ -271,7 +272,7 @@ flowchart TB
 | Monitor heartbeat | Pi to monitor | Basic Auth JSON POST `/api/heartbeat` every sync pass | Keeps device presence, active session, GPS, user, and mode fresh |
 | Monitor user sync | Pi to monitor and monitor to Pi | Basic Auth JSON GET/POST | Setup page can import remote users; Pi syncs local profiles outward |
 | Session upload | Pi to monitor | Basic Auth JSON POST `/api/upload_session` | Only completed sessions are uploaded; known sessions are skipped |
-| Photo upload | Pi to monitor | Basic Auth JSON POST `/api/upload_photo` | Includes image, GPS, user, metrics, raw CA, and solar snapshot |
+| Photo upload | Pi to monitor | Basic Auth JSON POST `/api/upload_photo` | Includes image, GPS, user, metrics, raw CA, and solar snapshot; failed uploads stay in `var/pending_photos` until a later sync succeeds |
 | Terrain enrichment | Monitor to external APIs | HTTPS POST to IGN; optional OpenTopoData fallback | Cached in `terrain_elevation_cache` |
 | Public monitor views | Public/browser to monitor | HTTP GET | `/public/suntrip`, `/public/suntrip.json`, `/session_map`, media routes |
 | System restart | Browser to Pi | POST `/restart_service`, shell-out to `sudo systemctl restart` | Requires a matching sudoers rule on the Pi |

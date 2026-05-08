@@ -1033,15 +1033,28 @@ function updatePhotoPreview(photoCapture) {
   interval.textContent = `Every: ${num(cfg.interval_km, 0).toFixed(1)} km`;
   count.textContent = `Captures: ${num(cfg.capture_count, 0).toFixed(0)}`;
   captured.textContent = `Captured: ${cfg.last_captured_at || "–"}`;
-  uploaded.textContent = `Uploaded: ${cfg.last_uploaded_at || "–"}`;
+  const pendingUploads = num(cfg.pending_upload_count, 0);
+  uploaded.textContent = `Uploaded: ${cfg.last_uploaded_at || "–"}${
+    pendingUploads > 0 ? ` (${pendingUploads.toFixed(0)} pending)` : ""
+  }`;
 
   const imageUrl = cfg.latest_local_url || cfg.latest_public_url || "";
   const cacheToken = encodeURIComponent(cfg.last_captured_at || cfg.last_uploaded_at || "");
   const imageKey = imageUrl ? `${imageUrl}|${cacheToken}` : null;
 
-  if (cfg.last_error) {
+  if (cfg.last_error && pendingUploads > 0) {
+    status.textContent = `Upload pending: ${pendingUploads.toFixed(0)} photo${
+      pendingUploads === 1 ? "" : "s"
+    } queued.`;
+    status.classList.remove("error");
+  } else if (cfg.last_error) {
     status.textContent = `Capture error: ${cfg.last_error}`;
     status.classList.add("error");
+  } else if (pendingUploads > 0) {
+    status.textContent = `Upload pending: ${pendingUploads.toFixed(0)} photo${
+      pendingUploads === 1 ? "" : "s"
+    } queued.`;
+    status.classList.remove("error");
   } else if (imageUrl) {
     status.textContent = "Last capture available.";
     status.classList.remove("error");

@@ -95,6 +95,7 @@ def _get_metrics_payload():
             "last_uploaded_at": photo_cfg.get("last_uploaded_at"),
             "latest_local_url": latest_local_url,
             "latest_public_url": photo_cfg.get("latest_public_url"),
+            "pending_upload_count": int(photo_cfg.get("pending_upload_count") or 0),
             "last_error": photo_cfg.get("last_error"),
         },
         "solar_sensor": state.solar_sensor if solar_enabled else {"enabled": False},

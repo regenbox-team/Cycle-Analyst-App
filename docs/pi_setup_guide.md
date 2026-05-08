@@ -280,7 +280,7 @@ Le code cree `var/` automatiquement, mais c'est plus clair de le preparer :
 
 ```bash
 cd /home/jeandard/Cycle-Analyst-App
-mkdir -p var var/session_metrics var/live_photo
+mkdir -p var var/session_metrics var/live_photo var/pending_photos
 ```
 
 Les fichiers runtime principaux sont :
@@ -299,6 +299,7 @@ Les fichiers runtime principaux sont :
 - `var/solar_battery_state.json`
 - `var/route.gpx`
 - `var/live_photo/*.jpg`
+- `var/pending_photos/*` : photos en attente d'envoi si le reseau est indisponible.
 
 ## 8. Creer le fichier de variables d'environnement
 
@@ -1151,7 +1152,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-mkdir -p var var/session_metrics var/live_photo
+mkdir -p var var/session_metrics var/live_photo var/pending_photos
 mkdir -p /home/jeandard/Documents
 ```
 
