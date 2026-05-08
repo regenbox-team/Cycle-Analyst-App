@@ -250,8 +250,19 @@
       <div class="map-altitude-strip" aria-live="polite">
         <span>Pi GPS alt: <strong id="pi-gps-altitude">-</strong></span>
         <span>Phone GPS alt: <strong id="phone-gps-altitude">-</strong></span>
+        <button id="gpx-profile-toggle" class="dashboard-button map-profile-toggle" type="button" title="Show GPX elevation profile" hidden>Profile</button>
       </div>
 
+      <div id="gpx-profile-panel" class="gpx-profile-panel" hidden>
+        <div class="gpx-profile-toolbar">
+          <span id="gpx-profile-summary">No GPX elevation profile</span>
+          <button id="gpx-profile-reset" class="dashboard-button" type="button" title="Reset profile zoom">Reset</button>
+        </div>
+        <div class="gpx-profile-canvas-wrap">
+          <canvas id="gpx-elevation-profile"></canvas>
+        </div>
+        <div id="gpx-profile-cursor" class="gpx-profile-cursor">Move over the profile for gradient</div>
+      </div>
 
       <!-- Bottom controls: GPX actions -->
       <div class="map-controls-bottom" style="display:flex; gap:0.4rem; align-items:center; justify-content:flex-end; margin-top:0.4rem;">

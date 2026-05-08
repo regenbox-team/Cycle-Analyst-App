@@ -338,6 +338,7 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 .map-altitude-strip {
   display: flex;
   justify-content: flex-start;
+  align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
   margin-top: 0.25rem;
@@ -350,6 +351,50 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 .map-altitude-strip strong {
   color: var(--text-dark);
   font-weight: bold;
+}
+
+.map-profile-toggle {
+  margin-left: auto;
+}
+
+.gpx-profile-panel {
+  margin-top: 0.35rem;
+  padding: 0.45rem;
+  border: 1px solid rgba(0,0,0,0.25);
+  border-radius: 0.4rem;
+  background: rgba(255,255,255,0.3);
+}
+
+.gpx-profile-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+  color: var(--text-dark);
+  font-size: var(--font-small);
+  text-align: left;
+}
+
+.gpx-profile-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 12rem;
+}
+
+#gpx-elevation-profile {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+}
+
+.gpx-profile-cursor {
+  min-height: 1.2em;
+  margin-top: 0.25rem;
+  color: #444;
+  font-size: var(--font-small);
+  text-align: left;
 }
 
 .map-controls-top label {
@@ -389,7 +434,8 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 }
 .map-box.reduced .map-controls-top,
 .map-box.reduced .map-controls-bottom,
-.map-box.reduced .map-altitude-strip {
+.map-box.reduced .map-altitude-strip,
+.map-box.reduced .gpx-profile-panel {
   display: none !important;
 }
 /* Half height map when reduced */

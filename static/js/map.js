@@ -8,6 +8,8 @@
   let trackSource = null;
   let routeSource = null;
   let routeCoords = null; // cached route coordinates [[lon,lat],...]
+  let routeProfile = { points: [], visible: false, zoomStartKm: 0, zoomEndKm: 0, cursorIndex: null };
+  let routeProfileDragging = false;
   let lastLon = null, lastLat = null;
   const MIN_SPEED_KPH = 3; // do not update heading below this speed
   const HEADING_MODES = { NORTH: 'north', FREE: 'free', TRAJECTORY: 'trajectory' };
@@ -21,6 +23,8 @@
   const BASEMAPS = { AUTO: 'auto', VECTOR_DARK: 'vector_dark', VECTOR_LIGHT: 'vector_light', RASTER_OSM: 'raster_osm', TERRAIN_3D: 'terrain_3d' };
   const OFFLINE_PM_TILES_DEFAULT = false; // set to true if you always ship offline tiles
   const FONT_STACK = 'Inter Regular'; // change to your font name
+  const PROFILE_MIN_WINDOW_KM = 0.2;
+  const PROFILE_ELEVATION_DEADBAND_M = 5.0;
 
   async function glyphsAvailable() {
     try {
@@ -550,6 +554,9 @@
       routeSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: routeCoords.slice() } }] });
       ensureRouteLayer();
     }
+    if (routeProfile.points.length) {
+      updateRouteProfileCursorOnMap();
+    }
   }
 
   async function switchBasemap(choice) {
@@ -721,19 +728,324 @@
   window.addEventListener('DOMContentLoaded', initMap);
 
   // ===== GPX handling and UI (dashboard) =====
-  function parseGpxToCoords(xmlText) {
+  function getChildrenByLocalName(parent, localName) {
+    const direct = Array.from(parent.getElementsByTagName(localName));
+    const namespaced = Array.from(parent.getElementsByTagNameNS('*', localName));
+    return Array.from(new Set([...direct, ...namespaced]));
+  }
+
+  function firstChildText(parent, localName) {
+    const child = getChildrenByLocalName(parent, localName)[0];
+    return child ? child.textContent : null;
+  }
+
+  function parseGpxToRoutePoints(xmlText) {
     try {
       const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-      const trkpts = Array.from(doc.getElementsByTagName('trkpt'));
-      let points = trkpts.map(p => [Number(p.getAttribute('lon')), Number(p.getAttribute('lat'))]).filter(a => isFinite(a[0]) && isFinite(a[1]));
-      if (!points.length) {
-        const rtepts = Array.from(doc.getElementsByTagName('rtept'));
-        points = rtepts.map(p => [Number(p.getAttribute('lon')), Number(p.getAttribute('lat'))]).filter(a => isFinite(a[0]) && isFinite(a[1]));
-      }
+      const parseError = getChildrenByLocalName(doc, 'parsererror')[0];
+      if (parseError) return [];
+
+      let nodes = getChildrenByLocalName(doc, 'trkpt');
+      if (!nodes.length) nodes = getChildrenByLocalName(doc, 'rtept');
+      if (!nodes.length) nodes = getChildrenByLocalName(doc, 'wpt');
+
+      const points = nodes.map((p) => {
+        const lon = Number(p.getAttribute('lon'));
+        const lat = Number(p.getAttribute('lat'));
+        const eleText = firstChildText(p, 'ele');
+        const ele = eleText == null || eleText === '' ? null : Number(eleText);
+        return {
+          lon,
+          lat,
+          ele: isFinite(ele) ? ele : null
+        };
+      }).filter(p => isFinite(p.lon) && isFinite(p.lat));
       return points;
     } catch (e) {
       return [];
     }
+  }
+
+  function haversineKm(a, b) {
+    const toRad = (d) => d * Math.PI / 180;
+    const lat1 = toRad(a.lat), lat2 = toRad(b.lat);
+    const dlat = lat2 - lat1;
+    const dlon = toRad(b.lon - a.lon);
+    const h = Math.sin(dlat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dlon / 2) ** 2;
+    return 6371.0088 * 2 * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  function buildRouteProfile(points) {
+    let distanceKm = 0;
+    const withDistance = points.map((point, index) => {
+      if (index > 0) distanceKm += haversineKm(points[index - 1], point);
+      return { ...point, distanceKm, gradePct: 0 };
+    });
+
+    withDistance.forEach((point, index) => {
+      if (point.ele == null) return;
+      let before = index;
+      let after = index;
+      while (before > 0 && point.distanceKm - withDistance[before].distanceKm < 0.04) before -= 1;
+      while (after < withDistance.length - 1 && withDistance[after].distanceKm - point.distanceKm < 0.04) after += 1;
+      const a = withDistance[before];
+      const b = withDistance[after];
+      if (!a || !b || a.ele == null || b.ele == null || b.distanceKm <= a.distanceKm) return;
+      point.gradePct = ((b.ele - a.ele) / ((b.distanceKm - a.distanceKm) * 1000)) * 100;
+    });
+
+    return withDistance.filter(p => p.ele != null);
+  }
+
+  function resetRouteProfileZoom() {
+    const last = routeProfile.points[routeProfile.points.length - 1];
+    routeProfile.zoomStartKm = 0;
+    routeProfile.zoomEndKm = last ? Math.max(0, last.distanceKm) : 0;
+  }
+
+  function gradeColor(grade) {
+    const g = Math.max(0, Math.min(14, Number(grade) || 0));
+    if (g <= 6) {
+      const t = g / 6;
+      const r = Math.round(47 + (245 - 47) * t);
+      const ge = Math.round(158 + (159 - 158) * t);
+      const b = Math.round(68 + (0 - 68) * t);
+      return `rgb(${r},${ge},${b})`;
+    }
+    const t = (g - 6) / 8;
+    const r = Math.round(245 + (217 - 245) * t);
+    const ge = Math.round(159 + (72 - 159) * t);
+    const b = Math.round(0 + (15 - 0) * t);
+    return `rgb(${r},${ge},${b})`;
+  }
+
+  function nearestProfileIndexForDistance(distanceKm) {
+    const points = routeProfile.points;
+    if (!points.length) return null;
+    let lo = 0, hi = points.length - 1;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (points[mid].distanceKm < distanceKm) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && Math.abs(points[lo - 1].distanceKm - distanceKm) < Math.abs(points[lo].distanceKm - distanceKm)) {
+      return lo - 1;
+    }
+    return lo;
+  }
+
+  function updateRouteProfileSummary() {
+    const summary = document.getElementById('gpx-profile-summary');
+    if (!summary) return;
+    const points = routeProfile.points;
+    if (!points.length) {
+      summary.textContent = 'No elevation data in GPX';
+      return;
+    }
+    const last = points[points.length - 1];
+    const minEle = Math.min(...points.map(p => p.ele));
+    const maxEle = Math.max(...points.map(p => p.ele));
+    let anchor = points[0].ele;
+    let uphill = 0;
+    let downhill = 0;
+    points.slice(1).forEach((point) => {
+      const diff = point.ele - anchor;
+      if (diff >= PROFILE_ELEVATION_DEADBAND_M) {
+        uphill += diff;
+        anchor = point.ele;
+      } else if (diff <= -PROFILE_ELEVATION_DEADBAND_M) {
+        downhill += Math.abs(diff);
+        anchor = point.ele;
+      }
+    });
+    summary.textContent = `${last.distanceKm.toFixed(1)} km · D+ ${Math.round(uphill)} m · D- ${Math.round(downhill)} m · ${Math.round(minEle)}-${Math.round(maxEle)} m`;
+  }
+
+  function setRouteProfileAvailability(points) {
+    const toggle = document.getElementById('gpx-profile-toggle');
+    const panel = document.getElementById('gpx-profile-panel');
+    routeProfile.points = points;
+    routeProfile.cursorIndex = points.length ? 0 : null;
+    resetRouteProfileZoom();
+    updateRouteProfileSummary();
+    updateProfileCursorLabel();
+    updateRouteProfileCursorOnMap();
+
+    if (toggle) {
+      toggle.hidden = !points.length;
+      toggle.classList.toggle('active-chart', routeProfile.visible && points.length);
+    }
+    if (panel) {
+      panel.hidden = !routeProfile.visible || !points.length;
+    }
+    renderRouteProfileChart();
+  }
+
+  function routeProfileScales(width, height, margin) {
+    const points = routeProfile.points;
+    const visible = points.filter(p => p.distanceKm >= routeProfile.zoomStartKm && p.distanceKm <= routeProfile.zoomEndKm);
+    const scoped = visible.length >= 2 ? visible : points;
+    const minEleRaw = Math.min(...scoped.map(p => p.ele));
+    const maxEleRaw = Math.max(...scoped.map(p => p.ele));
+    const pad = Math.max(10, (maxEleRaw - minEleRaw) * 0.12);
+    const minEle = Math.floor((minEleRaw - pad) / 10) * 10;
+    const maxEle = Math.ceil((maxEleRaw + pad) / 10) * 10;
+    const plotWidth = width - margin.left - margin.right;
+    const plotHeight = height - margin.top - margin.bottom;
+    const xForKm = (km) => margin.left + ((km - routeProfile.zoomStartKm) / Math.max(0.001, routeProfile.zoomEndKm - routeProfile.zoomStartKm)) * plotWidth;
+    const yForEle = (ele) => margin.top + ((maxEle - ele) / Math.max(1, maxEle - minEle)) * plotHeight;
+    return { scoped, minEle, maxEle, xForKm, yForEle };
+  }
+
+  function drawProfileFrame(ctx, width, height, margin, scales) {
+    ctx.strokeStyle = '#c8c1ad';
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#5f594b';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+
+    for (let i = 0; i <= 4; i++) {
+      const ele = scales.minEle + (i * (scales.maxEle - scales.minEle)) / 4;
+      const y = scales.yForEle(ele);
+      ctx.beginPath();
+      ctx.moveTo(margin.left, y);
+      ctx.lineTo(width - margin.right, y);
+      ctx.stroke();
+      ctx.fillText(`${Math.round(ele)} m`, margin.left - 6, y);
+    }
+
+    ctx.strokeStyle = '#88806f';
+    ctx.beginPath();
+    ctx.moveTo(margin.left, margin.top);
+    ctx.lineTo(margin.left, height - margin.bottom);
+    ctx.lineTo(width - margin.right, height - margin.bottom);
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i <= 4; i++) {
+      const km = routeProfile.zoomStartKm + (i * (routeProfile.zoomEndKm - routeProfile.zoomStartKm)) / 4;
+      const x = scales.xForKm(km);
+      ctx.strokeStyle = '#88806f';
+      ctx.beginPath();
+      ctx.moveTo(x, height - margin.bottom);
+      ctx.lineTo(x, height - margin.bottom + 4);
+      ctx.stroke();
+      ctx.fillText(`${km.toFixed(km < 10 ? 1 : 0)} km`, x, height - margin.bottom + 6);
+    }
+  }
+
+  function renderRouteProfileChart() {
+    const canvas = document.getElementById('gpx-elevation-profile');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(320, canvas.clientWidth || 320);
+    const height = Math.max(150, canvas.clientHeight || 150);
+    if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const points = routeProfile.points;
+    if (!points.length) {
+      ctx.fillStyle = '#666';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('No GPX elevation data', width / 2, height / 2);
+      return;
+    }
+
+    const margin = { top: 12, right: 14, bottom: 26, left: 48 };
+    const scales = routeProfileScales(width, height, margin);
+    drawProfileFrame(ctx, width, height, margin, scales);
+
+    const visible = points.filter(p => p.distanceKm >= routeProfile.zoomStartKm && p.distanceKm <= routeProfile.zoomEndKm);
+    const series = visible.length >= 2 ? visible : points;
+    ctx.lineWidth = 2.25;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 1; i < series.length; i++) {
+      const a = series[i - 1];
+      const b = series[i];
+      ctx.strokeStyle = gradeColor((a.gradePct + b.gradePct) / 2);
+      ctx.beginPath();
+      ctx.moveTo(scales.xForKm(a.distanceKm), scales.yForEle(a.ele));
+      ctx.lineTo(scales.xForKm(b.distanceKm), scales.yForEle(b.ele));
+      ctx.stroke();
+    }
+
+    if (routeProfile.cursorIndex != null && points[routeProfile.cursorIndex]) {
+      const cursor = points[routeProfile.cursorIndex];
+      if (cursor.distanceKm >= routeProfile.zoomStartKm && cursor.distanceKm <= routeProfile.zoomEndKm) {
+        const x = scales.xForKm(cursor.distanceKm);
+        const y = scales.yForEle(cursor.ele);
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, margin.top);
+        ctx.lineTo(x, height - margin.bottom);
+        ctx.stroke();
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  function updateProfileCursorLabel() {
+    const label = document.getElementById('gpx-profile-cursor');
+    if (!label) return;
+    const point = routeProfile.cursorIndex == null ? null : routeProfile.points[routeProfile.cursorIndex];
+    if (!point) {
+      label.textContent = 'Move over the profile for gradient';
+      return;
+    }
+    const grade = Number(point.gradePct) || 0;
+    label.textContent = `${point.distanceKm.toFixed(2)} km · ${Math.round(point.ele)} m · gradient ${grade.toFixed(1)}%`;
+  }
+
+  function setProfileCursorFromCanvasX(clientX) {
+    const canvas = document.getElementById('gpx-elevation-profile');
+    if (!canvas || !routeProfile.points.length) return;
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(320, canvas.clientWidth || 320);
+    const margin = { top: 12, right: 14, bottom: 26, left: 48 };
+    const plotWidth = Math.max(1, width - margin.left - margin.right);
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left - margin.left) / plotWidth));
+    const distanceKm = routeProfile.zoomStartKm + pct * (routeProfile.zoomEndKm - routeProfile.zoomStartKm);
+    routeProfile.cursorIndex = nearestProfileIndexForDistance(distanceKm);
+    updateProfileCursorLabel();
+    updateRouteProfileCursorOnMap();
+    renderRouteProfileChart();
+  }
+
+  function zoomRouteProfile(deltaY, clientX) {
+    const points = routeProfile.points;
+    if (!points.length) return;
+    const totalEnd = points[points.length - 1].distanceKm;
+    if (totalEnd <= PROFILE_MIN_WINDOW_KM) return;
+    const canvas = document.getElementById('gpx-elevation-profile');
+    const rect = canvas ? canvas.getBoundingClientRect() : null;
+    const focusPct = rect ? Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width))) : 0.5;
+    const focusKm = routeProfile.zoomStartKm + focusPct * (routeProfile.zoomEndKm - routeProfile.zoomStartKm);
+    const factor = deltaY < 0 ? 0.78 : 1.28;
+    let windowKm = (routeProfile.zoomEndKm - routeProfile.zoomStartKm) * factor;
+    windowKm = Math.max(PROFILE_MIN_WINDOW_KM, Math.min(totalEnd, windowKm));
+    let start = focusKm - windowKm * focusPct;
+    let end = start + windowKm;
+    if (start < 0) { end -= start; start = 0; }
+    if (end > totalEnd) { start -= end - totalEnd; end = totalEnd; }
+    routeProfile.zoomStartKm = Math.max(0, start);
+    routeProfile.zoomEndKm = Math.min(totalEnd, end);
+    renderRouteProfileChart();
   }
 
   function ensureRouteSource() {
@@ -744,6 +1056,16 @@
       src = map.getSource('route');
     }
     routeSource = src;
+    return src;
+  }
+
+  function ensureRouteCursorSource() {
+    if (!map) return null;
+    let src = map.getSource('route-cursor');
+    if (!src) {
+      map.addSource('route-cursor', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      src = map.getSource('route-cursor');
+    }
     return src;
   }
 
@@ -758,23 +1080,66 @@
     }
   }
 
+  function ensureRouteCursorLayer() {
+    if (!map) return;
+    ensureRouteCursorSource();
+    if (!map.getLayer('route-cursor-dot')) {
+      map.addLayer({
+        id: 'route-cursor-dot',
+        type: 'circle',
+        source: 'route-cursor',
+        paint: {
+          'circle-color': '#111',
+          'circle-radius': 6,
+          'circle-stroke-color': '#fff',
+          'circle-stroke-width': 2
+        }
+      });
+    }
+  }
+
+  function updateRouteProfileCursorOnMap() {
+    if (!map) return;
+    const point = routeProfile.cursorIndex == null ? null : routeProfile.points[routeProfile.cursorIndex];
+    const src = ensureRouteCursorSource();
+    if (!src) return;
+    if (!point || !routeProfile.visible || !routeProfile.points.length) {
+      src.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+    ensureRouteCursorLayer();
+    src.setData({
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [point.lon, point.lat] },
+        properties: {}
+      }]
+    });
+  }
+
   async function loadRouteFromServer() {
     try {
       const st = await fetch('/gpx/status', { cache: 'no-store' });
       const info = await st.json();
       if (!info || !info.exists) {
-        // no route
+        routeCoords = null;
+        setRouteProfileAvailability([]);
         return;
       }
       const res = await fetch('/gpx/track', { cache: 'no-store' });
       if (!res.ok) return;
       const text = await res.text();
-      const pts = parseGpxToCoords(text);
-      if (!pts.length) return;
-      routeCoords = pts;
+      const routePoints = parseGpxToRoutePoints(text);
+      if (!routePoints.length) {
+        setRouteProfileAvailability([]);
+        return;
+      }
+      routeCoords = routePoints.map(p => [p.lon, p.lat]);
       ensureRouteSource();
       routeSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: routeCoords.slice() } }] });
       ensureRouteLayer();
+      setRouteProfileAvailability(buildRouteProfile(routePoints));
     } catch (e) {
       // ignore
     }
@@ -798,7 +1163,10 @@
       showGpxMessage(ok ? 'Track erased' : 'Erase failed', ok);
       if (ok) {
         routeCoords = null;
+        setRouteProfileAvailability([]);
         if (map) {
+          if (map.getLayer('route-cursor-dot')) map.removeLayer('route-cursor-dot');
+          if (map.getSource('route-cursor')) map.removeSource('route-cursor');
           if (map.getLayer('route-line')) map.removeLayer('route-line');
           if (map.getSource('route')) map.removeSource('route');
         }
@@ -835,6 +1203,51 @@
       });
     }
     if (erBtn) erBtn.addEventListener('click', eraseRoute);
+    const profileToggle = document.getElementById('gpx-profile-toggle');
+    const profilePanel = document.getElementById('gpx-profile-panel');
+    const profileReset = document.getElementById('gpx-profile-reset');
+    const profileCanvas = document.getElementById('gpx-elevation-profile');
+    if (profileToggle && profilePanel) {
+      profileToggle.addEventListener('click', () => {
+        routeProfile.visible = !routeProfile.visible;
+        profilePanel.hidden = !routeProfile.visible || !routeProfile.points.length;
+        profileToggle.classList.toggle('active-chart', routeProfile.visible && routeProfile.points.length);
+        updateRouteProfileCursorOnMap();
+        renderRouteProfileChart();
+      });
+    }
+    if (profileReset) {
+      profileReset.addEventListener('click', () => {
+        resetRouteProfileZoom();
+        renderRouteProfileChart();
+      });
+    }
+    if (profileCanvas) {
+      profileCanvas.addEventListener('pointerdown', (event) => {
+        routeProfileDragging = true;
+        profileCanvas.setPointerCapture(event.pointerId);
+        setProfileCursorFromCanvasX(event.clientX);
+      });
+      profileCanvas.addEventListener('pointermove', (event) => {
+        if (routeProfileDragging || event.buttons === 0) {
+          setProfileCursorFromCanvasX(event.clientX);
+        }
+      });
+      profileCanvas.addEventListener('pointerup', (event) => {
+        routeProfileDragging = false;
+        try { profileCanvas.releasePointerCapture(event.pointerId); } catch {}
+      });
+      profileCanvas.addEventListener('pointerleave', () => {
+        routeProfileDragging = false;
+      });
+      profileCanvas.addEventListener('wheel', (event) => {
+        if (!routeProfile.points.length) return;
+        event.preventDefault();
+        zoomRouteProfile(event.deltaY, event.clientX);
+      }, { passive: false });
+    }
+    window.addEventListener('resize', renderRouteProfileChart);
+
         // Map reduce / extend controls
     const mapBox = document.querySelector('.map-box');
     const reduceBtn = document.getElementById('map-reduce-btn');
