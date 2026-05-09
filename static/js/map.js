@@ -12,6 +12,7 @@
   let routeDistancePoints = [];
   let routeProgress = null;
   let routeProfileDragging = false;
+  let routeProfilePanStart = null;
   let routeProfileTouchDistance = null;
   let lastLon = null, lastLat = null;
   const MIN_SPEED_KPH = 3; // do not update heading below this speed
@@ -1157,6 +1158,26 @@
     renderRouteProfileChart();
   }
 
+  function routeProfileIsZoomed() {
+    const points = routeProfile.points;
+    const totalEnd = points.length ? points[points.length - 1].distanceKm : 0;
+    return totalEnd > 0 && (routeProfile.zoomEndKm - routeProfile.zoomStartKm) < totalEnd - 0.01;
+  }
+
+  function panRouteProfileByPixels(deltaPx, canvasWidth) {
+    const points = routeProfile.points;
+    if (!points.length || !routeProfileIsZoomed()) return;
+    const totalEnd = points[points.length - 1].distanceKm;
+    const margin = { top: 12, right: 14, bottom: 26, left: 48 };
+    const plotWidth = Math.max(1, (canvasWidth || 320) - margin.left - margin.right);
+    const windowKm = routeProfile.zoomEndKm - routeProfile.zoomStartKm;
+    let start = routeProfile.zoomStartKm - (deltaPx * windowKm / plotWidth);
+    start = Math.max(0, Math.min(totalEnd - windowKm, start));
+    routeProfile.zoomStartKm = start;
+    routeProfile.zoomEndKm = start + windowKm;
+    renderRouteProfileChart();
+  }
+
   function zoomRouteProfile(deltaY, clientX) {
     const canvas = document.getElementById('gpx-elevation-profile');
     const rect = canvas ? canvas.getBoundingClientRect() : null;
@@ -1410,29 +1431,53 @@
     if (profileCanvas) {
       profileCanvas.addEventListener('pointerdown', (event) => {
         routeProfileDragging = true;
+        routeProfilePanStart = {
+          x: event.clientX,
+          lastX: event.clientX,
+          moved: false
+        };
         profileCanvas.setPointerCapture(event.pointerId);
         setProfileCursorFromCanvasX(event.clientX);
       });
       profileCanvas.addEventListener('pointermove', (event) => {
-        if (routeProfileDragging || event.buttons === 0) {
+        if (routeProfileDragging && routeProfilePanStart && routeProfileIsZoomed()) {
+          const deltaX = event.clientX - routeProfilePanStart.lastX;
+          const totalDeltaX = event.clientX - routeProfilePanStart.x;
+          if (Math.abs(totalDeltaX) > 4) routeProfilePanStart.moved = true;
+          if (routeProfilePanStart.moved) {
+            panRouteProfileByPixels(deltaX, profileCanvas.clientWidth || 320);
+            routeProfilePanStart.lastX = event.clientX;
+          }
+        } else if (routeProfileDragging || event.buttons === 0) {
           setProfileCursorFromCanvasX(event.clientX);
         }
       });
       profileCanvas.addEventListener('pointerup', (event) => {
+        if (routeProfilePanStart && !routeProfilePanStart.moved) {
+          setProfileCursorFromCanvasX(event.clientX);
+        }
         routeProfileDragging = false;
+        routeProfilePanStart = null;
         try { profileCanvas.releasePointerCapture(event.pointerId); } catch {}
       });
       profileCanvas.addEventListener('pointerleave', () => {
         routeProfileDragging = false;
+        routeProfilePanStart = null;
       });
       profileCanvas.addEventListener('wheel', (event) => {
         if (!routeProfile.points.length) return;
         event.preventDefault();
-        zoomRouteProfile(event.deltaY, event.clientX);
+        if (Math.abs(event.deltaX) > Math.abs(event.deltaY) && routeProfileIsZoomed()) {
+          panRouteProfileByPixels(-event.deltaX, profileCanvas.clientWidth || 320);
+        } else {
+          zoomRouteProfile(event.deltaY, event.clientX);
+        }
       }, { passive: false });
       profileCanvas.addEventListener('touchstart', (event) => {
         if (event.touches.length === 1) {
-          setProfileCursorFromCanvasX(event.touches[0].clientX);
+          const touchX = event.touches[0].clientX;
+          routeProfilePanStart = { x: touchX, lastX: touchX, moved: false };
+          setProfileCursorFromCanvasX(touchX);
         } else if (event.touches.length === 2) {
           routeProfileTouchDistance = Math.abs(event.touches[0].clientX - event.touches[1].clientX);
         }
@@ -1441,7 +1486,18 @@
         if (!routeProfile.points.length) return;
         if (event.touches.length === 1) {
           event.preventDefault();
-          setProfileCursorFromCanvasX(event.touches[0].clientX);
+          if (routeProfileIsZoomed() && routeProfilePanStart) {
+            const touchX = event.touches[0].clientX;
+            const deltaX = touchX - routeProfilePanStart.lastX;
+            const totalDeltaX = touchX - routeProfilePanStart.x;
+            if (Math.abs(totalDeltaX) > 4) routeProfilePanStart.moved = true;
+            if (routeProfilePanStart.moved) {
+              panRouteProfileByPixels(deltaX, profileCanvas.clientWidth || 320);
+              routeProfilePanStart.lastX = touchX;
+            }
+          } else {
+            setProfileCursorFromCanvasX(event.touches[0].clientX);
+          }
         } else if (event.touches.length === 2 && routeProfileTouchDistance) {
           event.preventDefault();
           const nextDistance = Math.abs(event.touches[0].clientX - event.touches[1].clientX);
@@ -1456,6 +1512,7 @@
       }, { passive: false });
       profileCanvas.addEventListener('touchend', () => {
         routeProfileTouchDistance = null;
+        routeProfilePanStart = null;
       });
     }
     window.addEventListener('resize', renderRouteProfileChart);
