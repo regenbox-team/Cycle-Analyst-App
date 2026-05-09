@@ -832,7 +832,131 @@ ssh jeandard@sc-vehicule-1.local
 Important : certains hotspots telephone bloquent le multicast ou l'isolation
 client. Dans ce cas, l'IP peut fonctionner alors que `.local` ne se resout pas.
 
-## 17. Config SSH pour VS Code
+## 17. Option : creer un hotspot Wi-Fi de secours
+
+Cette option garde la connexion au telephone comme reseau principal, mais cree
+aussi un hotspot Wi-Fi du Pi. Si le Pi ne rejoint pas le telephone au boot,
+NetworkManager peut activer ce hotspot de secours.
+
+Limite importante : avec un seul Wi-Fi `wlan0`, le Pi ne peut pas etre connecte
+au telephone et servir son propre hotspot en meme temps de maniere fiable. Un
+seul profil sera actif a la fois.
+
+### Connexion telephone prioritaire
+
+Remplacer le SSID et le mot de passe par ceux du partage de connexion :
+
+```bash
+sudo nmcli con add type wifi ifname wlan0 con-name "iPhone de Jean" ssid "iPhone de Jean"
+sudo nmcli con modify "iPhone de Jean" \
+  wifi-sec.key-mgmt wpa-psk \
+  wifi-sec.psk "MOT_DE_PASSE_TELEPHONE" \
+  ipv4.method auto \
+  ipv6.method disabled \
+  connection.autoconnect yes \
+  connection.autoconnect-priority 999
+```
+
+Si le profil existe deja :
+
+```bash
+sudo nmcli con modify "iPhone de Jean" \
+  ipv4.method auto \
+  ipv6.method disabled \
+  connection.autoconnect yes \
+  connection.autoconnect-priority 999
+```
+
+### Hotspot du Pi en secours
+
+Adapter le nom au vehicule :
+
+- Pi 1 : `SC-Vehicule-1`
+- Pi 2 : `SC-Vehicule-2`
+- Pi 3 : `SC-Vehicule-3`
+
+Exemple pour le Pi 2 :
+
+```bash
+sudo nmcli con add type wifi ifname wlan0 con-name SC-Vehicule-2 ssid SC-Vehicule-2
+sudo nmcli con modify SC-Vehicule-2 \
+  802-11-wireless.mode ap \
+  802-11-wireless.band bg \
+  wifi-sec.key-mgmt wpa-psk \
+  wifi-sec.psk "supercyclepass!" \
+  ipv4.method shared \
+  ipv6.method ignore \
+  connection.autoconnect yes \
+  connection.autoconnect-priority -10
+sudo nmcli dev set wlan0 managed yes
+sudo systemctl restart NetworkManager
+```
+
+`802-11-wireless.band bg` force un reseau 2.4 GHz, souvent plus visible et plus
+stable avec les telephones et les Raspberry Pi.
+
+### Verification
+
+```bash
+nmcli con show
+nmcli -f NAME,TYPE,AUTOCONNECT,AUTOCONNECT-PRIORITY con show
+nmcli con show --active
+```
+
+Etat attendu quand le telephone est disponible :
+
+```text
+iPhone de Jean      wifi      yes      999
+SC-Vehicule-2       wifi      yes      -10
+```
+
+Et dans les connexions actives :
+
+```text
+iPhone de Jean      wifi      wlan0
+```
+
+Si le Pi active son hotspot, se connecter au Wi-Fi `SC-Vehicule-2`, puis ouvrir
+ou joindre le Pi avec :
+
+```text
+http://10.42.0.1
+ssh jeandard@10.42.0.1
+```
+
+### Basculer manuellement
+
+Forcer le hotspot du Pi :
+
+```bash
+sudo nmcli con down "iPhone de Jean" || true
+sudo nmcli con up SC-Vehicule-2
+```
+
+Revenir au telephone :
+
+```bash
+sudo nmcli con down SC-Vehicule-2 || true
+sudo nmcli con up "iPhone de Jean"
+```
+
+### Nettoyer les doublons
+
+Si plusieurs profils ont le meme nom :
+
+```bash
+nmcli -f NAME,UUID,TYPE,AUTOCONNECT,DEVICE con show
+```
+
+Supprimer les doublons non actifs avec leur UUID :
+
+```bash
+sudo nmcli con delete uuid UUID_A_SUPPRIMER
+```
+
+Garder de preference le profil qui affiche `wlan0` dans la colonne `DEVICE`.
+
+## 18. Config SSH pour VS Code
 
 Sur ton Mac ou PC, editer `~/.ssh/config` :
 
@@ -861,7 +985,7 @@ Ensuite dans VS Code :
 - `Remote-SSH: Connect to Host...`
 - choisir `sc1` ou `sc2`
 
-## 18. Mise a jour du repo sur un Pi deja installe
+## 19. Mise a jour du repo sur un Pi deja installe
 
 ```bash
 cd /home/jeandard/Cycle-Analyst-App
@@ -886,7 +1010,7 @@ sudo systemctl daemon-reload
 sudo systemctl restart cycle-analyst.service
 ```
 
-## 19. Option : installer monitor_server
+## 20. Option : installer monitor_server
 
 Le `monitor_server` peut tourner sur un serveur distant, un laptop ou un Pi.
 Il recoit les uploads des vehicules quand `MONITOR_URL` est configure cote app
@@ -1000,7 +1124,7 @@ Tester :
 curl http://127.0.0.1:8080
 ```
 
-## 20. Brancher un Pi vehicule au monitor
+## 21. Brancher un Pi vehicule au monitor
 
 Dans `/etc/cycle-analyst/cycle-analyst.env` sur chaque Pi vehicule :
 
@@ -1020,7 +1144,7 @@ journalctl -u cycle-analyst.service -f
 
 La sync tourne toutes les 60 secondes quand `MONITOR_URL` est defini.
 
-## 21. Checklist finale par Pi
+## 22. Checklist finale par Pi
 
 - hostname unique OK
 - SSH OK
@@ -1043,7 +1167,7 @@ La sync tourne toutes les 60 secondes quand `MONITOR_URL` est defini.
 - si camera : capture test OK
 - si monitor : heartbeat visible cote monitor
 
-## 22. Depannage
+## 23. Depannage
 
 ### Le service ne demarre pas
 
@@ -1133,7 +1257,7 @@ ssh-keygen -R sc-vehicule-2.local
 ssh-keygen -R cycle.local
 ```
 
-## 23. Resume ultra-court
+## 24. Resume ultra-court
 
 ```bash
 sudo apt update

@@ -9,7 +9,10 @@
   let routeSource = null;
   let routeCoords = null; // cached route coordinates [[lon,lat],...]
   let routeProfile = { points: [], visible: false, zoomStartKm: 0, zoomEndKm: 0, cursorIndex: null };
+  let routeDistancePoints = [];
+  let routeProgress = null;
   let routeProfileDragging = false;
+  let routeProfileTouchDistance = null;
   let lastLon = null, lastLat = null;
   const MIN_SPEED_KPH = 3; // do not update heading below this speed
   const HEADING_MODES = { NORTH: 'north', FREE: 'free', TRAJECTORY: 'trajectory' };
@@ -25,6 +28,7 @@
   const FONT_STACK = 'Inter Regular'; // change to your font name
   const PROFILE_MIN_WINDOW_KM = 0.2;
   const PROFILE_ELEVATION_DEADBAND_M = 5.0;
+  const ROUTE_SNAP_MAX_METERS = 120;
 
   async function glyphsAvailable() {
     try {
@@ -66,6 +70,13 @@
     return `${alt.toFixed(1)} m`;
   }
 
+  function formatDistanceKm(value) {
+    const km = Number(value);
+    if (!isFinite(km)) return '-';
+    if (km < 1) return `${Math.max(0, km * 1000).toFixed(0)} m`;
+    return `${km.toFixed(km < 10 ? 1 : 0)} km`;
+  }
+
   function setText(id, text, title) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -80,6 +91,22 @@
       return;
     }
     setText('pi-gps-altitude', formatAltitudeMeters(status.alt));
+  }
+
+  function setRouteProgress(progress) {
+    routeProgress = progress;
+    const row = document.getElementById('gpx-route-progress');
+    const value = document.getElementById('gpx-route-remaining');
+    if (!row || !value) return;
+    if (!progress) {
+      row.hidden = true;
+      value.textContent = '-';
+      row.removeAttribute('title');
+      return;
+    }
+    row.hidden = false;
+    value.textContent = formatDistanceKm(progress.remainingKm);
+    row.title = `Closest point on GPX: ${Math.round(progress.distanceToRouteM)} m away`;
   }
 
   function mapIsExpanded() {
@@ -377,7 +404,8 @@
       ...buildBaseLayers('basemap', palette),
       ...(includeLabels ? buildLabelLayers('basemap', palette) : []),
       // Live track & position styled per CSS highlight
-      { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'orange', 'line-width': 2, 'line-opacity': 0.9 } },
+      { id: 'track-casing', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#050505', 'line-width': 7, 'line-opacity': 0.8 } },
+      { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'orange', 'line-width': 4, 'line-opacity': 0.95 } },
       { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': 'orange', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
     ];
 
@@ -398,7 +426,8 @@
     const layers = [
       ...buildBaseLayers('basemap', palette),
       ...(includeLabels ? buildLabelLayers('basemap', palette) : []),
-      { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'orange', 'line-width': 2, 'line-opacity': 0.9 } },
+      { id: 'track-casing', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#050505', 'line-width': 7, 'line-opacity': 0.8 } },
+      { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'orange', 'line-width': 4, 'line-opacity': 0.95 } },
       { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': 'orange', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
     ];
 
@@ -433,7 +462,8 @@
       layers: [
         { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
         { id: 'osm-raster', type: 'raster', source: 'osm' },
-        { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 2, 'line-opacity': 0.9 } },
+        { id: 'track-casing', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#050505', 'line-width': 7, 'line-opacity': 0.8 } },
+        { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 4, 'line-opacity': 0.95 } },
         { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
       ]
     };
@@ -480,7 +510,8 @@
             'hillshade-shadow-color': 'rgba(0,0,0,0.30)'
           }
         },
-        { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 2, 'line-opacity': 0.9 } },
+        { id: 'track-casing', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#050505', 'line-width': 7, 'line-opacity': 0.8 } },
+        { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 4, 'line-opacity': 0.95 } },
         { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
       ]
     };
@@ -557,6 +588,7 @@
     if (routeProfile.points.length) {
       updateRouteProfileCursorOnMap();
     }
+    updateRouteCurrentOnMap(routeProgress);
   }
 
   async function switchBasemap(choice) {
@@ -660,6 +692,7 @@
       if (coords.length > MAX_POINTS) coords.shift();
 
       lastLon = lon; lastLat = lat;
+      updateRouteProgressFromGps(lon, lat);
 
       if (posSource) {
         posSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] } });
@@ -795,6 +828,65 @@
     });
 
     return withDistance.filter(p => p.ele != null);
+  }
+
+  function buildRouteDistancePoints(points) {
+    let distanceKm = 0;
+    return points.map((point, index) => {
+      if (index > 0) distanceKm += haversineKm(points[index - 1], point);
+      return { ...point, distanceKm };
+    });
+  }
+
+  function nearestRouteProgress(lon, lat) {
+    if (!routeDistancePoints.length) return null;
+    if (routeDistancePoints.length === 1) {
+      const only = routeDistancePoints[0];
+      const distanceToRouteM = haversineKm({ lon, lat }, only) * 1000;
+      if (distanceToRouteM > ROUTE_SNAP_MAX_METERS) return null;
+      return { lon: only.lon, lat: only.lat, alongKm: 0, remainingKm: 0, distanceToRouteM };
+    }
+
+    const metersPerLat = 111320;
+    const metersPerLon = Math.max(1, 111320 * Math.cos(lat * Math.PI / 180));
+    let best = null;
+
+    for (let i = 1; i < routeDistancePoints.length; i++) {
+      const a = routeDistancePoints[i - 1];
+      const b = routeDistancePoints[i];
+      const ax = (a.lon - lon) * metersPerLon;
+      const ay = (a.lat - lat) * metersPerLat;
+      const bx = (b.lon - lon) * metersPerLon;
+      const by = (b.lat - lat) * metersPerLat;
+      const dx = bx - ax;
+      const dy = by - ay;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq <= 0.0001) continue;
+      const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / lenSq));
+      const px = ax + dx * t;
+      const py = ay + dy * t;
+      const distanceToRouteM = Math.sqrt(px * px + py * py);
+      const segmentKm = Math.max(0, b.distanceKm - a.distanceKm);
+      const alongKm = a.distanceKm + segmentKm * t;
+      const candidate = {
+        lon: lon + px / metersPerLon,
+        lat: lat + py / metersPerLat,
+        alongKm,
+        remainingKm: Math.max(0, routeDistancePoints[routeDistancePoints.length - 1].distanceKm - alongKm),
+        distanceToRouteM
+      };
+      if (!best || candidate.distanceToRouteM < best.distanceToRouteM) best = candidate;
+    }
+
+    if (!best || best.distanceToRouteM > ROUTE_SNAP_MAX_METERS) return null;
+    return best;
+  }
+
+  function updateRouteProgressFromGps(lon, lat) {
+    const progress = nearestRouteProgress(lon, lat);
+    setRouteProgress(progress);
+    updateRouteCurrentOnMap(progress);
+    renderRouteProfileChart();
   }
 
   function resetRouteProfileZoom() {
@@ -998,6 +1090,27 @@
         ctx.fill();
       }
     }
+
+    if (routeProgress && routeProgress.alongKm >= routeProfile.zoomStartKm && routeProgress.alongKm <= routeProfile.zoomEndKm) {
+      const currentIndex = nearestProfileIndexForDistance(routeProgress.alongKm);
+      const currentPoint = currentIndex == null ? null : points[currentIndex];
+      const x = scales.xForKm(routeProgress.alongKm);
+      ctx.strokeStyle = '#1e90ff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x, margin.top);
+      ctx.lineTo(x, height - margin.bottom);
+      ctx.stroke();
+      if (currentPoint) {
+        ctx.fillStyle = '#1e90ff';
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, scales.yForEle(currentPoint.ele), 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
   }
 
   function updateProfileCursorLabel() {
@@ -1027,16 +1140,12 @@
     renderRouteProfileChart();
   }
 
-  function zoomRouteProfile(deltaY, clientX) {
+  function zoomRouteProfileByFactor(factor, focusPct = 0.5) {
     const points = routeProfile.points;
     if (!points.length) return;
     const totalEnd = points[points.length - 1].distanceKm;
     if (totalEnd <= PROFILE_MIN_WINDOW_KM) return;
-    const canvas = document.getElementById('gpx-elevation-profile');
-    const rect = canvas ? canvas.getBoundingClientRect() : null;
-    const focusPct = rect ? Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width))) : 0.5;
     const focusKm = routeProfile.zoomStartKm + focusPct * (routeProfile.zoomEndKm - routeProfile.zoomStartKm);
-    const factor = deltaY < 0 ? 0.78 : 1.28;
     let windowKm = (routeProfile.zoomEndKm - routeProfile.zoomStartKm) * factor;
     windowKm = Math.max(PROFILE_MIN_WINDOW_KM, Math.min(totalEnd, windowKm));
     let start = focusKm - windowKm * focusPct;
@@ -1046,6 +1155,13 @@
     routeProfile.zoomStartKm = Math.max(0, start);
     routeProfile.zoomEndKm = Math.min(totalEnd, end);
     renderRouteProfileChart();
+  }
+
+  function zoomRouteProfile(deltaY, clientX) {
+    const canvas = document.getElementById('gpx-elevation-profile');
+    const rect = canvas ? canvas.getBoundingClientRect() : null;
+    const focusPct = rect ? Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width))) : 0.5;
+    zoomRouteProfileByFactor(deltaY < 0 ? 0.78 : 1.28, focusPct);
   }
 
   function ensureRouteSource() {
@@ -1069,14 +1185,32 @@
     return src;
   }
 
+  function ensureRouteCurrentSource() {
+    if (!map) return null;
+    let src = map.getSource('route-current');
+    if (!src) {
+      map.addSource('route-current', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      src = map.getSource('route-current');
+    }
+    return src;
+  }
+
   function ensureRouteLayer() {
     if (!map) return;
+    const beforePositionDot = map.getLayer('pos-dot') ? 'pos-dot' : undefined;
+    if (!map.getLayer('route-casing')) {
+      map.addLayer({
+        id: 'route-casing', type: 'line', source: 'route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#050505', 'line-opacity': 0.75, 'line-width': 8 }
+      }, beforePositionDot);
+    }
     if (!map.getLayer('route-line')) {
       map.addLayer({
         id: 'route-line', type: 'line', source: 'route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': 'orange', 'line-opacity': 0.4, 'line-width': 3 }
-      });
+        paint: { 'line-color': 'orange', 'line-opacity': 0.62, 'line-width': 5 }
+      }, beforePositionDot);
     }
   }
 
@@ -1096,6 +1230,43 @@
         }
       });
     }
+  }
+
+  function ensureRouteCurrentLayer() {
+    if (!map) return;
+    ensureRouteCurrentSource();
+    if (!map.getLayer('route-current-dot')) {
+      map.addLayer({
+        id: 'route-current-dot',
+        type: 'circle',
+        source: 'route-current',
+        paint: {
+          'circle-color': '#1e90ff',
+          'circle-radius': 6,
+          'circle-stroke-color': '#050505',
+          'circle-stroke-width': 3
+        }
+      });
+    }
+  }
+
+  function updateRouteCurrentOnMap(progress) {
+    if (!map) return;
+    const src = ensureRouteCurrentSource();
+    if (!src) return;
+    if (!progress) {
+      src.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+    ensureRouteCurrentLayer();
+    src.setData({
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [progress.lon, progress.lat] },
+        properties: {}
+      }]
+    });
   }
 
   function updateRouteProfileCursorOnMap() {
@@ -1124,6 +1295,9 @@
       const info = await st.json();
       if (!info || !info.exists) {
         routeCoords = null;
+        routeDistancePoints = [];
+        setRouteProgress(null);
+        updateRouteCurrentOnMap(null);
         setRouteProfileAvailability([]);
         return;
       }
@@ -1136,10 +1310,12 @@
         return;
       }
       routeCoords = routePoints.map(p => [p.lon, p.lat]);
+      routeDistancePoints = buildRouteDistancePoints(routePoints);
       ensureRouteSource();
       routeSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: routeCoords.slice() } }] });
       ensureRouteLayer();
       setRouteProfileAvailability(buildRouteProfile(routePoints));
+      if (isFinite(lastLon) && isFinite(lastLat)) updateRouteProgressFromGps(lastLon, lastLat);
     } catch (e) {
       // ignore
     }
@@ -1163,11 +1339,16 @@
       showGpxMessage(ok ? 'Track erased' : 'Erase failed', ok);
       if (ok) {
         routeCoords = null;
+        routeDistancePoints = [];
+        setRouteProgress(null);
         setRouteProfileAvailability([]);
         if (map) {
           if (map.getLayer('route-cursor-dot')) map.removeLayer('route-cursor-dot');
           if (map.getSource('route-cursor')) map.removeSource('route-cursor');
+          if (map.getLayer('route-current-dot')) map.removeLayer('route-current-dot');
+          if (map.getSource('route-current')) map.removeSource('route-current');
           if (map.getLayer('route-line')) map.removeLayer('route-line');
+          if (map.getLayer('route-casing')) map.removeLayer('route-casing');
           if (map.getSource('route')) map.removeSource('route');
         }
       }
@@ -1206,6 +1387,8 @@
     const profileToggle = document.getElementById('gpx-profile-toggle');
     const profilePanel = document.getElementById('gpx-profile-panel');
     const profileReset = document.getElementById('gpx-profile-reset');
+    const profileZoomIn = document.getElementById('gpx-profile-zoom-in');
+    const profileZoomOut = document.getElementById('gpx-profile-zoom-out');
     const profileCanvas = document.getElementById('gpx-elevation-profile');
     if (profileToggle && profilePanel) {
       profileToggle.addEventListener('click', () => {
@@ -1222,6 +1405,8 @@
         renderRouteProfileChart();
       });
     }
+    if (profileZoomIn) profileZoomIn.addEventListener('click', () => zoomRouteProfileByFactor(0.72, 0.5));
+    if (profileZoomOut) profileZoomOut.addEventListener('click', () => zoomRouteProfileByFactor(1.32, 0.5));
     if (profileCanvas) {
       profileCanvas.addEventListener('pointerdown', (event) => {
         routeProfileDragging = true;
@@ -1245,6 +1430,33 @@
         event.preventDefault();
         zoomRouteProfile(event.deltaY, event.clientX);
       }, { passive: false });
+      profileCanvas.addEventListener('touchstart', (event) => {
+        if (event.touches.length === 1) {
+          setProfileCursorFromCanvasX(event.touches[0].clientX);
+        } else if (event.touches.length === 2) {
+          routeProfileTouchDistance = Math.abs(event.touches[0].clientX - event.touches[1].clientX);
+        }
+      }, { passive: true });
+      profileCanvas.addEventListener('touchmove', (event) => {
+        if (!routeProfile.points.length) return;
+        if (event.touches.length === 1) {
+          event.preventDefault();
+          setProfileCursorFromCanvasX(event.touches[0].clientX);
+        } else if (event.touches.length === 2 && routeProfileTouchDistance) {
+          event.preventDefault();
+          const nextDistance = Math.abs(event.touches[0].clientX - event.touches[1].clientX);
+          if (nextDistance > 8) {
+            const rect = profileCanvas.getBoundingClientRect();
+            const centerX = (event.touches[0].clientX + event.touches[1].clientX) / 2;
+            const focusPct = Math.max(0, Math.min(1, (centerX - rect.left) / Math.max(1, rect.width)));
+            zoomRouteProfileByFactor(routeProfileTouchDistance / nextDistance, focusPct);
+            routeProfileTouchDistance = nextDistance;
+          }
+        }
+      }, { passive: false });
+      profileCanvas.addEventListener('touchend', () => {
+        routeProfileTouchDistance = null;
+      });
     }
     window.addEventListener('resize', renderRouteProfileChart);
 
