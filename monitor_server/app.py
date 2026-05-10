@@ -8,6 +8,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Any
@@ -45,6 +46,7 @@ TERRAIN_FALLBACK_THROTTLE_SEC = float(os.getenv("MONITOR_TERRAIN_FALLBACK_THROTT
 TERRAIN_BACKFILL_LIMIT_POINTS = int(os.getenv("MONITOR_TERRAIN_BACKFILL_LIMIT_POINTS", "500"))
 DEFAULT_DB_TIMEOUT_SEC = 30.0
 HEARTBEAT_ACTIVE_WINDOW_SEC = 120
+DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
 
 
 def _db_path() -> str:
@@ -61,6 +63,45 @@ def _db_timeout_sec() -> float:
         return max(0.1, float(os.getenv("MONITOR_DB_TIMEOUT_SEC", str(DEFAULT_DB_TIMEOUT_SEC))))
     except (TypeError, ValueError):
         return DEFAULT_DB_TIMEOUT_SEC
+
+
+def _startup_lock_timeout_sec() -> float:
+    try:
+        return max(
+            1.0,
+            float(os.getenv("MONITOR_STARTUP_LOCK_TIMEOUT_SEC", str(DEFAULT_STARTUP_LOCK_TIMEOUT_SEC))),
+        )
+    except (TypeError, ValueError):
+        return DEFAULT_STARTUP_LOCK_TIMEOUT_SEC
+
+
+@contextmanager
+def _startup_db_lock():
+    lock_path = f"{_db_path()}.startup.lock"
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    locked = False
+    try:
+        if os.name == "posix":
+            import fcntl
+
+            deadline = time.monotonic() + _startup_lock_timeout_sec()
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    locked = True
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"Timed out waiting for monitor DB startup lock: {lock_path}")
+                    time.sleep(0.2)
+        yield
+    finally:
+        if locked and os.name == "posix":
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def _get_db() -> sqlite3.Connection:
@@ -1472,8 +1513,9 @@ def create_app() -> Flask:
             FileSystemLoader(os.path.join(REPO_ROOT, "templates")),
         ]
     )
-    _init_db()
-    _migrate_db()
+    with _startup_db_lock():
+        _init_db()
+        _migrate_db()
 
     def _is_active(ts: str | None, window_sec: int = HEARTBEAT_ACTIVE_WINDOW_SEC, future_grace_sec: int = 10) -> bool:
         if not ts:

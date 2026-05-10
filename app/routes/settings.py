@@ -7,7 +7,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from flask import jsonify, make_response, redirect, render_template, request, send_file
+from flask import jsonify, redirect, render_template, request, send_file
 
 from app.env_file import current_device_hint, env_file_path, grouped_settings, save_settings
 from app.config import LIVE_PHOTO_DIR, get_db_file
@@ -36,15 +36,14 @@ DIAGNOSTIC_CAMERA_IMAGE = Path(LIVE_PHOTO_DIR) / "settings_camera_test.jpg"
 
 def settings_page():
     status = request.args.get("status", "")
-    response = make_response(render_template(
+    html = render_template(
         "settings.html",
         groups=grouped_settings(),
         env_path=str(env_file_path()),
         status=status,
         device_hint=current_device_hint(),
-    ))
-    response.headers["Cache-Control"] = "no-store"
-    return response
+    )
+    return html, {"Cache-Control": "no-store"}
 
 
 def save_settings_page():
