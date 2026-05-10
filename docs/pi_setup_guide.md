@@ -361,9 +361,9 @@ APP_BATTERY_DISCHARGE_CURVE_FILE=var/battery_curve_lg_mh1_from_trip.json
 # --palette YUYV evite les images grises observees avec le flux MJPEG de cette camera.
 APP_CAMERA_COMMAND=fswebcam -d /dev/video0 -q -S 60 --palette YUYV -r 640x480 --jpeg 85 --no-banner {output}
 
-# Synchronisation vers monitor_server. Laisser MONITOR_URL vide pour desactiver.
+# Synchronisation vers monitor_server. Laisser MONITOR_URL vide seulement pour desactiver.
 MONITOR_DEVICE_ID=sc-vehicule-1
-MONITOR_URL=
+MONITOR_URL=http://91.134.243.157:8080
 MONITOR_USER=
 MONITOR_PASS=
 MONITOR_UPLOAD_CHUNK_SIZE=1000
@@ -404,7 +404,7 @@ sudo chmod 0640 /etc/cycle-analyst/cycle-analyst.env
 | `APP_SOLAR_INVERT_SIGN` | vide | `true` pour inverser le signe du courant solaire. |
 | `APP_CAMERA_COMMAND` | auto | Commande custom camera. `{output}` est remplace par le fichier JPEG. |
 | `MONITOR_DEVICE_ID` | hostname | ID unique envoye au monitor. |
-| `MONITOR_URL` | vide | URL du monitor. Vide = sync desactivee. |
+| `MONITOR_URL` | `http://91.134.243.157:8080` | URL du monitor. Vide = sync desactivee. |
 | `MONITOR_USER` | vide | Login Basic Auth monitor. |
 | `MONITOR_PASS` | vide | Mot de passe Basic Auth monitor. |
 | `MONITOR_UPLOAD_CHUNK_SIZE` | `1000` | Nombre de lignes envoyees par paquet au monitor. |

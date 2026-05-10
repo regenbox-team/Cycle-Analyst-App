@@ -251,20 +251,20 @@ SETTINGS: tuple[EnvSetting, ...] = (
     ),
     EnvSetting(
         "MONITOR_DEVICE_ID",
-        "Monitor device ID",
+        "Vehicle name",
         "sc-vehicule-1",
-        "ID unique envoye au monitor_server.",
+        "Nom libre et stable du vehicule envoye au monitor_server.",
         "Monitor sync",
-        detail="Utilise un nom stable par vehicule, par exemple sc-vehicule-1. Le monitor s'en sert pour separer les uploads.",
+        detail="Champ libre: mets le nom exact que tu veux voir dans la colonne Device du monitor, par exemple sc-vehicule-1 ou solar-bike-a. Le monitor s'en sert pour separer les heartbeats, photos et uploads.",
     ),
     EnvSetting(
         "MONITOR_URL",
         "Monitor URL",
-        "",
+        "http://91.134.243.157:8080",
         "URL du monitor_server.",
         "Monitor sync",
-        placeholder="http://monitor.example:8080",
-        detail="Laisse vide pour desactiver la synchronisation. Renseigne l'URL complete du serveur monitor, avec le port si necessaire.",
+        placeholder="http://91.134.243.157:8080",
+        detail="URL du monitor_server de production. Laisse vide seulement si tu veux desactiver la synchronisation sur un Pi donne.",
     ),
     EnvSetting(
         "MONITOR_USER",
@@ -391,6 +391,8 @@ def compose_camera_command(form) -> str:
 def _choices_with_current(
     choices: tuple[tuple[str, str], ...], current: str
 ) -> list[dict[str, str]]:
+    if not choices:
+        return []
     options = [{"value": value, "label": label} for value, label in choices]
     if current and current not in {option["value"] for option in options}:
         options.append({"value": current, "label": f"{current} - current custom value"})

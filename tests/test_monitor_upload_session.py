@@ -42,6 +42,68 @@ class MonitorUploadSessionTest(unittest.TestCase):
             "solar_enabled": 1,
         }
 
+    def test_heartbeat_updates_device_last_seen_with_server_time(self):
+        with sqlite3.connect(self.db_path) as conn:
+            payload = self.monitor_app._record_heartbeat(
+                conn,
+                {
+                    "device_id": "bike",
+                    "timestamp": "2000-01-01 00:00:00",
+                    "session_active": 1,
+                    "mode": "supercycle_live",
+                },
+                "127.0.0.1",
+            )
+            conn.commit()
+
+            row = conn.execute(
+                "SELECT last_seen, session_active, mode FROM devices WHERE device_id = ?",
+                ("bike",),
+            ).fetchone()
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["device_id"], "bike")
+        self.assertIn("last_seen", payload)
+        self.assertNotEqual(payload["last_seen"], "2000-01-01 00:00:00")
+        self.assertEqual(row[0], payload["last_seen"])
+        self.assertEqual(row[1], 1)
+        self.assertEqual(row[2], "supercycle_live")
+
+    def test_heartbeat_requires_device_id(self):
+        with sqlite3.connect(self.db_path) as conn:
+            with self.assertRaises(ValueError):
+                self.monitor_app._record_heartbeat(
+                    conn,
+                    {
+                        "timestamp": "2000-01-01 00:00:00",
+                        "session_active": 1,
+                    },
+                    "127.0.0.1",
+                )
+
+    def test_heartbeat_route_returns_server_last_seen_when_flask_client_is_available(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        token = "Basic YWRtaW46c2VjcmV0"
+        response = self.monitor_app.app.test_client().post(
+            "/api/heartbeat",
+            json={
+                "device_id": "bike",
+                "timestamp": "2000-01-01 00:00:00",
+                "session_active": 1,
+                "mode": "supercycle_live",
+            },
+            headers={"Authorization": token},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["device_id"], "bike")
+        self.assertIn("last_seen", payload)
+        self.assertNotEqual(payload["last_seen"], "2000-01-01 00:00:00")
+
     def test_chunked_upload_finalizes_session_summary(self):
         base_payload = {
             "device_id": "bike",

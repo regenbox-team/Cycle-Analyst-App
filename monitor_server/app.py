@@ -44,6 +44,7 @@ TERRAIN_FALLBACK_BATCH_SIZE = int(os.getenv("MONITOR_TERRAIN_FALLBACK_BATCH_SIZE
 TERRAIN_FALLBACK_THROTTLE_SEC = float(os.getenv("MONITOR_TERRAIN_FALLBACK_THROTTLE_SEC", "1.0"))
 TERRAIN_BACKFILL_LIMIT_POINTS = int(os.getenv("MONITOR_TERRAIN_BACKFILL_LIMIT_POINTS", "500"))
 DEFAULT_DB_TIMEOUT_SEC = 30.0
+HEARTBEAT_ACTIVE_WINDOW_SEC = 120
 
 
 def _db_path() -> str:
@@ -1063,6 +1064,64 @@ def _upsert_upload_device(conn: sqlite3.Connection, data: dict[str, Any], solar_
     )
 
 
+def _record_heartbeat(conn: sqlite3.Connection, data: dict[str, Any], remote_addr: str | None = None) -> dict[str, Any]:
+    device_id = data.get("device_id")
+    if not device_id:
+        raise ValueError("missing device_id")
+
+    server_seen = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    gps_available = 1 if data.get("gps_available") else 0
+    gps_lat = data.get("gps_lat") if gps_available else None
+    gps_lon = data.get("gps_lon") if gps_available else None
+    gps_ts = data.get("gps_timestamp_utc") if gps_available else None
+    solar_enabled = 1 if data.get("solar_enabled", 1) else 0
+    conn.execute(
+        """
+        INSERT INTO devices (
+            device_id, last_seen, last_ip, last_session, session_active, mode, test_mode,
+            solar_enabled, current_user_id, current_user_initials, last_gps_lat, last_gps_lon, last_gps_ts, gps_available
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(device_id) DO UPDATE SET
+            last_seen = excluded.last_seen,
+            last_ip = excluded.last_ip,
+            last_session = excluded.last_session,
+            session_active = excluded.session_active,
+            mode = excluded.mode,
+            test_mode = excluded.test_mode,
+            solar_enabled = excluded.solar_enabled,
+            current_user_id = excluded.current_user_id,
+            current_user_initials = excluded.current_user_initials,
+            last_gps_lat = excluded.last_gps_lat,
+            last_gps_lon = excluded.last_gps_lon,
+            last_gps_ts = excluded.last_gps_ts,
+            gps_available = excluded.gps_available
+        """,
+        (
+            device_id,
+            server_seen,
+            remote_addr,
+            data.get("session_id"),
+            int(data.get("session_active") or 0),
+            data.get("mode"),
+            int(data.get("test_mode") or 0),
+            solar_enabled,
+            data.get("user_id"),
+            data.get("user_initials"),
+            gps_lat,
+            gps_lon,
+            gps_ts,
+            gps_available,
+        ),
+    )
+    return {
+        "status": "ok",
+        "device_id": device_id,
+        "last_seen": server_seen,
+        "active_window_sec": HEARTBEAT_ACTIVE_WINDOW_SEC,
+    }
+
+
 def _backfill_session_distances(conn: sqlite3.Connection) -> None:
     try:
         rows = conn.execute(
@@ -1416,7 +1475,7 @@ def create_app() -> Flask:
     _init_db()
     _migrate_db()
 
-    def _is_active(ts: str | None, window_sec: int = 120, future_grace_sec: int = 10) -> bool:
+    def _is_active(ts: str | None, window_sec: int = HEARTBEAT_ACTIVE_WINDOW_SEC, future_grace_sec: int = 10) -> bool:
         if not ts:
             return False
         try:
@@ -1817,54 +1876,10 @@ def create_app() -> Flask:
         device_id = data.get("device_id")
         if not device_id:
             return jsonify({"error": "missing device_id"}), 400
-        server_seen = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        gps_available = 1 if data.get("gps_available") else 0
-        gps_lat = data.get("gps_lat") if gps_available else None
-        gps_lon = data.get("gps_lon") if gps_available else None
-        gps_ts = data.get("gps_timestamp_utc") if gps_available else None
-        solar_enabled = 1 if data.get("solar_enabled", 1) else 0
         with _get_db() as conn:
-            conn.execute(
-                """
-                INSERT INTO devices (
-                    device_id, last_seen, last_ip, last_session, session_active, mode, test_mode,
-                    solar_enabled, current_user_id, current_user_initials, last_gps_lat, last_gps_lon, last_gps_ts, gps_available
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(device_id) DO UPDATE SET
-                    last_seen = excluded.last_seen,
-                    last_ip = excluded.last_ip,
-                    last_session = excluded.last_session,
-                    session_active = excluded.session_active,
-                    mode = excluded.mode,
-                    test_mode = excluded.test_mode,
-                    solar_enabled = excluded.solar_enabled,
-                    current_user_id = excluded.current_user_id,
-                    current_user_initials = excluded.current_user_initials,
-                    last_gps_lat = excluded.last_gps_lat,
-                    last_gps_lon = excluded.last_gps_lon,
-                    last_gps_ts = excluded.last_gps_ts,
-                    gps_available = excluded.gps_available
-                """,
-                (
-                    device_id,
-                    server_seen,
-                    request.remote_addr,
-                    data.get("session_id"),
-                    int(data.get("session_active") or 0),
-                    data.get("mode"),
-                    int(data.get("test_mode") or 0),
-                    solar_enabled,
-                    data.get("user_id"),
-                    data.get("user_initials"),
-                    gps_lat,
-                    gps_lon,
-                    gps_ts,
-                    gps_available,
-                ),
-            )
+            result = _record_heartbeat(conn, data, request.remote_addr)
             conn.commit()
-        return jsonify({"status": "ok"})
+        return jsonify(result)
 
     @app.route("/api/upload_session", methods=["POST"])
     @_require_auth

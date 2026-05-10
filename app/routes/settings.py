@@ -47,6 +47,12 @@ def settings_page():
 
 def save_settings_page():
     save_settings(request.form)
+    try:
+        from app.monitor_client import start_monitor_sync
+
+        start_monitor_sync()
+    except Exception:
+        pass
     return redirect("/settings?status=saved")
 
 
@@ -200,9 +206,19 @@ def diagnostics_monitor():
         }
         started = time.time()
         response = _request_json("POST", f"{url}/api/heartbeat", payload, timeout=8)
+        try:
+            from app.monitor_client import start_monitor_sync
+
+            start_monitor_sync()
+        except Exception:
+            pass
         elapsed_ms = int((time.time() - started) * 1000)
         lines.append(f"Heartbeat OK to {url}/api/heartbeat in {elapsed_ms} ms.")
         lines.append(f"Device: {device_id}")
+        if isinstance(response, dict) and response.get("last_seen"):
+            lines.append(f"Monitor last_seen: {response.get('last_seen')}")
+        if isinstance(response, dict) and response.get("active_window_sec"):
+            lines.append(f"Monitor online window: {response.get('active_window_sec')} sec")
         lines.append(f"Response: {response}")
         return _json_status("ok", lines, response=response)
     except Exception as exc:
