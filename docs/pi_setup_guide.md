@@ -12,7 +12,7 @@ Le setup recommande installe :
 - un nom local stable en `.local` via mDNS
 - un proxy `nginx` sur le port `80`
 - un service `systemd` `cycle-analyst.service`
-- un fichier de variables dedie : `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env`
+- un fichier de variables local dedie : `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env`
 - optionnellement le `monitor_server` sur le port `8080`
 
 ## 1. Hypotheses et conventions
@@ -310,6 +310,7 @@ Le repo contient deja le fichier :
 ```
 
 Il est charge automatiquement au demarrage de l'app et par le service systemd.
+Ce fichier est local au Pi et ignore par Git; le repo fournit `cycle-analyst.env.example`.
 Tu peux l'ajuster depuis l'interface :
 
 ```text
@@ -1166,7 +1167,7 @@ La sync tourne toutes les 60 secondes quand `MONITOR_URL` est defini.
 - cle SSH GitHub du Pi ajoutee dans GitHub ou comme Deploy Key
 - `.venv` cree
 - dependances Python installees
-- `cycle-analyst.env` present dans le repo
+- `cycle-analyst.env` present localement sur le Pi
 - `APP_VAR_DIR` pointe vers le `var/` du repo
 - `/home/jeandard/Documents/tiles.pmtiles` existe si la basemap offline est utilisee
 - `MONITOR_DEVICE_ID` unique
@@ -1294,7 +1295,7 @@ mkdir -p /home/jeandard/Documents
 
 Puis ajuster/creer :
 
-- `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env` deja fourni par le repo
+- `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env` cree automatiquement par l'app ou copie depuis `cycle-analyst.env.example`
 - `/etc/systemd/system/cycle-analyst.service`
 - `/etc/nginx/sites-available/cycle-analyst`
 - `/etc/sudoers.d/cycle-analyst` si tu veux le bouton restart
