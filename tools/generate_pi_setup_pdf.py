@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import html
+import re
+import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -8,12 +11,47 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
-from reportlab.platypus import Paragraph, Preformatted, SimpleDocTemplate, Spacer
+from reportlab.platypus import PageBreak, Paragraph, Preformatted, SimpleDocTemplate, Spacer
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "docs" / "pi_setup_guide.md"
 OUTPUT = ROOT / "docs" / "pi_setup_guide.pdf"
+ORDERED_LIST_RE = re.compile(r"^(\d+)\.\s+(.*)$")
+SECTION_NUMBER_RE = re.compile(r"^(\d+)\.")
+TOC_GROUPS = (
+    ("Preparation du Raspberry Pi", 1, 5),
+    ("Installation de l'application", 6, 9),
+    ("Carte offline et peripheriques", 10, 12),
+    ("Services et acces reseau", 13, 18),
+    ("Maintenance et monitor", 19, 21),
+    ("Validation et depannage", 22, 24),
+)
+
+
+@dataclass(frozen=True)
+class Heading:
+    level: int
+    text: str
+    anchor: str
+
+
+class AnchoredHeading(Paragraph):
+    def __init__(self, text, style, anchor: str, outline_text: str, outline_level: int):
+        super().__init__(text, style)
+        self.anchor = anchor
+        self.outline_text = outline_text
+        self.outline_level = outline_level
+
+    def draw(self):
+        self.canv.bookmarkPage(self.anchor)
+        self.canv.addOutlineEntry(
+            self.outline_text,
+            self.anchor,
+            level=self.outline_level,
+            closed=False,
+        )
+        super().draw()
 
 
 def build_styles():
@@ -52,6 +90,54 @@ def build_styles():
             spaceBefore=10,
             spaceAfter=6,
             textColor=colors.HexColor("#1d4ed8"),
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="TocTitle",
+            parent=styles["Heading1"],
+            fontName="Helvetica-Bold",
+            fontSize=15,
+            leading=19,
+            spaceBefore=8,
+            spaceAfter=10,
+            textColor=colors.HexColor("#0f172a"),
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="TocItem1",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=10,
+            leading=13,
+            leftIndent=0,
+            spaceAfter=3,
+            textColor=colors.HexColor("#1d4ed8"),
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="TocGroup",
+            parent=styles["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=10.5,
+            leading=14,
+            spaceBefore=8,
+            spaceAfter=3,
+            textColor=colors.HexColor("#0f172a"),
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="TocItem2",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=9.2,
+            leading=12,
+            leftIndent=14,
+            spaceAfter=2,
+            textColor=colors.HexColor("#475569"),
         )
     )
     styles.add(
@@ -99,6 +185,81 @@ def build_styles():
     return styles
 
 
+def slugify(text: str, used: set[str]) -> str:
+    normalized = unicodedata.normalize("NFKD", text)
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii").lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text).strip("-") or "section"
+    candidate = slug
+    suffix = 2
+    while candidate in used:
+        candidate = f"{slug}-{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def collect_headings(lines: list[str]) -> list[Heading]:
+    headings: list[Heading] = []
+    used: set[str] = set()
+    in_code = False
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+
+        if stripped.startswith("## "):
+            text = stripped[3:].strip()
+            headings.append(Heading(2, text, slugify(text, used)))
+            continue
+        if stripped.startswith("### "):
+            text = stripped[4:].strip()
+            headings.append(Heading(3, text, slugify(text, used)))
+
+    return headings
+
+
+def section_number(heading: Heading) -> int | None:
+    match = SECTION_NUMBER_RE.match(heading.text)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def build_toc(headings: list[Heading], styles):
+    story = [
+        Paragraph("Sommaire", styles["TocTitle"]),
+        Paragraph(
+            "Clique sur une section pour aller directement a la bonne partie du guide.",
+            styles["Body"],
+        ),
+    ]
+
+    main_headings = [heading for heading in headings if heading.level == 2]
+    for group_title, first_section, last_section in TOC_GROUPS:
+        group_headings = [
+            heading
+            for heading in main_headings
+            if (number := section_number(heading)) is not None
+            and first_section <= number <= last_section
+        ]
+        if not group_headings:
+            continue
+
+        story.append(Paragraph(group_title, styles["TocGroup"]))
+        for heading in group_headings:
+            label = inline_markup(heading.text)
+            story.append(
+                Paragraph(f'<a href="#{heading.anchor}">{label}</a>', styles["TocItem1"])
+            )
+
+    story.append(PageBreak())
+    return story
+
+
 def inline_markup(text: str) -> str:
     escaped = html.escape(text.strip())
     parts: list[str] = []
@@ -123,8 +284,11 @@ def parse_markdown(source: Path):
     styles = build_styles()
     story = []
     lines = source.read_text(encoding="utf-8").splitlines()
+    headings = collect_headings(lines)
+    heading_iter = iter(headings)
     in_code = False
     code_lines: list[str] = []
+    toc_inserted = False
 
     def flush_code():
         nonlocal code_lines
@@ -158,11 +322,32 @@ def parse_markdown(source: Path):
             continue
 
         if stripped.startswith("## "):
-            story.append(Paragraph(inline_markup(stripped[3:]), styles["Section1"]))
+            if not toc_inserted:
+                story.extend(build_toc(headings, styles))
+                toc_inserted = True
+            heading = next(heading_iter)
+            story.append(
+                AnchoredHeading(
+                    inline_markup(heading.text),
+                    styles["Section1"],
+                    heading.anchor,
+                    heading.text,
+                    0,
+                )
+            )
             continue
 
         if stripped.startswith("### "):
-            story.append(Paragraph(inline_markup(stripped[4:]), styles["Section2"]))
+            heading = next(heading_iter)
+            story.append(
+                AnchoredHeading(
+                    inline_markup(heading.text),
+                    styles["Section2"],
+                    heading.anchor,
+                    heading.text,
+                    1,
+                )
+            )
             continue
 
         if stripped.startswith("- "):
@@ -175,16 +360,13 @@ def parse_markdown(source: Path):
             )
             continue
 
-        if (
-            len(stripped) > 3
-            and stripped[0].isdigit()
-            and stripped[1:].startswith(". ")
-        ):
+        ordered_match = ORDERED_LIST_RE.match(stripped)
+        if ordered_match:
             story.append(
                 Paragraph(
-                    inline_markup(stripped[3:]),
+                    inline_markup(ordered_match.group(2)),
                     styles["BulletLine"],
-                    bulletText=f"{stripped[0]}.",
+                    bulletText=f"{ordered_match.group(1)}.",
                 )
             )
             continue
@@ -192,6 +374,8 @@ def parse_markdown(source: Path):
         story.append(Paragraph(inline_markup(stripped), styles["Body"]))
 
     flush_code()
+    if not toc_inserted and headings:
+        story.extend(build_toc(headings, styles))
     return story
 
 

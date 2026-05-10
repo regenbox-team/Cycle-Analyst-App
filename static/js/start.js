@@ -154,10 +154,8 @@ function updateLinksForMode(mode) {
   const qs = `?mode=${encodeURIComponent(mode)}`;
   const sel = document.getElementById("link-select-session");
   const edit = document.getElementById("link-edit-session");
-  const logs = document.getElementById("link-live-logs");
   if (sel) sel.href = "/select_session" + qs;
   if (edit) edit.href = "/edit_session" + qs;
-  if (logs) logs.href = "/live_logs"; // logs page may not need mode
 }
 
 async function updateResumeOptions(mode) {

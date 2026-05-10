@@ -12,7 +12,7 @@ Le setup recommande installe :
 - un nom local stable en `.local` via mDNS
 - un proxy `nginx` sur le port `80`
 - un service `systemd` `cycle-analyst.service`
-- un fichier de variables dedie : `/etc/cycle-analyst/cycle-analyst.env`
+- un fichier de variables dedie : `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env`
 - optionnellement le `monitor_server` sur le port `8080`
 
 ## 1. Hypotheses et conventions
@@ -27,7 +27,7 @@ Pi.
 - app locale : `http://127.0.0.1:5050`
 - app exposee via nginx : `http://sc-vehicule-1.local`
 - service app : `cycle-analyst.service`
-- fichier env app : `/etc/cycle-analyst/cycle-analyst.env`
+- fichier env app : `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env`
 
 Exemple de noms par vehicule :
 
@@ -301,22 +301,28 @@ Les fichiers runtime principaux sont :
 - `var/live_photo/*.jpg`
 - `var/pending_photos/*` : photos en attente d'envoi si le reseau est indisponible.
 
-## 8. Creer le fichier de variables d'environnement
+## 8. Ajuster le fichier de variables d'environnement
 
-Creer le dossier de configuration :
+Le repo contient deja le fichier :
 
-```bash
-sudo install -d -m 0755 /etc/cycle-analyst
-sudo nano /etc/cycle-analyst/cycle-analyst.env
+```text
+/home/jeandard/Cycle-Analyst-App/cycle-analyst.env
 ```
 
-Exemple complet pour le Pi 1 :
+Il est charge automatiquement au demarrage de l'app et par le service systemd.
+Tu peux l'ajuster depuis l'interface :
+
+```text
+http://sc-vehicule-1.local/settings
+```
+
+Exemple de contenu pour le Pi 1 :
 
 ```ini
-# Cycle Analyst App - variables chargees par systemd
+# Cycle Analyst App - editable app configuration
 
 # Runtime local
-APP_VAR_DIR=/home/jeandard/Cycle-Analyst-App/var
+APP_VAR_DIR=var
 
 # A utiliser seulement si l'app est lancee via wsgi/gunicorn.
 # Avec "python cycle_server.py", le reader demarre deja automatiquement.
@@ -336,7 +342,7 @@ APP_SOLAR_PANEL_MAX_W=590
 APP_SOLAR_LAT=48.8566
 APP_SOLAR_LON=2.3522
 APP_BATTERY_NOMINAL_VOLTAGE=48.1
-APP_BATTERY_DISCHARGE_CURVE_FILE=/home/jeandard/Cycle-Analyst-App/var/battery_curve_lg_mh1_from_trip.json
+APP_BATTERY_DISCHARGE_CURVE_FILE=var/battery_curve_lg_mh1_from_trip.json
 
 # Capteur solaire INA228. Laisser commente si le Pi n'a pas ce capteur.
 # APP_SOLAR_SENSOR=ina228
@@ -357,14 +363,18 @@ APP_CAMERA_COMMAND=fswebcam -d /dev/video0 -q -S 60 --palette YUYV -r 640x480 --
 
 # Synchronisation vers monitor_server. Laisser MONITOR_URL vide pour desactiver.
 MONITOR_DEVICE_ID=sc-vehicule-1
-MONITOR_URL=http://91.134.243.157:8080
-MONITOR_USER=jean
-MONITOR_PASS=oklm
+MONITOR_URL=
+MONITOR_USER=
+MONITOR_PASS=
+MONITOR_UPLOAD_CHUNK_SIZE=1000
 ```
 
-Proteger le fichier si tu y mets `MONITOR_PASS` :
+Si tu preferes garder le fichier dans `/etc/cycle-analyst`, tu peux copier le
+fichier du repo puis lancer le service avec `APP_ENV_FILE` :
 
 ```bash
+sudo install -d -m 0755 /etc/cycle-analyst
+sudo cp /home/jeandard/Cycle-Analyst-App/cycle-analyst.env /etc/cycle-analyst/cycle-analyst.env
 sudo chown root:root /etc/cycle-analyst/cycle-analyst.env
 sudo chmod 0640 /etc/cycle-analyst/cycle-analyst.env
 ```
@@ -397,6 +407,7 @@ sudo chmod 0640 /etc/cycle-analyst/cycle-analyst.env
 | `MONITOR_URL` | vide | URL du monitor. Vide = sync desactivee. |
 | `MONITOR_USER` | vide | Login Basic Auth monitor. |
 | `MONITOR_PASS` | vide | Mot de passe Basic Auth monitor. |
+| `MONITOR_UPLOAD_CHUNK_SIZE` | `1000` | Nombre de lignes envoyees par paquet au monitor. |
 
 ## 10. Telecharger les tiles PMTiles pour la basemap vectorielle
 
@@ -585,7 +596,7 @@ Si le navigateur garde l'ancien rendu, recharge la page avec un refresh force.
 cd /home/jeandard/Cycle-Analyst-App
 source .venv/bin/activate
 set -a
-. /etc/cycle-analyst/cycle-analyst.env
+. /home/jeandard/Cycle-Analyst-App/cycle-analyst.env
 set +a
 python cycle_server.py
 ```
@@ -672,7 +683,8 @@ present. Sur cette camera, le mode MJPEG peut produire une image grise meme si
 la camera est correctement detectee.
 
 Si la camera apparait sur un autre device, par exemple `/dev/video1`, adapter
-`APP_CAMERA_COMMAND` dans `/etc/cycle-analyst/cycle-analyst.env`.
+`APP_CAMERA_COMMAND` dans `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env`
+ou depuis `/settings`.
 
 ## 13. Creer le service systemd de l'app
 
@@ -696,7 +708,7 @@ User=jeandard
 Group=jeandard
 SupplementaryGroups=dialout i2c video
 WorkingDirectory=/home/jeandard/Cycle-Analyst-App
-EnvironmentFile=-/etc/cycle-analyst/cycle-analyst.env
+EnvironmentFile=-/home/jeandard/Cycle-Analyst-App/cycle-analyst.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=/home/jeandard/Cycle-Analyst-App/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/home/jeandard/Cycle-Analyst-App/.venv/bin/python /home/jeandard/Cycle-Analyst-App/cycle_server.py
@@ -997,7 +1009,7 @@ sudo systemctl restart cycle-analyst.service
 sudo systemctl status cycle-analyst.service --no-pager
 ```
 
-Si tu modifies `/etc/cycle-analyst/cycle-analyst.env` :
+Si tu modifies `cycle-analyst.env` :
 
 ```bash
 sudo systemctl restart cycle-analyst.service
@@ -1126,7 +1138,7 @@ curl http://127.0.0.1:8080
 
 ## 21. Brancher un Pi vehicule au monitor
 
-Dans `/etc/cycle-analyst/cycle-analyst.env` sur chaque Pi vehicule :
+Dans `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env` sur chaque Pi vehicule :
 
 ```ini
 MONITOR_DEVICE_ID=sc-vehicule-1
@@ -1154,7 +1166,7 @@ La sync tourne toutes les 60 secondes quand `MONITOR_URL` est defini.
 - cle SSH GitHub du Pi ajoutee dans GitHub ou comme Deploy Key
 - `.venv` cree
 - dependances Python installees
-- `/etc/cycle-analyst/cycle-analyst.env` cree
+- `cycle-analyst.env` present dans le repo
 - `APP_VAR_DIR` pointe vers le `var/` du repo
 - `/home/jeandard/Documents/tiles.pmtiles` existe si la basemap offline est utilisee
 - `MONITOR_DEVICE_ID` unique
@@ -1180,7 +1192,7 @@ Verifier :
 
 - chemin du repo
 - chemin du venv
-- syntaxe de `/etc/cycle-analyst/cycle-analyst.env`
+- syntaxe de `cycle-analyst.env`
 - permissions sur les ports serie/I2C/camera
 
 ### La page web locale marche, mais pas `.local`
@@ -1280,9 +1292,9 @@ mkdir -p var var/session_metrics var/live_photo var/pending_photos
 mkdir -p /home/jeandard/Documents
 ```
 
-Puis creer :
+Puis ajuster/creer :
 
-- `/etc/cycle-analyst/cycle-analyst.env`
+- `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env` deja fourni par le repo
 - `/etc/systemd/system/cycle-analyst.service`
 - `/etc/nginx/sites-available/cycle-analyst`
 - `/etc/sudoers.d/cycle-analyst` si tu veux le bouton restart

@@ -937,64 +937,6 @@ th, td {
   max-width: 100%;
 }
 
-/* Live Logs utility styles */
-.section-compact {
-  padding-top: 0.5rem;
-}
-
-.card-wide {
-  max-width: 1000px;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.section-title {
-  font-size: var(--font-label);
-  color: var(--text-dark);
-  font-weight: bold;
-  margin: 0.5rem 0 0.5rem 0;
-}
-
-.subtitle {
-  font-size: var(--font-medium);
-  color: var(--text-dark);
-  margin: 0.25rem 0;
-}
-
-.muted { color: #666; }
-
-.two-col {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-  width: 100%;
-}
-
-@media (min-width: 980px) {
-  .two-col { grid-template-columns: 1fr 1fr; }
-}
-
-.kv {
-  display: grid;
-  grid-template-columns: 70vw 1fr;
-  gap: 6px 16px;
-  width: 100%;
-}
-
-.kv-key {
-  font-size: var(--font-medium);
-  color: var(--text-dark);
-  font-weight: bold;
-  text-align: left;
-}
-
-.kv-value {
-  font-size: var(--font-medium);
-  color: var(--text-dark);
-  text-align: left;
-}
-
 #connection-status {
   background-color: #999;
   color: white;
@@ -2046,5 +1988,352 @@ th, td {
     font-weight: bold;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+}
+
+/* ===== App settings page ===== */
+.settings-shell {
+  width: min(96vw, 1080px);
+}
+
+.settings-header-page {
+  margin-bottom: 0.45rem;
+}
+
+.settings-env-path,
+.settings-device-hint,
+.settings-save-status,
+.settings-process-value {
+  font-size: var(--font-medium);
+  line-height: 1.25;
+}
+
+.settings-env-path {
+  margin-top: 0.25rem;
+  color: #b9b3a4;
+  word-break: break-all;
+}
+
+.settings-save-status {
+  min-height: 1.2rem;
+  margin-bottom: 0.65rem;
+  color: #b9b3a4;
+}
+
+.settings-save-status.ok {
+  color: #00cc66;
+}
+
+.settings-save-status.error {
+  color: #ff6b6b;
+}
+
+.settings-save-status.working {
+  color: var(--highlight);
+}
+
+.settings-editor-form {
+  width: 100%;
+  margin: 0;
+}
+
+.settings-map-card {
+  margin-bottom: 0.65rem;
+}
+
+.settings-map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(13rem, 0.8fr);
+  gap: 0.65rem;
+  align-items: stretch;
+}
+
+#solar-position-map {
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  border-radius: 0.55rem;
+  background: #b8d7dd;
+  cursor: crosshair;
+}
+
+.settings-map-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  align-items: stretch;
+}
+
+.settings-map-readout {
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.45rem;
+  background: rgba(255, 255, 255, 0.34);
+  color: #111;
+  font-size: var(--font-medium);
+  font-weight: bold;
+  text-align: left;
+}
+
+.settings-diagnostics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+}
+
+.settings-diagnostic-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.55rem;
+}
+
+.settings-log-box {
+  min-height: 7.5rem;
+  max-height: 17rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.55rem;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 0.45rem;
+  background: rgba(0, 0, 0, 0.08);
+  color: #26221d;
+  font-family: var(--font-main);
+  font-size: 0.56rem;
+  line-height: 1.28;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.settings-log-box.ok {
+  border-left: 3px solid #008b38;
+}
+
+.settings-log-box.warning {
+  border-left: 3px solid #d47500;
+}
+
+.settings-log-box.error {
+  border-left: 3px solid #cc3333;
+}
+
+.settings-camera-preview {
+  width: 100%;
+  max-height: 18rem;
+  object-fit: contain;
+  border: 1px solid rgba(0, 0, 0, 0.24);
+  border-radius: 0.45rem;
+  background: #111;
+}
+
+.settings-section-grid {
+  align-items: start;
+}
+
+.settings-category-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-variable-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.settings-variable-row {
+  display: grid;
+  grid-template-columns: minmax(9.5rem, 0.55fr) minmax(11rem, 1fr);
+  gap: 0.35rem 0.55rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.settings-variable-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.settings-variable-toggle {
+  justify-content: flex-start;
+}
+
+.settings-variable-toggle span {
+  min-width: 0;
+  color: #111;
+  line-height: 1.15;
+}
+
+.settings-variable-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  color: var(--text-dark);
+  font-size: var(--font-medium);
+  font-weight: bold;
+  text-align: left;
+}
+
+.settings-variable-field span {
+  color: #d47500;
+  font-size: 0.56rem;
+  line-height: 1.1;
+  word-break: break-all;
+}
+
+.settings-variable-field input,
+.settings-variable-field select {
+  min-width: 0;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  border-radius: 0.45rem;
+  background: rgba(255, 255, 255, 0.42);
+  color: #111;
+  font-family: var(--font-main);
+  font-size: var(--font-medium);
+  font-weight: bold;
+}
+
+.settings-camera-grid {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.settings-camera-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  color: var(--text-dark);
+  font-size: var(--font-medium);
+  font-weight: bold;
+  text-align: left;
+}
+
+.settings-camera-grid label span {
+  color: #d47500;
+  font-size: 0.56rem;
+  line-height: 1.1;
+}
+
+.settings-camera-grid input:not([type="checkbox"]),
+.settings-camera-grid select {
+  min-width: 0;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  border-radius: 0.45rem;
+  background: rgba(255, 255, 255, 0.42);
+  color: #111;
+  font-family: var(--font-main);
+  font-size: var(--font-medium);
+  font-weight: bold;
+}
+
+.settings-camera-check {
+  flex-direction: row !important;
+  align-items: center;
+  min-height: 2rem;
+}
+
+.settings-camera-check input {
+  width: auto;
+  min-height: 0;
+}
+
+.settings-camera-extra,
+.settings-command-preview {
+  grid-column: 1 / -1;
+}
+
+.settings-command-preview {
+  grid-column: 1 / -1;
+  padding: 0.35rem 0.45rem;
+  border-radius: 0.45rem;
+  background: rgba(0, 0, 0, 0.08);
+  color: #5f594e;
+  font-size: 0.54rem;
+  line-height: 1.2;
+  text-align: left;
+  word-break: break-word;
+}
+
+.settings-variable-description,
+.settings-variable-detail,
+.settings-process-value {
+  grid-column: 1 / -1;
+  color: #5f594e;
+  font-size: 0.58rem;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.settings-variable-detail {
+  padding: 0.38rem 0.48rem;
+  border-left: 3px solid rgba(212, 117, 0, 0.65);
+  border-radius: 0.35rem;
+  background: rgba(255, 255, 255, 0.22);
+  color: #3f3a33;
+}
+
+.settings-process-value {
+  color: #8a5a00;
+  word-break: break-all;
+}
+
+.settings-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: #1b1b1b;
+  box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.28);
+}
+
+.settings-device-hint {
+  color: #d8d2bd;
+}
+
+@media (max-width: 700px) {
+  .settings-section-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-variable-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-map-layout,
+  .settings-diagnostics {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-camera-grid {
+    grid-column: 1;
+    grid-template-columns: 1fr;
+  }
+
+  .settings-save-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-save-bar .start-button {
+    width: 100%;
+    min-height: 2.4rem;
   }
 }

@@ -203,8 +203,8 @@ flowchart TB
         Dashboard["/dashboard"]
         Summary["/summary"]
         Users["/users"]
+        Settings["/settings"]
         Game["/game, /game/play, /game/leaderboard"]
-        LogsPage["/live_logs"]
     end
 
     subgraph LiveApis["Live JSON APIs"]

@@ -1,6 +1,11 @@
 from threading import Lock
 import os
 
+from app.env_file import load_env_file
+
+
+load_env_file()
+
 # --- Files & Paths ---
 BASE_DIR = os.getenv("APP_VAR_DIR", "var")
 os.makedirs(BASE_DIR, exist_ok=True)

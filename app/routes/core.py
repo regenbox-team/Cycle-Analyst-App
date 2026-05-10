@@ -324,10 +324,6 @@ def dashboard():
     return render_template("index.html")
 
 
-def live_logs_page():
-    return render_template("live_logs.html")
-
-
 def latest_photo():
     path = latest_local_photo_path()
     if not path:
@@ -344,7 +340,6 @@ def create_blueprint():
     bp.add_url_rule("/sessions", view_func=list_sessions)
     bp.add_url_rule("/", view_func=root)
     bp.add_url_rule("/dashboard", view_func=dashboard)
-    bp.add_url_rule("/live_logs", view_func=live_logs_page)
     bp.add_url_rule("/photo_capture/latest", view_func=latest_photo)
     return bp
 
@@ -356,5 +351,4 @@ def register(app):
     app.add_url_rule("/sessions", view_func=list_sessions)
     app.add_url_rule("/", view_func=root)
     app.add_url_rule("/dashboard", view_func=dashboard)
-    app.add_url_rule("/live_logs", view_func=live_logs_page)
     app.add_url_rule("/photo_capture/latest", view_func=latest_photo)

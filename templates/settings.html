@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App Settings</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="summary-page settings-page">
+  <main class="summary-shell settings-shell">
+    <header class="summary-header settings-header-page">
+      <div>
+        <div class="summary-kicker">App Settings</div>
+        <h1>cycle-analyst.env</h1>
+        <div class="settings-env-path">{{ env_path }}</div>
+      </div>
+      <div class="summary-actions">
+        <a class="dashboard-button" href="/start">Start</a>
+        <button class="dashboard-button" type="button" id="restart-service-button">Restart service</button>
+      </div>
+    </header>
+
+    <div
+      class="settings-save-status {% if status == 'saved' %}ok{% endif %}"
+      id="settings-action-status"
+      aria-live="polite"
+    >{% if status == "saved" %}Saved. Restart the service for startup settings.{% endif %}</div>
+
+    <section class="summary-category-card settings-map-card">
+      <h2>Solar GPS point</h2>
+      <div class="settings-map-layout">
+        <canvas id="solar-position-map" width="720" height="360" aria-label="Solar position map"></canvas>
+        <div class="settings-map-panel">
+          <div class="settings-map-readout" id="solar-position-readout">-</div>
+          <button class="dashboard-button" type="button" id="solar-use-gps">Use live GPS</button>
+          <div class="settings-variable-detail">
+            Click the map to set APP_SOLAR_LAT and APP_SOLAR_LON. This point is used for solar estimation when the live GPS has no fresh fix yet.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-diagnostics">
+      <div class="summary-category-card settings-diagnostic-card">
+        <h2>Current sensor</h2>
+        <button class="dashboard-button" type="button" data-diagnostic="solar_sensor">Test INA228</button>
+        <pre id="diagnostic-solar_sensor" class="settings-log-box">No test run yet.</pre>
+      </div>
+      <div class="summary-category-card settings-diagnostic-card">
+        <h2>Webcam</h2>
+        <button class="dashboard-button" type="button" data-diagnostic="camera">Capture test image</button>
+        <img id="diagnostic-camera-image" class="settings-camera-preview" alt="Camera test preview" hidden>
+        <pre id="diagnostic-camera" class="settings-log-box">No test run yet.</pre>
+      </div>
+      <div class="summary-category-card settings-diagnostic-card">
+        <h2>Cycle Analyst</h2>
+        <button class="dashboard-button" type="button" data-diagnostic="cycle_analyst">Refresh CA log</button>
+        <pre id="diagnostic-cycle_analyst" class="settings-log-box">No test run yet.</pre>
+      </div>
+      <div class="summary-category-card settings-diagnostic-card">
+        <h2>Monitor</h2>
+        <button class="dashboard-button" type="button" data-diagnostic="monitor">Send heartbeat</button>
+        <pre id="diagnostic-monitor" class="settings-log-box">No test run yet.</pre>
+      </div>
+    </section>
+
+    <form class="settings-editor-form" method="POST" action="/settings/save">
+      <div class="summary-section-grid settings-section-grid">
+        {% for group in groups %}
+          <section class="summary-category-card settings-category-card">
+            <h2>{{ group["name"] }}</h2>
+            <div class="settings-variable-list">
+              {% for setting in group["settings"] %}
+                <div class="settings-variable-row">
+                  <label class="setting-switch settings-variable-toggle" for="enabled_{{ setting.key }}">
+                    <span>{{ setting.label }}</span>
+                    <input
+                      type="checkbox"
+                      id="enabled_{{ setting.key }}"
+                      name="enabled_{{ setting.key }}"
+                      value="1"
+                      {% if setting.enabled %}checked{% endif %}
+                    >
+                  </label>
+                  {% if setting.key == "APP_CAMERA_COMMAND" %}
+                    <div class="settings-camera-grid">
+                      <label>
+                        <span>Program</span>
+                        <select name="APP_CAMERA_COMMAND__program">
+                          {% for option in setting.camera_choices.program %}
+                            <option value="{{ option.value }}" {% if option.value == setting.camera.program %}selected{% endif %}>{{ option.label }}</option>
+                          {% endfor %}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Device</span>
+                        <select name="APP_CAMERA_COMMAND__device">
+                          {% for option in setting.camera_choices.device %}
+                            <option value="{{ option.value }}" {% if option.value == setting.camera.device %}selected{% endif %}>{{ option.label }}</option>
+                          {% endfor %}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Skip frames</span>
+                        <select name="APP_CAMERA_COMMAND__skip_frames">
+                          {% for option in setting.camera_choices.skip_frames %}
+                            <option value="{{ option.value }}" {% if option.value == setting.camera.skip_frames %}selected{% endif %}>{{ option.label }}</option>
+                          {% endfor %}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Palette</span>
+                        <select name="APP_CAMERA_COMMAND__palette">
+                          {% for option in setting.camera_choices.palette %}
+                            <option value="{{ option.value }}" {% if option.value == setting.camera.palette %}selected{% endif %}>{{ option.label }}</option>
+                          {% endfor %}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Resolution</span>
+                        <select name="APP_CAMERA_COMMAND__resolution">
+                          {% for option in setting.camera_choices.resolution %}
+                            <option value="{{ option.value }}" {% if option.value == setting.camera.resolution %}selected{% endif %}>{{ option.label }}</option>
+                          {% endfor %}
+                        </select>
+                      </label>
+                      <label>
+                        <span>JPEG quality</span>
+                        <select name="APP_CAMERA_COMMAND__jpeg_quality">
+                          {% for option in setting.camera_choices.jpeg_quality %}
+                            <option value="{{ option.value }}" {% if option.value == setting.camera.jpeg_quality %}selected{% endif %}>{{ option.label }}</option>
+                          {% endfor %}
+                        </select>
+                      </label>
+                      <label class="settings-camera-check">
+                        <input type="checkbox" name="APP_CAMERA_COMMAND__quiet" value="1" {% if setting.camera.quiet %}checked{% endif %}>
+                        <span>Quiet</span>
+                      </label>
+                      <label class="settings-camera-check">
+                        <input type="checkbox" name="APP_CAMERA_COMMAND__no_banner" value="1" {% if setting.camera.no_banner %}checked{% endif %}>
+                        <span>No banner</span>
+                      </label>
+                      <label class="settings-camera-extra">
+                        <span>Advanced args</span>
+                        <input name="APP_CAMERA_COMMAND__extra_args" value="{{ setting.camera.extra_args }}" placeholder="optional">
+                      </label>
+                    </div>
+                    <div class="settings-command-preview">{{ setting.value }}</div>
+                  {% else %}
+                    <label class="settings-variable-field" for="{{ setting.key }}">
+                      <span>{{ setting.key }}</span>
+                      {% if setting.choices %}
+                        <select id="{{ setting.key }}" name="{{ setting.key }}">
+                          {% for option in setting.choices %}
+                            <option value="{{ option.value }}" {% if option.value == setting.value %}selected{% endif %}>{{ option.label }}</option>
+                          {% endfor %}
+                        </select>
+                      {% else %}
+                        <input
+                          type="{{ setting.input_type }}"
+                          id="{{ setting.key }}"
+                          name="{{ setting.key }}"
+                          value="{{ setting.value }}"
+                          placeholder="{{ setting.placeholder }}"
+                          {% if setting.input_type == "number" %}step="any"{% endif %}
+                        >
+                      {% endif %}
+                    </label>
+                  {% endif %}
+                  <div class="settings-variable-description">{{ setting.description }}</div>
+                  {% if setting.detail %}
+                    <div class="settings-variable-detail">{{ setting.detail }}</div>
+                  {% endif %}
+                  {% if setting.process_value and setting.process_value != setting.value %}
+                    <div class="settings-process-value">Running: {{ setting.process_value }}</div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </section>
+        {% endfor %}
+      </div>
+
+      <div class="settings-save-bar">
+        <div class="settings-device-hint">Device: {{ device_hint }}</div>
+        <button class="start-button" type="submit">Save settings</button>
+      </div>
+    </form>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+  <script>
+    (function(){
+      const button = document.getElementById('restart-service-button');
+      const status = document.getElementById('settings-action-status');
+      if (!button || !status) return;
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        status.textContent = 'Restart requested...';
+        status.className = 'settings-save-status working';
+        try {
+          const response = await fetch('/restart_service', { method: 'POST' });
+          const data = await response.json();
+          if (response.ok || response.status === 202) {
+            status.textContent = data.message || 'Restart requested.';
+            status.className = 'settings-save-status ok';
+          } else {
+            status.textContent = data.error || 'Restart failed.';
+            status.className = 'settings-save-status error';
+            button.disabled = false;
+          }
+        } catch (error) {
+          status.textContent = 'Restart failed.';
+          status.className = 'settings-save-status error';
+          button.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
