@@ -66,6 +66,12 @@ def diagnostics_solar_sensor():
         f"{float(live.get('current_a') or 0):.3f} A, "
         f"{float(live.get('power_w') or 0):.3f} W"
     )
+    if live.get("raw_current_a") is not None:
+        lines.append(
+            "Live raw/filter: "
+            f"raw={float(live.get('raw_current_a') or 0):.3f} A, "
+            f"filtered={float(live.get('current_a') or 0):.3f} A"
+        )
 
     try:
         from app.solar_sensor import INA228Sensor, sensor_enabled

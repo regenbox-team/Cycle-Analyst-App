@@ -129,6 +129,8 @@ def read_serial():
                 "bus_v": solar_sample.bus_v,
                 "shunt_v": solar_sample.shunt_v,
                 "power_w": getattr(solar_sample, "power_w", 0.0),
+                "raw_current_a": getattr(solar_sample, "raw_current_a", solar_sample.current_a),
+                "raw_power_w": getattr(solar_sample, "raw_power_w", getattr(solar_sample, "power_w", 0.0)),
                 "temperature_c": getattr(solar_sample, "temperature_c", 0.0),
                 "last_update": now_ts,
             })
@@ -143,6 +145,8 @@ def read_serial():
                 "bus_v": 0.0,
                 "shunt_v": 0.0,
                 "power_w": 0.0,
+                "raw_current_a": 0.0,
+                "raw_power_w": 0.0,
                 "temperature_c": 0.0,
             })
 

@@ -4,6 +4,8 @@ import os
 import time
 from dataclasses import dataclass
 
+from .solar_filter import AdaptiveSolarFilter, SolarFilterConfig
+
 
 CONFIG_REGISTER = 0x00
 ADC_CONFIG_REGISTER = 0x01
@@ -38,6 +40,8 @@ class SolarSample:
     power_w: float = 0.0
     temperature_c: float = 0.0
     source: str = "ina228"
+    raw_current_a: float | None = None
+    raw_power_w: float | None = None
 
 
 @dataclass
@@ -84,6 +88,8 @@ class INA228Sensor:
         self.current_offset = float(os.getenv("APP_SOLAR_CURRENT_OFFSET", "0.0"))
         self.current_deadband_a = float(os.getenv("APP_SOLAR_CURRENT_DEADBAND_A", "0.15"))
         self.current_sign = -1.0 if os.getenv("APP_SOLAR_INVERT_SIGN", "").strip().lower() in {"1", "true", "yes", "on"} else 1.0
+        self.filter = AdaptiveSolarFilter(_filter_config_from_env(self.current_deadband_a))
+        self._last_sample_ts = None
         self.current_lsb = self.max_amps / INA228_CURRENT_LSB_DIVISOR
         self.expected_shunt_cal = int(INA228_CALIBRATION_FACTOR * self.current_lsb * self.shunt_ohms) & 0x7FFF
         self._bus = self._SMBus(self.bus_id)
@@ -101,14 +107,22 @@ class INA228Sensor:
 
     def read_sample(self) -> SolarSample:
         debug = self.read_debug_sample()
-        current_a = 0.0 if abs(debug.current_a) < self.current_deadband_a else debug.current_a
+        now = time.time()
+        dt = None if self._last_sample_ts is None else now - self._last_sample_ts
+        self._last_sample_ts = now
+
+        raw_current_a = 0.0 if abs(debug.current_a) < self.current_deadband_a else debug.current_a
+        current_a = self.filter.update_current(raw_current_a, dt)
         power_w = 0.0 if current_a == 0.0 else debug.bus_v * current_a
+        raw_power_w = 0.0 if raw_current_a == 0.0 else debug.bus_v * raw_current_a
         return SolarSample(
             current_a=current_a,
             bus_v=debug.bus_v,
             shunt_v=debug.shunt_v,
             power_w=power_w,
             temperature_c=debug.die_temp_c,
+            raw_current_a=raw_current_a,
+            raw_power_w=raw_power_w,
         )
 
     def read_debug_sample(self) -> SolarDebugSample:
@@ -242,3 +256,35 @@ def read_solar_sample(sensor: INA228Sensor | None, failure_backoff_until: float)
 def _sign_extend(value: int, bits: int) -> int:
     sign_bit = 1 << (bits - 1)
     return (value ^ sign_bit) - sign_bit
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+
+def _filter_config_from_env(current_deadband_a: float) -> SolarFilterConfig:
+    return SolarFilterConfig(
+        enabled=_env_bool("APP_SOLAR_FILTER_ENABLED", True),
+        tau_seconds=max(0.05, _env_float("APP_SOLAR_FILTER_TAU_SECONDS", 4.0)),
+        fast_tau_seconds=max(0.05, _env_float("APP_SOLAR_FILTER_FAST_TAU_SECONDS", 0.8)),
+        median_window=max(1, _env_int("APP_SOLAR_FILTER_MEDIAN_WINDOW", 5)),
+        jump_threshold_a=max(0.0, _env_float("APP_SOLAR_FILTER_JUMP_THRESHOLD_A", 2.5)),
+        output_deadband_a=max(0.0, _env_float("APP_SOLAR_FILTER_OUTPUT_DEADBAND_A", current_deadband_a)),
+    )
