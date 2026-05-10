@@ -1218,20 +1218,26 @@
 
   function ensureRouteLayer() {
     if (!map) return;
-    const beforePositionDot = map.getLayer('pos-dot') ? 'pos-dot' : undefined;
+    const beforeFollowedTrack = map.getLayer('track-casing') ? 'track-casing' : (map.getLayer('track-line') ? 'track-line' : undefined);
     if (!map.getLayer('route-casing')) {
       map.addLayer({
         id: 'route-casing', type: 'line', source: 'route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#050505', 'line-opacity': 0.75, 'line-width': 8 }
-      }, beforePositionDot);
+        paint: { 'line-color': '#050505', 'line-opacity': 0.45, 'line-width': 8 }
+      }, beforeFollowedTrack);
     }
     if (!map.getLayer('route-line')) {
       map.addLayer({
         id: 'route-line', type: 'line', source: 'route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': 'orange', 'line-opacity': 0.62, 'line-width': 5 }
-      }, beforePositionDot);
+        paint: { 'line-color': 'orange', 'line-opacity': 0.42, 'line-width': 5 }
+      }, beforeFollowedTrack);
+    }
+    if (beforeFollowedTrack) {
+      try {
+        if (map.getLayer('route-casing')) map.moveLayer('route-casing', beforeFollowedTrack);
+        if (map.getLayer('route-line')) map.moveLayer('route-line', beforeFollowedTrack);
+      } catch {}
     }
   }
 
