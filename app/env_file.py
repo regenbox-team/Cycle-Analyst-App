@@ -292,6 +292,15 @@ SETTINGS: tuple[EnvSetting, ...] = (
         detail="1000 est un bon compromis. Diminue si le reseau est lent ou instable; augmente si les uploads sont trop nombreux.",
         choices=MONITOR_CHUNK_CHOICES,
     ),
+    EnvSetting(
+        "MONITOR_AUTO_UPLOAD_SESSIONS",
+        "Auto-upload sessions",
+        "0",
+        "Upload automatique des sessions terminees.",
+        "Monitor sync",
+        detail="Desactive par defaut: les heartbeats, utilisateurs et photos restent synchronises, mais les sessions doivent etre uploadees manuellement depuis la liste des sessions.",
+        choices=(("0", "Off"), ("1", "On")),
+    ),
 )
 
 

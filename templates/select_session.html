@@ -11,36 +11,38 @@
   <div class="section">
     <h1>Select a Session</h1>
 
-    <div class="card">
-      <form action="/summary" method="get" class="form-group">
-        <label for="session">View Summary for Session:</label>
-        <select name="session" id="session">
-          {% for s in sessions %}
-            <option value="{{ s }}">{{ s }}</option>
-          {% endfor %}
-        </select>
-        {% if mode %}
-          <input type="hidden" name="mode" value="{{ mode }}">
-        {% endif %}
-        <button type="submit">View Summary</button>
-      </form>
-    </div>
-
-    <div class="card">
-      <div class="form-group">
-        <label for="session-select">Manage Session(s):</label>
-        <select id="session-select" multiple></select>
-        <div class="session-action-row">
-          <button id="upload-session-button" data-upload-selected-sessions data-mode="{{ mode or '' }}">Upload monitor</button>
-          <button id="delete-session-button">Delete</button>
+    <div class="card session-table-card">
+      <div class="session-table-head">
+        <div>
+          <h2>Sessions</h2>
+          <p>Upload manually to the monitor server when the session looks correct.</p>
         </div>
-        <div id="session-upload-status" class="session-upload-status" aria-live="polite"></div>
+        <button id="refresh-sessions-button" type="button">Refresh</button>
+      </div>
+      <div id="session-upload-status" class="session-upload-status" aria-live="polite"></div>
+      <div class="session-table-wrap">
+        <table class="session-table">
+          <thead>
+            <tr>
+              <th>Session</th>
+              <th>Distance</th>
+              <th>Rows</th>
+              <th>Size</th>
+              <th>Monitor</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="sessions-body">
+            <tr>
+              <td colspan="6">Loading sessions...</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
     <a class="dashboard-button" href="/dashboard">&larr; Back to Dashboard</a>
   </div>
-  <script src="{{ url_for('static', filename='js/session_upload.js') }}"></script>
   <script src="{{ url_for('static', filename='js/select_session.js') }}"></script>
 
 </body>

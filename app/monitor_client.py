@@ -28,6 +28,10 @@ def _monitor_url() -> str | None:
     return os.getenv("MONITOR_URL")
 
 
+def _auto_upload_sessions_enabled() -> bool:
+    return os.getenv("MONITOR_AUTO_UPLOAD_SESSIONS", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _auth_header() -> dict[str, str]:
     user = os.getenv("MONITOR_USER", "")
     password = os.getenv("MONITOR_PASS", "")
@@ -122,7 +126,7 @@ def _fetch_session_rows(db_path: str, session_id: str) -> list[dict[str, Any]]:
                        {bool_col("solar_enabled")}
                 FROM logs
                 WHERE session = ?
-                ORDER BY id
+                ORDER BY timestamp, id
                 """,
                 (session_id,),
             ).fetchall()
@@ -483,6 +487,9 @@ def _sync_once() -> None:
         pass
 
     current_session = state.session_id if state.session_active else None
+
+    if not _auto_upload_sessions_enabled():
+        return
 
     for db_path in _list_db_files():
         mode = _mode_from_db_path(db_path)

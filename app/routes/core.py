@@ -1,9 +1,11 @@
 from __future__ import annotations
+import json
+import os
 import sqlite3
 from datetime import datetime, timedelta
 from flask import render_template, jsonify, redirect, request, send_file
 
-from app.config import get_db_file, VEHICLE_CONFIGS
+from app.config import get_db_file, VEHICLE_CONFIGS, SESSION_METRICS_DIR
 from app.modes import vehicle_mode
 from app import state
 from app.metrics import update_metrics  # re-export compatibility
@@ -18,6 +20,31 @@ POWER_HISTORY_DEFAULT_SAMPLES = 180
 POWER_HISTORY_MAX_SAMPLES = 180
 SESSION_TRACK_DEFAULT_SAMPLES = 5000
 SESSION_TRACK_MAX_SAMPLES = 10000
+
+
+def _raw_distance_km(raw: str | None) -> float | None:
+    if not raw:
+        return None
+    try:
+        parts = raw.strip().split()
+        if len(parts) < 5:
+            return None
+        return float(parts[4])
+    except Exception:
+        return None
+
+
+def _session_metrics_distance(session_id: str | None) -> float | None:
+    if not session_id:
+        return None
+    path = os.path.join(SESSION_METRICS_DIR, f"{session_id}_session_metrics.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            metrics = json.load(f)
+        distance = metrics.get("distance_km")
+        return float(distance) if distance is not None else None
+    except Exception:
+        return None
 
 
 def _get_metrics_payload():
@@ -365,16 +392,66 @@ def logs():
 
 
 def list_sessions():
-    with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
+    mode = request.args.get('mode')
+    db_path = get_db_file(mode)
+    with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
             """
-            SELECT session, SUM(LENGTH(raw)) as size_bytes
+            SELECT session,
+                   COUNT(*) AS rows_count,
+                   SUM(LENGTH(raw)) AS size_bytes,
+                   MIN(timestamp) AS start_ts,
+                   MAX(timestamp) AS end_ts
             FROM logs
             GROUP BY session
             ORDER BY session DESC
             """
         ).fetchall()
-    sessions = [{"session": r[0], "size_kb": round((r[1] or 0) / 1024, 2)} for r in rows]
+        distances = {}
+        for row in rows:
+            session_id = row[0]
+            distance = _session_metrics_distance(session_id)
+            if distance is None:
+                raw_rows = conn.execute(
+                    """
+                    SELECT raw
+                    FROM logs
+                    WHERE session = ?
+                    ORDER BY timestamp, id
+                    """,
+                    (session_id,),
+                ).fetchall()
+                raw_distances = [
+                    value
+                    for value in (_raw_distance_km(raw_row[0]) for raw_row in raw_rows)
+                    if value is not None
+                ]
+                if raw_distances:
+                    distance = max(raw_distances) - min(raw_distances)
+            distances[session_id] = distance
+
+    uploaded_sessions = None
+    try:
+        from app.monitor_client import _device_id, _known_sessions, _mode_from_db_path, _monitor_url
+
+        url = _monitor_url()
+        if url:
+            uploaded_sessions = _known_sessions(url, _device_id(), _mode_from_db_path(db_path))
+    except Exception:
+        uploaded_sessions = None
+
+    sessions = [
+        {
+            "session": r[0],
+            "rows_count": int(r[1] or 0),
+            "size_kb": round((r[2] or 0) / 1024, 2),
+            "start_ts": r[3],
+            "end_ts": r[4],
+            "distance_km": distances.get(r[0]),
+            "uploaded": (r[0] in uploaded_sessions) if uploaded_sessions is not None else None,
+        }
+        for r in rows
+    ]
     return jsonify(sessions)
 
 

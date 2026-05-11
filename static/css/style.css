@@ -1012,6 +1012,140 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   color: var(--highlight);
 }
 
+.session-table-card {
+  overflow-x: auto;
+}
+
+.session-table-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.65rem;
+}
+
+.session-table-head h2 {
+  margin: 0 0 0.2rem;
+}
+
+.session-table-head p {
+  margin: 0;
+  color: var(--text-light);
+  font-size: var(--font-small);
+}
+
+.session-table-wrap {
+  overflow-x: auto;
+}
+
+.session-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  color: var(--text-dark);
+  font-size: var(--font-small);
+}
+
+.session-table th,
+.session-table td {
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.session-table th {
+  color: var(--text-light);
+  font-size: var(--font-tiny);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.session-row.uploaded {
+  background: rgba(22, 163, 74, 0.12);
+}
+
+.session-row.pending {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.session-row.unknown {
+  background: rgba(234, 179, 8, 0.12);
+}
+
+.session-name {
+  font-weight: 700;
+}
+
+.session-sub {
+  color: var(--text-light);
+  font-size: var(--font-tiny);
+}
+
+.session-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: var(--radius);
+  font-size: var(--font-tiny);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.session-badge.uploaded {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.session-badge.pending {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.session-badge.unknown {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.session-row-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.session-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: var(--radius);
+  background: #f8f8f8;
+  color: var(--text-dark);
+  font-family: var(--font-main);
+  font-size: var(--font-tiny);
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.session-action.primary {
+  background: var(--highlight);
+  color: var(--text-dark);
+}
+
+.session-action.danger {
+  background: #aa3333;
+  color: #fff;
+}
+
+.session-action:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 /* FORMS + LINKS */
 form {
   margin: 1rem 0;
