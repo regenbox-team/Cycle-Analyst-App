@@ -44,6 +44,9 @@ TERRAIN_FALLBACK_API_URL = os.getenv(
 TERRAIN_FALLBACK_BATCH_SIZE = int(os.getenv("MONITOR_TERRAIN_FALLBACK_BATCH_SIZE", "100"))
 TERRAIN_FALLBACK_THROTTLE_SEC = float(os.getenv("MONITOR_TERRAIN_FALLBACK_THROTTLE_SEC", "1.0"))
 TERRAIN_BACKFILL_LIMIT_POINTS = int(os.getenv("MONITOR_TERRAIN_BACKFILL_LIMIT_POINTS", "500"))
+SUNTRIP_DEFAULT_START_DATE = "2026-05-04"
+SUNTRIP_DEFAULT_DEVICE_ALIASES = ("Supercycle-1", "sc-vehicule-1")
+SUNTRIP_DEFAULT_PHOTO_LIMIT = 5000
 DEFAULT_DB_TIMEOUT_SEC = 30.0
 HEARTBEAT_ACTIVE_WINDOW_SEC = 120
 DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
@@ -618,6 +621,45 @@ def _parse_upload_ts(ts: str | None) -> datetime | None:
         except Exception:
             continue
     return None
+
+
+def _csv_values(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _suntrip_start_filter() -> tuple[str, str] | None:
+    raw = os.getenv("SUNTRIP_START_DATE", SUNTRIP_DEFAULT_START_DATE).strip()
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return dt.strftime("%Y-%m-%d %H:%M:%S"), dt.strftime("%Y-%m-%d")
+        except Exception:
+            continue
+    return None
+
+
+def _suntrip_photo_limit() -> int | None:
+    raw = os.getenv("SUNTRIP_PHOTO_LIMIT", str(SUNTRIP_DEFAULT_PHOTO_LIMIT)).strip()
+    if not raw:
+        return SUNTRIP_DEFAULT_PHOTO_LIMIT
+    try:
+        limit = int(raw)
+    except (TypeError, ValueError):
+        return SUNTRIP_DEFAULT_PHOTO_LIMIT
+    return limit if limit > 0 else None
+
+
+def _suntrip_device_aliases(device_id: str | None) -> list[str]:
+    device = (device_id or "").strip()
+    configured = _csv_values(os.getenv("SUNTRIP_DEVICE_ALIASES"))
+    aliases = configured or list(SUNTRIP_DEFAULT_DEVICE_ALIASES)
+    if device and device in aliases:
+        return aliases
+    return [device] if device else []
 
 
 def _terrain_enabled() -> bool:
@@ -2321,7 +2363,7 @@ def create_app() -> Flask:
         }
         return Response(gpx_text, headers=headers)
 
-    def _suntrip_photo_payload(row) -> dict[str, Any]:
+    def _suntrip_photo_payload(row, gps_fallback: sqlite3.Row | None = None) -> dict[str, Any]:
         image_url = url_for("photo_file", filename=row["relative_path"])
         stored_metrics = {}
         if row["metrics_json"]:
@@ -2345,6 +2387,24 @@ def create_app() -> Flask:
         speed_kph = metric_value("speed_kph", "speed_kph")
         if speed_kph is None:
             speed_kph = row["gps_speed_kph"]
+        gps_lat = row["gps_lat"]
+        gps_lon = row["gps_lon"]
+        gps_alt = row["gps_alt"]
+        gps_speed_kph = row["gps_speed_kph"]
+        gps_track_deg = row["gps_track_deg"]
+        gps_fix = row["gps_fix"]
+        gps_sats = row["gps_sats"]
+        gps_hdop = row["gps_hdop"]
+        if gps_fallback is not None:
+            if _safe_float(gps_lat) in (None, 0) or _safe_float(gps_lon) in (None, 0):
+                gps_lat = gps_fallback["gps_lat"]
+                gps_lon = gps_fallback["gps_lon"]
+            gps_alt = gps_alt if gps_alt is not None else gps_fallback["gps_alt"]
+            gps_speed_kph = gps_speed_kph if gps_speed_kph is not None else gps_fallback["gps_speed_kph"]
+            gps_track_deg = gps_track_deg if gps_track_deg is not None else gps_fallback["gps_track_deg"]
+            gps_fix = gps_fix if gps_fix is not None else gps_fallback["gps_fix"]
+            gps_sats = gps_sats if gps_sats is not None else gps_fallback["gps_sats"]
+            gps_hdop = gps_hdop if gps_hdop is not None else gps_fallback["gps_hdop"]
         return {
             "id": row["id"],
             "device_id": row["device_id"],
@@ -2357,14 +2417,14 @@ def create_app() -> Flask:
             "interval_km": row["interval_km"],
             "image_url": image_url,
             "gps": {
-                "lat": row["gps_lat"],
-                "lon": row["gps_lon"],
-                "alt": row["gps_alt"],
-                "speed_kph": row["gps_speed_kph"],
-                "track_deg": row["gps_track_deg"],
-                "fix": bool(row["gps_fix"]),
-                "sats": row["gps_sats"],
-                "hdop": row["gps_hdop"],
+                "lat": gps_lat,
+                "lon": gps_lon,
+                "alt": gps_alt,
+                "speed_kph": gps_speed_kph,
+                "track_deg": gps_track_deg,
+                "fix": bool(gps_fix),
+                "sats": gps_sats,
+                "hdop": gps_hdop,
             },
             "metrics": {
                 "speed_kph": speed_kph,
@@ -2380,6 +2440,42 @@ def create_app() -> Flask:
             },
         }
 
+    def _suntrip_photo_needs_gps(row: sqlite3.Row) -> bool:
+        lat = _safe_float(row["gps_lat"])
+        lon = _safe_float(row["gps_lon"])
+        return lat is None or lon is None or lat == 0 or lon == 0
+
+    def _suntrip_fallback_gps(conn: sqlite3.Connection, row: sqlite3.Row) -> sqlite3.Row | None:
+        aliases = _suntrip_device_aliases(row["device_id"])
+        if not aliases:
+            return None
+        placeholders = ",".join("?" for _ in aliases)
+        params: list[Any] = [row["session_id"], row["mode"], *aliases]
+        order = "id ASC"
+        if row["captured_at"]:
+            order = """
+                CASE
+                    WHEN timestamp IS NULL THEN 1
+                    WHEN strftime('%s', timestamp) IS NULL THEN 1
+                    ELSE 0
+                END,
+                ABS(strftime('%s', timestamp) - strftime('%s', ?)),
+                id ASC
+            """
+            params.append(row["captured_at"])
+        return conn.execute(
+            f"""
+            SELECT gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop
+            FROM {TELEMETRY_TABLE}
+            WHERE session_id = ? AND mode = ? AND device_id IN ({placeholders})
+              AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
+              AND gps_lat != 0 AND gps_lon != 0
+            ORDER BY {order}
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
+
     def _suntrip_payload(device_id: str | None = None) -> dict[str, Any]:
         query = """
             SELECT id, device_id, session_id, mode, captured_at, distance_km, interval_km,
@@ -2390,15 +2486,33 @@ def create_app() -> Flask:
             WHERE is_public = 1
         """
         params: list[Any] = []
-        if device_id:
-            query += " AND device_id = ?"
-            params.append(device_id)
-        query += " ORDER BY captured_at DESC, id DESC LIMIT 250"
+        start_filter = _suntrip_start_filter()
+        if start_filter:
+            start_ts, start_day = start_filter
+            query += " AND (captured_at >= ? OR session_id >= ?)"
+            params.extend([start_ts, start_day])
+        requested_device = (device_id or "").strip()
+        if requested_device:
+            aliases = _suntrip_device_aliases(device_id)
+            placeholders = ",".join("?" for _ in aliases)
+            query += f" AND device_id IN ({placeholders})"
+            params.extend(aliases)
+        query += " ORDER BY captured_at DESC, id DESC"
+        limit = _suntrip_photo_limit()
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
 
         with _get_db() as conn:
             rows = conn.execute(query, params).fetchall()
+            photos = [
+                _suntrip_photo_payload(
+                    row,
+                    _suntrip_fallback_gps(conn, row) if _suntrip_photo_needs_gps(row) else None,
+                )
+                for row in rows
+            ]
 
-        photos = [_suntrip_photo_payload(row) for row in rows]
         latest = photos[0] if photos else None
         points = []
         for photo in photos:
