@@ -225,6 +225,38 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertEqual(len(exported["photos"]), 1)
         self.assertEqual(exported["photos"][0]["relative_path"], "photos/bike/frame.jpg")
 
+    def test_index_groups_sessions_by_month(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO sessions (
+                    device_id, session_id, mode, start_ts, rows_count, distance_km, uploaded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    ("bike", "2026-05-07_10-00-00", "supercycle_live", "2026-05-07 10:00:00", 2, 12.0, "2026-05-07 10:05:00"),
+                    ("bike", "2026-05-01_09-00-00", "supercycle_live", "2026-05-01 09:00:00", 2, 8.0, "2026-05-01 09:05:00"),
+                    ("bike", "2026-04-30_08-00-00", "supercycle_live", "2026-04-30 08:00:00", 2, 6.0, "2026-04-30 08:05:00"),
+                ],
+            )
+            conn.commit()
+
+        response = self.monitor_app.app.test_client().get(
+            "/",
+            headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertEqual(html.count('class="month-separator"'), 2)
+        self.assertIn("<span>mai 2026</span>", html)
+        self.assertIn("<span>avril 2026</span>", html)
+        self.assertIn('data-session-row="1"', html)
+        self.assertIn('data-month-key="2026-05"', html)
+
 
 if __name__ == "__main__":
     unittest.main()

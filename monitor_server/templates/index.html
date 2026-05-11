@@ -125,6 +125,27 @@
       .link:hover { text-decoration: underline; }
       .table-compact th, .table-compact td { padding: 6px 8px; }
       .table-compact td { white-space: nowrap; }
+      .month-separator td {
+        background: #f0eadf;
+        color: #6f665b;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .month-separator:hover { background: transparent; }
+      .month-separator span {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .month-separator span::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
       .sort-btn {
         border: none;
         background: none;
@@ -458,13 +479,23 @@
             </tr>
           </thead>
           <tbody id="sessions-body">
+            {% set current_month = namespace(key="") %}
             {% for s in sessions %}
+            {% if s["month_key"] != current_month.key %}
+            {% set current_month.key = s["month_key"] %}
+            <tr class="month-separator" data-month-separator="1">
+              <td colspan="10"><span>{{ s["month_label"] }}</span></td>
+            </tr>
+            {% endif %}
             <tr
+              data-session-row="1"
               data-start="{{ s['start_ts'] or '' }}"
               data-distance="{{ s['distance_km'] or 0 }}"
               data-device-id="{{ s['device_id'] }}"
               data-session-id="{{ s['session_id'] }}"
               data-mode="{{ s['mode'] }}"
+              data-month-key="{{ s['month_key'] }}"
+              data-month-label="{{ s['month_label'] }}"
             >
               <td>
                 <input class="session-check session-row-check" type="checkbox" aria-label="Select session {{ s['session_id'] }}">
@@ -610,6 +641,31 @@
         session_id: row.dataset.sessionId || "",
         mode: row.dataset.mode || "default"
       });
+      const sessionRows = () => tbody ? Array.from(tbody.querySelectorAll("tr[data-session-row='1']")) : [];
+      const clearMonthSeparators = () => {
+        if (!tbody) return;
+        tbody.querySelectorAll("tr[data-month-separator='1']").forEach((row) => row.remove());
+      };
+      const renderMonthSeparators = () => {
+        if (!tbody) return;
+        clearMonthSeparators();
+        let currentMonth = "";
+        sessionRows().forEach((row) => {
+          const key = row.dataset.monthKey || "unknown";
+          if (key === currentMonth) return;
+          currentMonth = key;
+          const separator = document.createElement("tr");
+          separator.className = "month-separator";
+          separator.dataset.monthSeparator = "1";
+          const cell = document.createElement("td");
+          cell.colSpan = 10;
+          const label = document.createElement("span");
+          label.textContent = row.dataset.monthLabel || "Date inconnue";
+          cell.appendChild(label);
+          separator.appendChild(cell);
+          tbody.insertBefore(separator, row);
+        });
+      };
       const selectedRows = () => tbody ? Array.from(tbody.querySelectorAll(".session-row-check:checked")).map((check) => check.closest("tr")).filter(Boolean) : [];
       const updateSelectionState = () => {
         if (!tbody) return;
@@ -624,6 +680,7 @@
       };
       const removeRows = (rows) => {
         rows.forEach((row) => row.remove());
+        renderMonthSeparators();
         updateSelectionState();
       };
       if (tbody) {
@@ -732,6 +789,7 @@
         });
       }
       updateSelectionState();
+      renderMonthSeparators();
       const getValue = (row, key) => {
         if (key === "start") {
           const raw = row.dataset.start || "";
@@ -752,13 +810,15 @@
           btn.dataset.sortOrder = next;
           sortButtons.forEach((b) => b.classList.remove("active"));
           btn.classList.add("active");
-          const rows = Array.from(tbody.querySelectorAll("tr"));
+          const rows = sessionRows();
           rows.sort((a, b) => {
             const va = getValue(a, key);
             const vb = getValue(b, key);
             return next === "asc" ? va - vb : vb - va;
           });
+          clearMonthSeparators();
           rows.forEach((row) => tbody.appendChild(row));
+          renderMonthSeparators();
         });
       });
 

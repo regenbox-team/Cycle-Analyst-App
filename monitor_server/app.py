@@ -1619,6 +1619,31 @@ def create_app() -> Flask:
                 continue
         return None
 
+    def _session_month(start_ts: str | None, session_id: str | None) -> tuple[str, str]:
+        parsed = _parse_ts(start_ts)
+        if not parsed and session_id:
+            try:
+                parsed = datetime.strptime(session_id[:10], "%Y-%m-%d")
+            except Exception:
+                parsed = None
+        if not parsed:
+            return "unknown", "Date inconnue"
+        month_names = (
+            "janvier",
+            "fevrier",
+            "mars",
+            "avril",
+            "mai",
+            "juin",
+            "juillet",
+            "aout",
+            "septembre",
+            "octobre",
+            "novembre",
+            "decembre",
+        )
+        return parsed.strftime("%Y-%m"), f"{month_names[parsed.month - 1]} {parsed.year}"
+
     def _format_gpx_time(ts: str | None) -> str | None:
         parsed = _parse_ts(ts)
         if not parsed:
@@ -1773,15 +1798,17 @@ def create_app() -> Flask:
                     "gps_available": gps_available,
                 }
             )
-        sessions = [
-            dict(s)
-            | {
+        def _session_view_payload(s):
+            month_key, month_label = _session_month(s["start_ts"], s["session_id"])
+            return dict(s) | {
                 "start_ts_fmt": _format_dt(s["start_ts"]),
                 "end_ts_fmt": _format_dt(s["end_ts"]),
                 "uploaded_at_fmt": _format_dt(s["uploaded_at"]),
+                "month_key": month_key,
+                "month_label": month_label,
             }
-            for s in sessions
-        ]
+
+        sessions = [_session_view_payload(s) for s in sessions]
         daily_all = [
             {"day": row["day"], "distance_km": float(row["distance_km"] or 0)}
             for row in daily_all_rows
