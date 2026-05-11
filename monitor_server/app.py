@@ -2364,7 +2364,8 @@ def create_app() -> Flask:
         return Response(gpx_text, headers=headers)
 
     def _suntrip_photo_payload(row, gps_fallback: sqlite3.Row | None = None) -> dict[str, Any]:
-        image_url = url_for("photo_file", filename=row["relative_path"])
+        image_path = str(row["relative_path"] or "").replace("\\", "/")
+        image_url = url_for("photo_file", filename=image_path)
         stored_metrics = {}
         if row["metrics_json"]:
             try:
@@ -2526,8 +2527,12 @@ def create_app() -> Flask:
                     "id": photo["id"],
                     "lat": lat,
                     "lon": lon,
+                    "device_id": photo["device_id"],
+                    "session_id": photo["session_id"],
+                    "uploaded_at": photo["uploaded_at"],
                     "captured_at": photo["captured_at"],
                     "image_url": photo["image_url"],
+                    "metrics": photo["metrics"],
                     "latest": bool(latest and photo["id"] == latest["id"]),
                 }
             )

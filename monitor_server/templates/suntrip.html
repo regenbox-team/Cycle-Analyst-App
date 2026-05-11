@@ -810,6 +810,8 @@
       let map;
       let markers = [];
       let latestImageUrl = "";
+      let selectedPhotoId = null;
+      let currentSuntripData = null;
       let efficiencyUnit = localStorage.getItem("suntrip-efficiency-unit") || "wh";
       const WH_PER_LITER_GASOLINE = 8900;
 
@@ -967,6 +969,42 @@
         setConsumptionMetric("net", netWhPerKm);
       }
 
+      function renderPhotoDisplay(photo, data, selectedManually = false) {
+        if (!photo) return;
+        const imageStamp = photo.uploaded_at || photo.captured_at || Date.now();
+        const imageKey = `${photo.image_url || ""}|${imageStamp}`;
+        if (imageKey !== latestImageUrl) {
+          latestImageUrl = imageKey;
+          document.getElementById("latest-photo").src = `${photo.image_url}?t=${encodeURIComponent(imageStamp)}`;
+        }
+
+        setText("captured-at", photo.captured_at || "Dernière capture");
+        if (selectedManually) {
+          setText("time-since", "Photo sélectionnée sur la carte");
+          setText("metrics-age", photo.captured_at || "--");
+        } else {
+          const photoAge = formatAge(data.seconds_since_latest);
+          setText("time-since", photoAge === "--" ? "Dernière photo prise : --" : `Dernière photo prise ${photoAge}`);
+          setText("metrics-age", photoAge === "--" ? "--" : photoAge);
+        }
+        setText("session-label", `${photo.device_id || ""} · ${photo.session_id || ""}`);
+
+        const metrics = photo.metrics || {};
+        setText("speed", formatNumber(metrics.speed_kph, 1));
+        setText("distance", formatNumber(metrics.distance_km, 1));
+        renderConsumptionMetrics(metrics);
+        setText("solar-power", formatNumber(metrics.solar_power_w, 0));
+        setText("generator-power", formatNumber(metrics.generator_power_w, 0));
+        setText("solar-total", formatNumber(metrics.solar_wh, 1));
+      }
+
+      function selectSuntripPhoto(photo) {
+        if (!currentSuntripData || !photo) return;
+        selectedPhotoId = photo.id;
+        renderPhotoDisplay(photo, currentSuntripData, !photo.latest);
+        renderMarkers(Array.isArray(currentSuntripData.points) ? currentSuntripData.points : []);
+      }
+
       function initEfficiencyUnitToggle() {
         const button = document.getElementById("efficiency-unit-toggle");
         if (!button) return;
@@ -1010,15 +1048,17 @@
 
         const bounds = [];
         points.forEach(point => {
+          const selected = selectedPhotoId != null ? point.id === selectedPhotoId : point.latest;
           const marker = L.circleMarker([point.lat, point.lon], {
-            radius: point.latest ? 12 : 6,
-            color: point.latest ? "#111111" : "#6f6f6f",
-            weight: point.latest ? 3 : 1,
-            fillColor: point.latest ? "#111111" : "#8a8a8a",
-            fillOpacity: point.latest ? 0.92 : 0.28,
-            opacity: point.latest ? 1 : 0.46
+            radius: selected ? 12 : 6,
+            color: selected ? "#111111" : "#6f6f6f",
+            weight: selected ? 3 : 1,
+            fillColor: selected ? "#111111" : "#8a8a8a",
+            fillOpacity: selected ? 0.92 : 0.28,
+            opacity: selected ? 1 : 0.46
           }).addTo(map);
           marker.bindPopup(point.latest ? "Dernière photo" : point.captured_at);
+          marker.on("click", () => selectSuntripPhoto(point));
           markers.push(marker);
           bounds.push([point.lat, point.lon]);
         });
@@ -1033,10 +1073,22 @@
       async function loadSuntrip() {
         const res = await fetch("/public/suntrip.json", { cache: "no-store" });
         const data = await res.json();
+        currentSuntripData = data;
         const latest = data.latest;
         document.getElementById("content").hidden = !latest;
         document.getElementById("topbar").hidden = !latest;
         if (!latest) return;
+
+        const points = Array.isArray(data.points) ? data.points : [];
+        if (selectedPhotoId != null) {
+          const selectedPhoto = points.find(point => point.id === selectedPhotoId);
+          if (selectedPhoto) {
+            renderPhotoDisplay(selectedPhoto, data, !selectedPhoto.latest);
+            renderMarkers(points);
+            return;
+          }
+          selectedPhotoId = null;
+        }
 
         if (latest.image_url !== latestImageUrl) {
           latestImageUrl = latest.image_url;
