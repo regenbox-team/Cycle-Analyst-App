@@ -7,6 +7,8 @@ const END_ANGLE = 126;
 
 let isLongRange = false;
 let metricsPaused = false;
+let solarPotentialChartOpen = false;
+let latestSolarBattery = null;
 const photoPreviewState = {
   lastImageKey: null
 };
@@ -718,21 +720,252 @@ async function fetchPowerHistory() {
   }
 }
 
+function setSvgAttrs(el, attrs) {
+  Object.entries(attrs).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) el.setAttribute(key, value);
+  });
+  return el;
+}
+
+function addSvgElement(parent, tag, attrs, text) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  setSvgAttrs(el, attrs);
+  if (text !== undefined && text !== null) el.textContent = text;
+  parent.appendChild(el);
+  return el;
+}
+
+function niceChartBounds(minValue, maxValue, targetTicks = 4) {
+  let min = Number.isFinite(minValue) ? minValue : 0;
+  let max = Number.isFinite(maxValue) ? maxValue : 1;
+  if (min === max) {
+    min = Math.min(0, min);
+    max = Math.max(1, max);
+  }
+  const span = Math.max(1e-6, max - min);
+  const rawStep = span / Math.max(1, targetTicks);
+  const pow = 10 ** Math.floor(Math.log10(rawStep));
+  const step = [1, 2, 5, 10].map(m => m * pow).find(s => rawStep <= s) || 10 * pow;
+  return {
+    min: Math.floor(min / step) * step,
+    max: Math.ceil(max / step) * step,
+    step
+  };
+}
+
+function formatCompactChartValue(value) {
+  const v = num(value, 0);
+  if (Math.abs(v) >= 100) return v.toFixed(0);
+  if (Math.abs(v) >= 10) return v.toFixed(0);
+  return v.toFixed(1);
+}
+
+function prepareChartSvg(chart, width, height) {
+  chart.innerHTML = '';
+  chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  chart.setAttribute("preserveAspectRatio", "xMidYMid meet");
+}
+
+function addChartBottomLabel(chart, x, y, text, options = {}) {
+  const label = String(text);
+  const width = Math.max(options.minWidth || 17, label.length * 4.4 + 8);
+  addSvgElement(chart, "rect", {
+    x: x - width / 2,
+    y: y - 9,
+    width,
+    height: 12,
+    rx: 3,
+    ry: 3,
+    fill: "rgba(255,255,255,0.34)",
+    stroke: "rgba(0,0,0,0.18)",
+    "stroke-width": 0.6
+  });
+  addSvgElement(chart, "text", {
+    x,
+    y,
+    "text-anchor": "middle",
+    "font-size": 7.2,
+    "font-weight": "bold",
+    fill: "rgba(0,0,0,0.72)"
+  }, label);
+}
+
+function solarPowerAtHour(points, hour) {
+  if (!Array.isArray(points) || points.length === 0) return 0;
+  const sorted = [...points]
+    .map(point => ({ hour: num(point.hour, 0), power: num(point.power_w ?? point.power, 0) }))
+    .sort((a, b) => a.hour - b.hour);
+  if (hour <= sorted[0].hour) return sorted[0].power;
+  if (hour >= sorted[sorted.length - 1].hour) return sorted[sorted.length - 1].power;
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const next = sorted[i];
+    if (hour <= next.hour) {
+      const ratio = (hour - prev.hour) / Math.max(1e-6, next.hour - prev.hour);
+      return prev.power + (next.power - prev.power) * ratio;
+    }
+  }
+  return 0;
+}
+
+function renderSolarPotentialChart(solarBattery = latestSolarBattery) {
+  const box = document.getElementById("solar-potential-chart-box");
+  const chart = document.getElementById("solar-potential-chart");
+  if (!box || !chart || box.hidden) return;
+
+  const profile = solarBattery?.solar_power_profile_today;
+  const points = Array.isArray(profile?.points) ? profile.points : [];
+  const usablePoints = points
+    .map(point => ({ hour: num(point.hour, 0), power: Math.max(0, num(point.power_w, 0)) }))
+    .filter(point => Number.isFinite(point.hour) && point.hour >= 0 && point.hour <= 24);
+
+  const width = 400;
+  const height = 168;
+  prepareChartSvg(chart, width, height);
+
+  if (usablePoints.length < 2) {
+    addSvgElement(chart, "text", {
+      x: width / 2,
+      y: height / 2,
+      "text-anchor": "middle",
+      "font-size": 9,
+      fill: "rgba(0,0,0,0.55)"
+    }, "No solar profile");
+    return;
+  }
+
+  const plot = { left: 34, right: 10, top: 12, bottom: 24 };
+  plot.width = width - plot.left - plot.right;
+  plot.height = height - plot.top - plot.bottom;
+
+  const peak = Math.max(1, ...usablePoints.map(point => point.power));
+  const bounds = niceChartBounds(0, peak, 4);
+  bounds.min = 0;
+  const xFor = hour => plot.left + (clamp(hour, 0, 24) / 24) * plot.width;
+  const yFor = power => plot.top + ((bounds.max - power) / Math.max(1e-6, bounds.max - bounds.min)) * plot.height;
+  const baselineY = yFor(0);
+
+  for (let t = 0; t <= bounds.max + bounds.step / 2; t += bounds.step) {
+    const y = yFor(t);
+    addSvgElement(chart, "line", {
+      x1: plot.left,
+      x2: width - plot.right,
+      y1: y,
+      y2: y,
+      stroke: t === 0 ? "#111" : "rgba(0,0,0,0.18)",
+      "stroke-width": t === 0 ? 0.9 : 0.5
+    });
+    addSvgElement(chart, "text", {
+      x: plot.left - 7,
+      y: y + 3,
+      "text-anchor": "end",
+      "font-size": 7.5,
+      fill: "rgba(0,0,0,0.64)"
+    }, formatCompactChartValue(t));
+  }
+
+  [0, 6, 12, 18, 24].forEach(hour => {
+    const x = xFor(hour);
+    addSvgElement(chart, "line", {
+      x1: x,
+      x2: x,
+      y1: plot.top,
+      y2: baselineY,
+      stroke: "rgba(0,0,0,0.12)",
+      "stroke-width": 0.5
+    });
+    addSvgElement(chart, "text", {
+      x,
+      y: height - 7,
+      "text-anchor": "middle",
+      "font-size": 7.5,
+      "font-weight": "bold",
+      fill: "rgba(0,0,0,0.62)"
+    }, hour === 24 ? "24" : `${hour}h`);
+  });
+
+  const linePoints = usablePoints.map(point => ({
+    x: xFor(point.hour),
+    y: yFor(point.power)
+  }));
+  const linePath = linePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+  const areaPath = `${linePath} L ${xFor(24).toFixed(2)} ${baselineY.toFixed(2)} L ${xFor(0).toFixed(2)} ${baselineY.toFixed(2)} Z`;
+
+  addSvgElement(chart, "path", {
+    d: areaPath,
+    fill: "rgba(239, 143, 48, 0.22)"
+  });
+  addSvgElement(chart, "path", {
+    d: linePath,
+    fill: "none",
+    stroke: "orange",
+    "stroke-width": 2.1,
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round"
+  });
+
+  const nowHour = clamp(num(profile?.now_hour, new Date().getHours() + new Date().getMinutes() / 60), 0, 24);
+  const nowPower = Math.max(0, solarPowerAtHour(usablePoints, nowHour));
+  const nowX = xFor(nowHour);
+  const nowY = yFor(nowPower);
+  addSvgElement(chart, "line", {
+    x1: nowX,
+    x2: nowX,
+    y1: plot.top - 2,
+    y2: baselineY + 2,
+    stroke: "#111",
+    "stroke-width": 1.2,
+    "stroke-dasharray": "3 3"
+  });
+  addSvgElement(chart, "circle", {
+    cx: nowX,
+    cy: nowY,
+    r: 4,
+    fill: "#111",
+    stroke: "orange",
+    "stroke-width": 1.2
+  });
+  addChartBottomLabel(chart, nowX, plot.top + 8, "now", { minWidth: 20 });
+
+  const nowEl = document.getElementById("solar-chart-now-value");
+  const peakEl = document.getElementById("solar-chart-peak-value");
+  const remainingEl = document.getElementById("solar-chart-remaining-value");
+  if (nowEl) nowEl.textContent = num(solarBattery?.potential_power_now_w, nowPower).toFixed(0);
+  if (peakEl) peakEl.textContent = peak.toFixed(0);
+  if (remainingEl) remainingEl.textContent = num(solarBattery?.potential_remaining_today_wh, 0).toFixed(0);
+}
+
+function setSolarPotentialChartOpen(open) {
+  const row = document.getElementById("solar-potential-row");
+  const box = document.getElementById("solar-potential-chart-box");
+  if (!row || !box) return;
+  if (open) {
+    const tripBox = row.closest(".box");
+    if (tripBox && tripBox.nextElementSibling !== box) {
+      tripBox.insertAdjacentElement("afterend", box);
+    }
+  }
+  solarPotentialChartOpen = Boolean(open);
+  box.hidden = !solarPotentialChartOpen;
+  row.classList.toggle("is-expanded", solarPotentialChartOpen);
+  row.setAttribute("aria-expanded", solarPotentialChartOpen ? "true" : "false");
+  if (solarPotentialChartOpen) renderSolarPotentialChart();
+}
+
 function updateWhPerKmChart(totalValues, netValues = [], liveTotal = 0, liveNet = 0, range = 10) {
   const chart = document.getElementById("wh-per-km-chart");
   if (!chart) return;
 
-  chart.innerHTML = '';
-
   const width = 400;
-  const chartHeight = 150;
-  const barHeight = 120;
-  const labelOffset = 20;
+  const chartHeight = 210;
+  prepareChartSvg(chart, width, chartHeight);
+
+  const plot = { left: 32, right: 8, top: 13, bottom: 24 };
+  plot.width = width - plot.left - plot.right;
+  plot.height = chartHeight - plot.top - plot.bottom;
   const totalBars = range + 1; // history + live
-  const gapRatio = 0.3;
-  const marginLeft = 32;
-  const barAreaWidth = width - marginLeft;
-  const barWidth = barAreaWidth / (totalBars + (totalBars - 1) * gapRatio);
+  const gapRatio = range > 10 ? 0.18 : 0.28;
+  const barWidth = plot.width / (totalBars + (totalBars - 1) * gapRatio);
   const spacing = barWidth * gapRatio;
 
   const totalVals = (Array.isArray(totalValues) ? totalValues : []).map(v => num(v, 0));
@@ -749,104 +982,103 @@ function updateWhPerKmChart(totalValues, netValues = [], liveTotal = 0, liveNet 
   const values = [...paddedTotal, liveTotal];
   const netFull = [...paddedNet, liveNet];
 
-  const maxAbsVal = Math.max(
-    ...values.map(v => Math.abs(v ?? 0)),
-    ...netFull.map(v => Math.abs(v ?? 0)),
-    1
-  );
-  const maxDisplayWh = Math.max(1, Math.ceil(maxAbsVal / 10) * 10);
+  const numericValues = [...values, ...netFull].filter(v => v !== undefined && Number.isFinite(Number(v))).map(Number);
+  const minValue = Math.min(0, ...numericValues);
+  const maxValue = Math.max(1, ...numericValues);
+  const bounds = niceChartBounds(minValue, maxValue, 4);
+  const yFor = (v) => plot.top + ((bounds.max - v) / Math.max(1e-6, bounds.max - bounds.min)) * plot.height;
+  const zeroY = yFor(0);
 
-  const zeroY = chartHeight - labelOffset - barHeight * 0.35;
-
-  for (let t = -maxDisplayWh; t <= maxDisplayWh; t += 10) {
-    const y = zeroY - (t / maxDisplayWh) * (barHeight * 0.65);
-
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", marginLeft);
-    tick.setAttribute("x2", width);
-    tick.setAttribute("y1", y);
-    tick.setAttribute("y2", y);
-    tick.setAttribute("stroke", "#888");
-    tick.setAttribute("stroke-width", "0.5");
-    chart.appendChild(tick);
-
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", marginLeft - 8);
-    label.setAttribute("y", y + 3);
-    label.setAttribute("text-anchor", "end");
-    label.setAttribute("font-size", "8");
-    label.setAttribute("fill", "#333");
-    label.textContent = t.toString();
-    chart.appendChild(label);
+  for (let t = bounds.min; t <= bounds.max + bounds.step / 2; t += bounds.step) {
+    const y = yFor(t);
+    const isZero = Math.abs(t) < bounds.step / 1000;
+    addSvgElement(chart, "line", {
+      x1: plot.left,
+      x2: width - plot.right,
+      y1: y,
+      y2: y,
+      stroke: isZero ? "#111" : "rgba(0,0,0,0.24)",
+      "stroke-width": isZero ? 1 : 0.5
+    });
+    addSvgElement(chart, "text", {
+      x: plot.left - 7,
+      y: y + 3,
+      "text-anchor": "end",
+      "font-size": 7.5,
+      fill: "rgba(0,0,0,0.68)"
+    }, formatCompactChartValue(t));
   }
 
   for (let i = 0; i < totalBars; i++) {
     const total = values[i];
     const net = netFull[i];
 
-    const x = marginLeft + i * (barWidth + spacing);
+    const x = plot.left + i * (barWidth + spacing);
 
     if (total === undefined) continue;
 
     const totalSafe = num(total, 0);
     const netSafe   = num(net, 0);
 
-    const totalH = (Math.abs(totalSafe) / maxDisplayWh) * (barHeight * 0.65);
-    const netH   = (Math.abs(netSafe)   / maxDisplayWh) * (barHeight * 0.65);
+    const totalYValue = yFor(totalSafe);
+    const totalY = Math.min(zeroY, totalYValue);
+    const totalH = Math.max(0.5, Math.abs(zeroY - totalYValue));
+    const isLive = i === totalBars - 1;
 
-    const totalY = totalSafe >= 0 ? zeroY - totalH : zeroY;
-    const netY   = netSafe   >= 0 ? zeroY - netH   : zeroY;
-
-    const totalRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    totalRect.setAttribute("x", x);
-    totalRect.setAttribute("y", totalY);
-    totalRect.setAttribute("width", barWidth);
-    totalRect.setAttribute("height", totalH);
-    totalRect.setAttribute("rx", 2);
-    totalRect.setAttribute("ry", 2);
-    totalRect.setAttribute("fill", "orange");
-    chart.appendChild(totalRect);
+    addSvgElement(chart, "rect", {
+      x,
+      y: totalY,
+      width: barWidth,
+      height: totalH,
+      rx: 2,
+      ry: 2,
+      fill: "orange",
+      "fill-opacity": isLive ? 1 : 0.72,
+      stroke: isLive ? "#111" : "none",
+      "stroke-width": isLive ? 0.8 : 0
+    });
 
     if (net !== undefined) {
-      const netRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      netRect.setAttribute("x", x + barWidth * 0.15);
-      netRect.setAttribute("y", netY);
-      netRect.setAttribute("width", barWidth * 0.7);
-      netRect.setAttribute("height", netH);
-      netRect.setAttribute("rx", 1);
-      netRect.setAttribute("ry", 1);
-      netRect.setAttribute("fill", "#ff6600");
-      chart.appendChild(netRect);
+      const netYValue = yFor(netSafe);
+      const netY = Math.min(zeroY, netYValue);
+      const netH = Math.max(0.5, Math.abs(zeroY - netYValue));
+      addSvgElement(chart, "rect", {
+        x: x + barWidth * 0.18,
+        y: netY,
+        width: barWidth * 0.64,
+        height: netH,
+        rx: 1.5,
+        ry: 1.5,
+        fill: "#111",
+        "fill-opacity": isLive ? 0.62 : 0.42
+      });
     }
 
     if (range === 10) {
-      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      label.setAttribute("x", x + barWidth / 2);
-      label.setAttribute("y", chartHeight - 6);
-      label.setAttribute("text-anchor", "middle");
-      label.setAttribute("font-size", "8");
-      label.setAttribute("font-weight", "bold");
-      label.setAttribute("fill", "black");
-      label.textContent = totalSafe.toFixed(1);
-      chart.appendChild(label);
+      addChartBottomLabel(chart, x + barWidth / 2, chartHeight - 7, isLive ? "live" : formatCompactChartValue(totalSafe));
     }
   }
+
+  addSvgElement(chart, "rect", { x: width - 80, y: 5, width: 7, height: 7, rx: 1, fill: "orange", "fill-opacity": 0.75 });
+  addSvgElement(chart, "text", { x: width - 69, y: 11, "font-size": 7.5, fill: "rgba(0,0,0,0.72)" }, "total");
+  addSvgElement(chart, "rect", { x: width - 37, y: 5, width: 7, height: 7, rx: 1, fill: "#111", "fill-opacity": 0.45 });
+  addSvgElement(chart, "text", { x: width - 26, y: 11, "font-size": 7.5, fill: "rgba(0,0,0,0.72)" }, "net");
 }
 
 function updatePctChart(chartId, pctValues, livePct = 0, range = 10, liveColor = "orange") {
   const chart = document.getElementById(chartId);
   if (!chart) return;
 
-  chart.innerHTML = '';
-
   const width = 400;
-  const height = 150;
-  const marginLeft = 32;
-  const barHeight = 120;
-  const labelOffset = 20;
+  const height = 210;
+  prepareChartSvg(chart, width, height);
+
+  const plot = { left: 32, right: 8, top: 13, bottom: 24 };
+  plot.width = width - plot.left - plot.right;
+  plot.height = height - plot.top - plot.bottom;
   const totalBars = range + 1;
-  const gapRatio = 0.3;
-  const barWidth = (width - marginLeft) / (totalBars + (totalBars - 1) * gapRatio);
+  const gapRatio = range > 10 ? 0.18 : 0.28;
+  const barWidth = plot.width / (totalBars + (totalBars - 1) * gapRatio);
   const spacing = barWidth * gapRatio;
 
   const vals = (Array.isArray(pctValues) ? pctValues : []).map(v => num(v, 0));
@@ -856,31 +1088,30 @@ function updatePctChart(chartId, pctValues, livePct = 0, range = 10, liveColor =
   const padded = new Array(range - count).fill(undefined).concat([...vals].slice(-count));
   const values = [...padded, livePct];
 
-  const maxVal = Math.max(...values.map(v => v ?? 0), 1);
-  const maxDisplay = Math.max(1, Math.ceil(maxVal / 10) * 10);
+  const maxVal = Math.max(...values.filter(v => v !== undefined).map(v => Math.max(0, num(v, 0))), 1);
+  const bounds = niceChartBounds(0, maxVal, 4);
+  bounds.min = 0;
+  const yFor = (v) => plot.top + ((bounds.max - v) / Math.max(1e-6, bounds.max - bounds.min)) * plot.height;
+  const zeroY = yFor(0);
 
-  const zeroY = height - labelOffset;
-
-  for (let t = 0; t <= maxDisplay; t += 10) {
-    const y = zeroY - (t / maxDisplay) * barHeight;
-
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", marginLeft);
-    tick.setAttribute("x2", width);
-    tick.setAttribute("y1", y);
-    tick.setAttribute("y2", y);
-    tick.setAttribute("stroke", "#888");
-    tick.setAttribute("stroke-width", "0.5");
-    chart.appendChild(tick);
-
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", marginLeft - 6);
-    label.setAttribute("y", y + 3);
-    label.setAttribute("text-anchor", "end");
-    label.setAttribute("font-size", "8");
-    label.setAttribute("fill", "#333");
-    label.textContent = `${t}`;
-    chart.appendChild(label);
+  for (let t = 0; t <= bounds.max + bounds.step / 2; t += bounds.step) {
+    const y = yFor(t);
+    const isZero = Math.abs(t) < bounds.step / 1000;
+    addSvgElement(chart, "line", {
+      x1: plot.left,
+      x2: width - plot.right,
+      y1: y,
+      y2: y,
+      stroke: isZero ? "#111" : "rgba(0,0,0,0.24)",
+      "stroke-width": isZero ? 1 : 0.5
+    });
+    addSvgElement(chart, "text", {
+      x: plot.left - 7,
+      y: y + 3,
+      "text-anchor": "end",
+      "font-size": 7.5,
+      fill: "rgba(0,0,0,0.68)"
+    }, formatCompactChartValue(t));
   }
 
   for (let i = 0; i < totalBars; i++) {
@@ -888,30 +1119,26 @@ function updatePctChart(chartId, pctValues, livePct = 0, range = 10, liveColor =
     if (val === undefined) continue;
 
     const v = num(val, 0);
-    const x = marginLeft + i * (barWidth + spacing);
-    const h = (v / maxDisplay) * barHeight;
-    const y = zeroY - h;
+    const x = plot.left + i * (barWidth + spacing);
+    const yValue = yFor(Math.max(0, v));
+    const h = Math.max(0.5, zeroY - yValue);
+    const isLive = i === totalBars - 1;
 
-    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    rect.setAttribute("x", x);
-    rect.setAttribute("y", y);
-    rect.setAttribute("width", barWidth);
-    rect.setAttribute("height", h);
-    rect.setAttribute("rx", 2);
-    rect.setAttribute("ry", 2);
-    rect.setAttribute("fill", i === totalBars - 1 ? liveColor : "#888");
-    chart.appendChild(rect);
+    addSvgElement(chart, "rect", {
+      x,
+      y: yValue,
+      width: barWidth,
+      height: h,
+      rx: 2,
+      ry: 2,
+      fill: isLive ? liveColor : "orange",
+      "fill-opacity": isLive ? 0.98 : 0.72,
+      stroke: isLive ? "#111" : "none",
+      "stroke-width": isLive ? 0.8 : 0
+    });
 
     if (range === 10) {
-      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      label.setAttribute("x", x + barWidth / 2);
-      label.setAttribute("y", height - 6);
-      label.setAttribute("text-anchor", "middle");
-      label.setAttribute("font-size", "8");
-      label.setAttribute("font-weight", "bold");
-      label.setAttribute("fill", "black");
-      label.textContent = v.toFixed(1);
-      chart.appendChild(label);
+      addChartBottomLabel(chart, x + barWidth / 2, height - 7, isLive ? "live" : formatCompactChartValue(v));
     }
   }
 }
@@ -920,16 +1147,16 @@ function updateRegenPctChart(pctValues, livePct = 0, range = 10) {
   const chart = document.getElementById("regen-pct-per-km-chart");
   if (!chart) return;
 
-  chart.innerHTML = '';
-
   const width = 400;
-  const height = 150;
-  const marginLeft = 32;
-  const barHeight = 120;
-  const labelOffset = 20;
+  const height = 210;
+  prepareChartSvg(chart, width, height);
+
+  const plot = { left: 32, right: 8, top: 13, bottom: 24 };
+  plot.width = width - plot.left - plot.right;
+  plot.height = height - plot.top - plot.bottom;
   const totalBars = range + 1;
-  const gapRatio = 0.3;
-  const barWidth = (width - marginLeft) / (totalBars + (totalBars - 1) * gapRatio);
+  const gapRatio = range > 10 ? 0.18 : 0.28;
+  const barWidth = plot.width / (totalBars + (totalBars - 1) * gapRatio);
   const spacing = barWidth * gapRatio;
 
   const vals = (Array.isArray(pctValues) ? pctValues : []).map(v => num(v, 0));
@@ -937,61 +1164,59 @@ function updateRegenPctChart(pctValues, livePct = 0, range = 10) {
 
   const count = Math.min(range, vals.length);
   const padded = new Array(range - count).fill(undefined).concat([...vals].slice(-count));
-  const values = [...padded, livePct].map(v => num(v, 0));
+  const values = [...padded, livePct];
 
-  const maxVal = Math.max(...values, 1);
-  const maxDisplay = Math.max(1, Math.ceil(maxVal / 10) * 10);
-  const zeroY = height - labelOffset;
+  const maxVal = Math.max(...values.filter(v => v !== undefined).map(v => Math.max(0, num(v, 0))), 1);
+  const bounds = niceChartBounds(0, maxVal, 4);
+  bounds.min = 0;
+  const yFor = (v) => plot.top + ((bounds.max - v) / Math.max(1e-6, bounds.max - bounds.min)) * plot.height;
+  const zeroY = yFor(0);
 
-  for (let t = 0; t <= maxDisplay; t += 10) {
-    const y = zeroY - (t / maxDisplay) * barHeight;
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", marginLeft);
-    tick.setAttribute("x2", width);
-    tick.setAttribute("y1", y);
-    tick.setAttribute("y2", y);
-    tick.setAttribute("stroke", "#888");
-    tick.setAttribute("stroke-width", "0.5");
-    chart.appendChild(tick);
-
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", marginLeft - 6);
-    label.setAttribute("y", y + 3);
-    label.setAttribute("text-anchor", "end");
-    label.setAttribute("font-size", "8");
-    label.setAttribute("fill", "#333");
-    label.textContent = `${t}`;
-    chart.appendChild(label);
+  for (let t = 0; t <= bounds.max + bounds.step / 2; t += bounds.step) {
+    const y = yFor(t);
+    const isZero = Math.abs(t) < bounds.step / 1000;
+    addSvgElement(chart, "line", {
+      x1: plot.left,
+      x2: width - plot.right,
+      y1: y,
+      y2: y,
+      stroke: isZero ? "#111" : "rgba(0,0,0,0.24)",
+      "stroke-width": isZero ? 1 : 0.5
+    });
+    addSvgElement(chart, "text", {
+      x: plot.left - 7,
+      y: y + 3,
+      "text-anchor": "end",
+      "font-size": 7.5,
+      fill: "rgba(0,0,0,0.68)"
+    }, formatCompactChartValue(t));
   }
 
   for (let i = 0; i < totalBars; i++) {
-    const v = values[i];
-    if (v === undefined) continue;
+    const raw = values[i];
+    if (raw === undefined) continue;
+    const v = Math.max(0, num(raw, 0));
 
-    const x = marginLeft + i * (barWidth + spacing);
-    const h = (v / maxDisplay) * barHeight;
-    const y = zeroY - h;
+    const x = plot.left + i * (barWidth + spacing);
+    const yValue = yFor(v);
+    const h = Math.max(0.5, zeroY - yValue);
+    const isLive = i === totalBars - 1;
 
-    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    rect.setAttribute("x", x);
-    rect.setAttribute("y", y);
-    rect.setAttribute("width", barWidth);
-    rect.setAttribute("height", h);
-    rect.setAttribute("rx", 2);
-    rect.setAttribute("ry", 2);
-    rect.setAttribute("fill", i === totalBars - 1 ? "#0099cc" : "#888");
-    chart.appendChild(rect);
+    addSvgElement(chart, "rect", {
+      x,
+      y: yValue,
+      width: barWidth,
+      height: h,
+      rx: 2,
+      ry: 2,
+      fill: isLive ? "#0099cc" : "orange",
+      "fill-opacity": isLive ? 0.98 : 0.72,
+      stroke: isLive ? "#111" : "none",
+      "stroke-width": isLive ? 0.8 : 0
+    });
 
     if (range === 10) {
-      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      label.setAttribute("x", x + barWidth / 2);
-      label.setAttribute("y", height - 6);
-      label.setAttribute("text-anchor", "middle");
-      label.setAttribute("font-size", "8");
-      label.setAttribute("font-weight", "bold");
-      label.setAttribute("fill", "black");
-      label.textContent = v.toFixed(1);
-      chart.appendChild(label);
+      addChartBottomLabel(chart, x + barWidth / 2, height - 7, isLive ? "live" : formatCompactChartValue(v));
     }
   }
 }
@@ -1241,6 +1466,12 @@ async function fetchMetrics() {
     document.getElementById("trip-net-wh").innerText =
       num(json.calculated_CA_values?.net_Wh, 0).toFixed(1);
     document.getElementById("trip-total-wh").innerText = Wh_pos.toFixed(1);
+    const liveWhPerKm = num(json.calculated_CA_values?.live_Wh_per_km, 0);
+    const liveNetWhPerKm = num(json.calculated_CA_values?.live_net_Wh_per_km, 0);
+    const liveWhEl = document.getElementById("trip-live-wh-per-km");
+    const liveNetEl = document.getElementById("trip-live-net-wh-per-km");
+    if (liveWhEl) liveWhEl.textContent = liveWhPerKm.toFixed(1);
+    if (liveNetEl) liveNetEl.textContent = liveNetWhPerKm.toFixed(1);
 
     // Range block
     const autonomy = json.calculated_CA_values?.autonomy ?? {};
@@ -1264,9 +1495,16 @@ async function fetchMetrics() {
     if (solarPotentialRow && solarPotentialNow && solarPotentialToday) {
       const potentialNow = num(solarBattery?.potential_power_now_w, 0);
       const potentialToday = num(solarBattery?.potential_remaining_today_wh, 0);
-      solarPotentialRow.style.display = solarEnabled && solarBattery?.enabled ? "flex" : "none";
+      const showSolarPotential = solarEnabled && solarBattery?.enabled;
+      latestSolarBattery = showSolarPotential ? solarBattery : null;
+      solarPotentialRow.style.display = showSolarPotential ? "flex" : "none";
       solarPotentialNow.textContent = potentialNow.toFixed(0);
       solarPotentialToday.textContent = potentialToday.toFixed(0);
+      if (!showSolarPotential && solarPotentialChartOpen) {
+        setSolarPotentialChartOpen(false);
+      } else if (showSolarPotential && solarPotentialChartOpen) {
+        renderSolarPotentialChart(solarBattery);
+      }
     }
 
     // Charts (10 or 50)
@@ -1274,8 +1512,8 @@ async function fetchMetrics() {
     updateWhPerKmChart(
       json.calculated_CA_values?.Wh_per_km_last ?? [],
       json.calculated_CA_values?.net_Wh_per_km_last ?? [],
-      num(json.calculated_CA_values?.live_Wh_per_km, 0),
-      num(json.calculated_CA_values?.live_net_Wh_per_km, 0),
+      liveWhPerKm,
+      liveNetWhPerKm,
       range
     );
     updatePctChart(
@@ -1646,6 +1884,20 @@ window.addEventListener("DOMContentLoaded", () => {
     resetBtn.addEventListener('click', () => {
       try { localStorage.removeItem('dashboardLayoutOrder'); } catch (e) {}
       window.location.reload();
+    });
+  }
+
+  const solarPotentialRow = document.getElementById("solar-potential-row");
+  if (solarPotentialRow) {
+    solarPotentialRow.addEventListener("click", () => {
+      if (solarPotentialRow.style.display === "none") return;
+      setSolarPotentialChartOpen(!solarPotentialChartOpen);
+    });
+    solarPotentialRow.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      if (solarPotentialRow.style.display === "none") return;
+      setSolarPotentialChartOpen(!solarPotentialChartOpen);
     });
   }
 

@@ -10,6 +10,7 @@ from app.solar_range import (
     potential_solar_wh_remaining_today,
     select_estimation_voltage,
     soc_from_voltage,
+    solar_power_profile_today,
     theoretical_solar_power_w,
 )
 
@@ -73,6 +74,24 @@ class SolarRangeTest(unittest.TestCase):
             potential_solar_wh_remaining_today(morning, latitude=48.8566, longitude=2.3522, panel_max_w=400),
             potential_solar_wh_remaining_today(evening, latitude=48.8566, longitude=2.3522, panel_max_w=400),
         )
+
+    def test_solar_power_profile_spans_full_day(self):
+        midday = datetime(2026, 6, 21, 12, 30, tzinfo=ZoneInfo("Europe/Paris"))
+
+        profile = solar_power_profile_today(
+            midday,
+            latitude=48.8566,
+            longitude=2.3522,
+            panel_max_w=400,
+            step_minutes=60,
+        )
+
+        self.assertEqual(profile["points"][0]["time"], "00:00")
+        self.assertEqual(profile["points"][-1]["time"], "24:00")
+        self.assertEqual(profile["points"][0]["hour"], 0)
+        self.assertEqual(profile["points"][-1]["hour"], 24)
+        self.assertAlmostEqual(profile["now_hour"], 12.5)
+        self.assertGreater(max(point["power_w"] for point in profile["points"]), 0)
 
 
 if __name__ == "__main__":

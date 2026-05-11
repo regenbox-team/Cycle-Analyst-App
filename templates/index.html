@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cycle Analyst</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=solar-potential-chart-card">
 </head>
 <body>
   <div id="page-scale-root">
@@ -182,36 +182,96 @@
       <button onclick="hideCaResetPopup()">Dismiss</button>
     </div>
 
+    <div class="box trip-summary-box">
+      <div class="box-title">Trip</div>
+      <div class="trip-summary-grid">
+        <div class="trip-summary-row trip-summary-row-3">
+          <div class="trip-stat trip-stat-distance">
+            <span class="trip-stat-label">Distance</span>
+            <span class="trip-stat-value" id="trip-distance">0.0 km</span>
+          </div>
+          <div class="trip-stat trip-stat-route" id="gpx-route-progress">
+            <span class="trip-stat-label">Route left</span>
+            <span class="trip-stat-value" id="gpx-route-remaining">-</span>
+          </div>
+          <div class="trip-stat trip-stat-gradient">
+            <span class="trip-stat-label">Gradient now</span>
+            <span class="trip-stat-value" id="trip-current-gradient">-</span>
+          </div>
+        </div>
+
+        <div class="trip-summary-row trip-summary-row-energy">
+          <div class="trip-stat-group trip-stat-group-wh">
+            <div class="trip-stat trip-stat-energy trip-stat-nested">
+              <span class="trip-stat-label">Total Wh</span>
+              <span class="trip-stat-value" id="trip-total-wh">0.0</span>
+            </div>
+            <div class="trip-stat trip-stat-energy-net trip-stat-nested">
+              <span class="trip-stat-label">Net Wh</span>
+              <span class="trip-stat-value" id="trip-net-wh">0.0</span>
+            </div>
+          </div>
+          <div class="trip-stat-group trip-stat-group-efficiency">
+            <div class="trip-stat trip-stat-efficiency trip-stat-nested">
+              <span class="trip-stat-label">Total Wh/km</span>
+              <span class="trip-stat-value" id="trip-wh-per-km">0.0</span>
+            </div>
+            <div class="trip-stat trip-stat-efficiency-net trip-stat-nested">
+              <span class="trip-stat-label">Net Wh/km</span>
+              <span class="trip-stat-value" id="trip-net-wh-per-km">0.0</span>
+            </div>
+          </div>
+          <div class="trip-stat-group trip-stat-group-live-efficiency">
+            <div class="trip-stat trip-stat-efficiency-live trip-stat-nested">
+              <span class="trip-stat-label">Live Wh/km</span>
+              <span class="trip-stat-value" id="trip-live-wh-per-km">0.0</span>
+            </div>
+            <div class="trip-stat trip-stat-efficiency-live-net trip-stat-nested">
+              <span class="trip-stat-label">Live net Wh/km</span>
+              <span class="trip-stat-value" id="trip-live-net-wh-per-km">0.0</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="trip-summary-row trip-summary-row-range">
+          <div class="trip-stat trip-stat-range">
+            <span class="trip-stat-label">Range last km</span>
+            <span><span class="trip-stat-value" id="range-last">-</span><span class="trip-stat-unit"> km</span></span>
+          </div>
+          <div class="trip-stat trip-stat-range">
+            <span class="trip-stat-label">Range 10 km</span>
+            <span><span class="trip-stat-value" id="range-10">-</span><span class="trip-stat-unit"> km</span></span>
+          </div>
+          <div class="trip-stat trip-stat-range">
+            <span class="trip-stat-label">Range session</span>
+            <span><span class="trip-stat-value" id="range-avg">-</span><span class="trip-stat-unit"> km</span></span>
+          </div>
+          <div class="trip-stat trip-stat-range trip-stat-optional" id="range-solar-row">
+            <span class="trip-stat-label">Solar today</span>
+            <span><span class="trip-stat-value" id="range-solar-today">-</span><span class="trip-stat-unit"> km</span></span>
+          </div>
+          <div class="trip-stat trip-stat-range trip-stat-optional trip-stat-clickable" id="solar-potential-row" role="button" tabindex="0" aria-controls="solar-potential-chart-box" aria-expanded="false" title="Show solar potential chart">
+            <span class="trip-stat-label">Solar potential</span>
+            <span><span class="trip-stat-value" id="solar-potential-now">-</span><span class="trip-stat-unit"> W / </span><span class="trip-stat-value" id="solar-potential-today">-</span><span class="trip-stat-unit"> Wh</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="box solar-potential-chart-box" id="solar-potential-chart-box" hidden>
+      <div class="box-title">Solar Potential</div>
+      <div class="solar-potential-chart-stats">
+        <span><strong id="solar-chart-now-value">-</strong> W now</span>
+        <span><strong id="solar-chart-peak-value">-</strong> W peak</span>
+        <span><strong id="solar-chart-remaining-value">-</strong> Wh left</span>
+      </div>
+      <svg id="solar-potential-chart" viewBox="0 0 400 150" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+
     <!-- Wh/km Chart + Metrics -->
     <div class="box chart-box">
       <div class="box-title">Efficiency</div>
       <div class="wh-chart-wrapper">
-        <div class="trip-metrics">
-          <div class="trip-metric">
-            <div class="metric-label">Distance</div>
-            <div class="metric-value" id="trip-distance">0.0</div>
-          </div>
-          <div class="trip-metric">
-            <div class="metric-label">Net Wh/km</div>
-            <div class="metric-value" id="trip-net-wh-per-km">0.0</div>
-          </div>
-          <div class="trip-metric">
-            <div class="metric-label">Total Wh/km</div>
-            <div class="metric-value" id="trip-wh-per-km">0.0</div>
-          </div>
-        </div>
-        <div class="trip-metrics">
-          <div class="trip-metric"></div>
-          <div class="trip-metric">
-            <div class="metric-label">Net Wh</div>
-            <div class="metric-value" id="trip-net-wh">0.0</div>
-          </div>
-          <div class="trip-metric">
-            <div class="metric-label">Total Wh</div>
-            <div class="metric-value" id="trip-total-wh">0.0</div>
-          </div>
-        </div>
-
         <svg id="wh-per-km-chart" viewBox="0 0 400 150" preserveAspectRatio="xMidYMid meet"></svg>
         <svg id="human-pct-per-km-chart" viewBox="0 0 400 150" preserveAspectRatio="none" style="display: none;"></svg>
         <svg id="solar-pct-per-km-chart" viewBox="0 0 400 150" preserveAspectRatio="none" style="display: none;"></svg>
@@ -250,7 +310,6 @@
       <div class="map-altitude-strip" aria-live="polite">
         <span>Pi GPS alt: <strong id="pi-gps-altitude">-</strong></span>
         <span>Phone GPS alt: <strong id="phone-gps-altitude">-</strong></span>
-        <span id="gpx-route-progress" hidden>Route left: <strong id="gpx-route-remaining">-</strong></span>
         <button id="gpx-profile-toggle" class="dashboard-button map-profile-toggle" type="button" title="Show GPX elevation profile" hidden>Profile</button>
       </div>
 
@@ -279,34 +338,34 @@
       <div id="gpx-message" style="position:absolute; bottom:0.4rem; left:0.6rem; z-index:2; color:#ccc; background:rgba(0,0,0,0.4); padding:0.2rem 0.4rem; border-radius:0.3rem; display:none;"></div>
     </div>
 
-    <div class="box range-box">
+    <div class="box range-box legacy-range-box" hidden>
       <div class="box-title">Range</div>
         <div class="trip-metrics" style="flex-direction: column; gap: 0.2rem; align-items: flex-start;">
           <div class="trip-metric" style="display: flex; gap: 0.5rem; align-items: baseline;">
             <span class="metric-label">Range (last km):</span>
-            <span class="metric-value" id="range-last">–</span>
+            <span class="metric-value" id="legacy-range-last">–</span>
             <span class="metric-label">km</span>
           </div>
           <div class="trip-metric" style="display: flex; gap: 0.5rem; align-items: baseline;">
             <span class="metric-label">Range (10 km avg):</span>
-            <span class="metric-value" id="range-10">–</span>
+            <span class="metric-value" id="legacy-range-10">–</span>
             <span class="metric-label">km</span>
           </div>
           <div class="trip-metric" style="display: flex; gap: 0.5rem; align-items: baseline;">
             <span class="metric-label">Range (session avg):</span>
-            <span class="metric-value" id="range-avg">–</span>
+            <span class="metric-value" id="legacy-range-avg">–</span>
             <span class="metric-label">km</span>
           </div>
-          <div class="trip-metric" id="range-solar-row" style="display: none; gap: 0.5rem; align-items: baseline;">
+          <div class="trip-metric" id="legacy-range-solar-row" style="display: none; gap: 0.5rem; align-items: baseline;">
             <span class="metric-label">With solar today:</span>
-            <span class="metric-value" id="range-solar-today">-</span>
+            <span class="metric-value" id="legacy-range-solar-today">-</span>
             <span class="metric-label">km</span>
           </div>
-          <div class="trip-metric" id="solar-potential-row" style="display: none; gap: 0.5rem; align-items: baseline;">
+          <div class="trip-metric" id="legacy-solar-potential-row" style="display: none; gap: 0.5rem; align-items: baseline;">
             <span class="metric-label">Solar potential:</span>
-            <span class="metric-value" id="solar-potential-now">-</span>
+            <span class="metric-value" id="legacy-solar-potential-now">-</span>
             <span class="metric-label">W now /</span>
-            <span class="metric-value" id="solar-potential-today">-</span>
+            <span class="metric-value" id="legacy-solar-potential-today">-</span>
             <span class="metric-label">Wh today</span>
           </div>
         </div>
@@ -385,7 +444,7 @@
 
   </div> <!-- /#page-scale-root -->
 
-  <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/script.js') }}?v=solar-potential-chart-card"></script>
   <script src="{{ url_for('static', filename='js/gps_status.js') }}"></script>
   <script src="{{ url_for('static', filename='js/sys_metrics.js') }}"></script>
   <!-- Prefer local vendor copies for offline usage; fallback to CDN if not present -->
@@ -414,6 +473,6 @@
       } catch (e) { /* ignore */ }
     }
   </script>
-  <script src="{{ url_for('static', filename='js/map.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/map.js') }}?v=trip-summary"></script>
 </body>
 </html>

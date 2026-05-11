@@ -16,6 +16,8 @@ POWER_HISTORY_DEFAULT_SECONDS = 180
 POWER_HISTORY_MAX_SECONDS = 1800
 POWER_HISTORY_DEFAULT_SAMPLES = 180
 POWER_HISTORY_MAX_SAMPLES = 180
+SESSION_TRACK_DEFAULT_SAMPLES = 5000
+SESSION_TRACK_MAX_SAMPLES = 10000
 
 
 def _get_metrics_payload():
@@ -264,6 +266,68 @@ def power_history():
     })
 
 
+def session_track():
+    if not state.session_id:
+        return jsonify({"points": [], "count": 0, "sample_count": 0})
+
+    sample_count = _bounded_int_arg(
+        "samples",
+        SESSION_TRACK_DEFAULT_SAMPLES,
+        100,
+        SESSION_TRACK_MAX_SAMPLES,
+    )
+
+    try:
+        with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(logs)").fetchall()}
+            if "gps_lat" not in cols or "gps_lon" not in cols:
+                return jsonify({"points": [], "count": 0, "sample_count": sample_count})
+
+            gps_fix_filter = "AND (gps_fix IS NULL OR gps_fix = 1)" if "gps_fix" in cols else ""
+            rows = conn.execute(
+                f"""
+                SELECT timestamp, gps_lat, gps_lon
+                FROM logs
+                WHERE session = ?
+                  AND gps_lat IS NOT NULL
+                  AND gps_lon IS NOT NULL
+                  {gps_fix_filter}
+                ORDER BY id ASC
+                """,
+                (state.session_id,),
+            ).fetchall()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    rows = _sample_evenly(rows, sample_count)
+    points = []
+    last_lat = None
+    last_lon = None
+    for timestamp, lat, lon in rows:
+        try:
+            lat_value = float(lat)
+            lon_value = float(lon)
+        except (TypeError, ValueError):
+            continue
+        if not (-90 <= lat_value <= 90 and -180 <= lon_value <= 180):
+            continue
+        if last_lat == lat_value and last_lon == lon_value:
+            continue
+        points.append({
+            "timestamp": timestamp,
+            "lat": round(lat_value, 7),
+            "lon": round(lon_value, 7),
+        })
+        last_lat = lat_value
+        last_lon = lon_value
+
+    return jsonify({
+        "points": points,
+        "count": len(points),
+        "sample_count": sample_count,
+    })
+
+
 def _smooth_power_points(points, window: int = 5):
     if not points:
         return []
@@ -336,6 +400,7 @@ def create_blueprint():
     bp = Blueprint("core", __name__)
     bp.add_url_rule("/metrics", view_func=metrics)
     bp.add_url_rule("/power_history", view_func=power_history)
+    bp.add_url_rule("/session_track", view_func=session_track)
     bp.add_url_rule("/logs", view_func=logs)
     bp.add_url_rule("/sessions", view_func=list_sessions)
     bp.add_url_rule("/", view_func=root)
@@ -347,6 +412,7 @@ def create_blueprint():
 def register(app):
     app.add_url_rule("/metrics", view_func=metrics)
     app.add_url_rule("/power_history", view_func=power_history)
+    app.add_url_rule("/session_track", view_func=session_track)
     app.add_url_rule("/logs", view_func=logs)
     app.add_url_rule("/sessions", view_func=list_sessions)
     app.add_url_rule("/", view_func=root)

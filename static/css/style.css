@@ -289,12 +289,16 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 .human-box        { grid-column: 1; }
 .solar-box        { grid-column: 2; }
 .power-history-box { grid-column: 1 / -1; }
-.bar-box, .chart-box, .range-box {
+.bar-box, .chart-box, .range-box, .trip-summary-box, .solar-potential-chart-box {
   grid-column: 1 / -1;
 }
 .photo-preview-box { grid-column: 1 / -1; }
 /* Map box full width like other wide sections */
 .map-box { grid-column: 1 / -1; }
+
+.legacy-range-box {
+  display: none !important;
+}
 
 
 .box {
@@ -335,6 +339,19 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 .map-controls-top { margin-bottom: 0.4rem; }
 .map-controls-bottom { margin-top: 0.4rem; }
 
+.map-route-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding-left: 0.4rem;
+  border-left: 1px solid rgba(0, 0, 0, 0.18);
+}
+
+.map-controls-bottom:empty {
+  display: none;
+}
+
 .map-altitude-strip {
   display: flex;
   justify-content: flex-start;
@@ -351,10 +368,6 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 .map-altitude-strip strong {
   color: var(--text-dark);
   font-weight: bold;
-}
-
-.map-profile-toggle {
-  margin-left: auto;
 }
 
 .gpx-profile-panel {
@@ -660,18 +673,215 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   color: var(--text-dark);
 }
 
+.trip-summary-box {
+  align-items: stretch;
+  padding: 0.42rem;
+}
+
+.trip-summary-grid {
+  display: grid;
+  gap: 0.3rem;
+  width: 100%;
+}
+
+.trip-summary-row {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.trip-summary-row-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.trip-summary-row-energy {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.trip-summary-row-range {
+  grid-template-columns: repeat(auto-fit, minmax(5.6rem, 1fr));
+}
+
+.trip-stat {
+  min-width: 0;
+  min-height: 2.55rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.08rem;
+  padding: 0.2rem 0.28rem;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 0.42rem;
+  background: rgba(255, 255, 255, 0.34);
+  color: #111;
+  text-align: center;
+}
+
+.trip-stat-group {
+  min-width: 0;
+  display: grid;
+  gap: 0.24rem;
+  padding: 0.24rem;
+  border: 1px solid rgba(90, 54, 12, 0.2);
+  border-radius: 0.5rem;
+  background: rgba(239, 224, 198, 0.82);
+}
+
+.trip-stat-group-wh {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.trip-stat-group-efficiency,
+.trip-stat-group-live-efficiency {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.trip-stat-nested {
+  min-height: 2.36rem;
+  border-color: rgba(126, 68, 8, 0.24);
+  background: rgba(239, 143, 48, 0.74);
+}
+
+.trip-stat-nested .trip-stat-label {
+  color: rgba(32, 20, 7, 0.62);
+}
+
+.trip-stat-nested .trip-stat-unit {
+  color: rgba(32, 20, 7, 0.58);
+}
+
+.trip-stat-label {
+  align-self: stretch;
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 0.43rem;
+  font-weight: bold;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.trip-stat-value {
+  display: inline-block;
+  min-width: 0;
+  color: #111;
+  font-size: clamp(0.86rem, 2.2vw, 1.18rem);
+  font-weight: 800;
+  line-height: 1.02;
+  white-space: nowrap;
+}
+
+.trip-summary-row-3 .trip-stat-value,
+.trip-summary-row-energy .trip-stat-value {
+  font-size: clamp(1rem, 2.65vw, 1.45rem);
+}
+
+.trip-summary-row-energy .trip-stat-efficiency-live .trip-stat-value,
+.trip-summary-row-energy .trip-stat-efficiency-live-net .trip-stat-value {
+  font-size: clamp(1rem, 2.65vw, 1.45rem);
+}
+
+.trip-summary-row-range .trip-stat {
+  min-height: 2.25rem;
+}
+
+.trip-summary-row-range .trip-stat-value {
+  font-size: clamp(0.78rem, 1.8vw, 1rem);
+}
+
+.trip-stat-unit {
+  color: rgba(0, 0, 0, 0.55);
+  font-size: 0.52rem;
+  font-weight: bold;
+}
+
+.trip-stat.is-muted {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.trip-stat.is-muted .trip-stat-value {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.trip-stat-optional {
+  display: none;
+}
+
+.trip-stat-clickable {
+  cursor: pointer;
+}
+
+.trip-stat-clickable:focus-visible,
+.trip-stat-clickable.is-expanded {
+  outline: 2px solid rgba(239, 143, 48, 0.75);
+  outline-offset: 2px;
+}
+
+.solar-potential-chart-box {
+  padding: 0.5rem 0.6rem 0.55rem;
+}
+
+.solar-potential-chart-box[hidden] {
+  display: none !important;
+}
+
+.solar-potential-chart-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.3rem;
+  margin: 0.2rem 0 0.3rem;
+}
+
+.solar-potential-chart-stats span {
+  min-width: 0;
+  padding: 0.2rem 0.28rem;
+  border: 1px solid rgba(90, 54, 12, 0.2);
+  border-radius: 0.42rem;
+  background: rgba(239, 224, 198, 0.82);
+  color: rgba(0, 0, 0, 0.68);
+  font-size: 0.55rem;
+  font-weight: 700;
+  line-height: 1.05;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.solar-potential-chart-stats strong {
+  color: #111;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+#solar-potential-chart {
+  display: block;
+  width: 100%;
+  height: 9.5rem;
+  min-height: 8rem;
+  overflow: visible;
+}
+
+.chart-box {
+  align-items: stretch;
+  min-height: 40vh;
+  padding: 0.45rem 0.55rem 0.5rem;
+}
+
 .chart-box svg {
   display: block;
-  margin: auto;          /* centers horizontally */
-  max-width: 100%;       /* never overflow */
-  height: auto;          /* scale proportionally */
+  width: 100%;
+  max-width: none;
+  height: calc(40vh - 3.8rem);
+  min-height: 12rem;
+  margin: 0;
+  overflow: visible;
 }
 
 .wh-chart-wrapper {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    width: 95%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  flex: 1;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
 }
 
 #session-id-display {
@@ -685,7 +895,7 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 .barchart-buttons-wrapper {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.2rem;
+  gap: 0.18rem;
   justify-content: center;
 }
 

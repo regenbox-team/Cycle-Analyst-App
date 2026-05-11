@@ -263,6 +263,51 @@ def potential_solar_wh_remaining_today(
     return max(0.0, total)
 
 
+def solar_power_profile_today(
+    when: datetime | None = None,
+    *,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    panel_max_w: float | None = None,
+    step_minutes: int = 60,
+) -> dict:
+    when = when or _now_paris()
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=ZoneInfo("Europe/Paris"))
+    latitude = SOLAR_LOCATION_LAT if latitude is None else latitude
+    longitude = SOLAR_LOCATION_LON if longitude is None else longitude
+    panel_max_w = SOLAR_PANEL_MAX_W if panel_max_w is None else panel_max_w
+    step_minutes = max(15, min(120, int(step_minutes)))
+
+    day_start = when.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(hours=24)
+    points = []
+    cursor = day_start
+    step = timedelta(minutes=step_minutes)
+    while cursor <= day_end:
+        hour = (cursor - day_start).total_seconds() / 3600.0
+        label = "24:00" if hour >= 24.0 else cursor.strftime("%H:%M")
+        points.append({
+            "hour": round(hour, 3),
+            "time": label,
+            "power_w": round(theoretical_solar_power_w(
+                cursor,
+                latitude=latitude,
+                longitude=longitude,
+                panel_max_w=panel_max_w,
+            ), 1),
+        })
+        cursor += step
+
+    now_hour = (when - day_start).total_seconds() / 3600.0
+    return {
+        "points": points,
+        "now_hour": round(_clamp(now_hour, 0.0, 24.0), 3),
+        "date": day_start.date().isoformat(),
+        "panel_max_w": float(panel_max_w),
+    }
+
+
 def _gps_or_config_location(gps_state: dict | None) -> tuple[float, float, str]:
     gps_state = gps_state or {}
     if gps_state.get("has_fix") and gps_state.get("lat") is not None and gps_state.get("lon") is not None:
@@ -301,6 +346,7 @@ def build_estimate(
     when = when or _now_paris()
     potential_wh = potential_solar_wh_remaining_today(when, latitude=lat, longitude=lon)
     power_now = theoretical_solar_power_w(when, latitude=lat, longitude=lon)
+    power_profile = solar_power_profile_today(when, latitude=lat, longitude=lon)
 
     return {
         "enabled": True,
@@ -316,6 +362,7 @@ def build_estimate(
         "source": session_metrics.get("solar_battery_estimate_source") or "session",
         "potential_power_now_w": power_now,
         "potential_remaining_today_wh": potential_wh,
+        "solar_power_profile_today": power_profile,
         "location_source": location_source,
         "latitude": lat,
         "longitude": lon,

@@ -98,16 +98,43 @@
     routeProgress = progress;
     const row = document.getElementById('gpx-route-progress');
     const value = document.getElementById('gpx-route-remaining');
+    setCurrentRouteGradient(progress);
     if (!row || !value) return;
     if (!progress) {
-      row.hidden = true;
+      row.hidden = false;
+      row.classList.add('is-muted');
       value.textContent = '-';
       row.removeAttribute('title');
       return;
     }
     row.hidden = false;
+    row.classList.remove('is-muted');
     value.textContent = formatDistanceKm(progress.remainingKm);
     row.title = `Closest point on GPX: ${Math.round(progress.distanceToRouteM)} m away`;
+  }
+
+  function setCurrentRouteGradient(progress) {
+    const value = document.getElementById('trip-current-gradient');
+    if (!value) return;
+    const tile = value.closest('.trip-stat');
+    if (!progress || !routeProfile.points.length) {
+      value.textContent = '-';
+      value.removeAttribute('title');
+      if (tile) tile.classList.add('is-muted');
+      return;
+    }
+    const index = nearestProfileIndexForDistance(progress.alongKm);
+    const point = index == null ? null : routeProfile.points[index];
+    if (!point) {
+      value.textContent = '-';
+      value.removeAttribute('title');
+      if (tile) tile.classList.add('is-muted');
+      return;
+    }
+    const grade = Number(point.gradePct) || 0;
+    value.textContent = `${grade > 0 ? '+' : ''}${grade.toFixed(1)}%`;
+    value.title = `${point.distanceKm.toFixed(2)} km on GPX · ${Math.round(point.ele)} m`;
+    if (tile) tile.classList.remove('is-muted');
   }
 
   function mapIsExpanded() {
@@ -592,6 +619,86 @@
     updateRouteCurrentOnMap(routeProgress);
   }
 
+  function trackFeatureCollection() {
+    return {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: coords.slice() }
+      }]
+    };
+  }
+
+  function refreshTrackSource() {
+    if (trackSource) trackSource.setData(trackFeatureCollection());
+  }
+
+  function sameCoord(a, b) {
+    if (!a || !b) return false;
+    return Math.abs(a[0] - b[0]) < 0.0000001 && Math.abs(a[1] - b[1]) < 0.0000001;
+  }
+
+  function appendTrackCoord(coord) {
+    const last = coords[coords.length - 1];
+    if (!sameCoord(last, coord)) coords.push(coord);
+    while (coords.length > MAX_POINTS) coords.shift();
+  }
+
+  function placeRouteControlsInMapToolbar() {
+    const toolbar = document.querySelector('.map-controls-top');
+    const bottomControls = document.querySelector('.map-controls-bottom');
+    if (!toolbar) return;
+
+    let routeControls = toolbar.querySelector('.map-route-controls');
+    if (!routeControls) {
+      routeControls = document.createElement('div');
+      routeControls.className = 'map-route-controls';
+      toolbar.appendChild(routeControls);
+    }
+
+    [
+      document.getElementById('gpx-file-input'),
+      document.getElementById('gpx-profile-toggle'),
+      document.getElementById('gpx-upload-btn'),
+      document.getElementById('gpx-erase-btn')
+    ].forEach((control) => {
+      if (control) routeControls.appendChild(control);
+    });
+
+    if (bottomControls && bottomControls.children.length === 0) {
+      bottomControls.remove();
+    }
+  }
+
+  async function loadSessionTrackFromServer() {
+    try {
+      const res = await fetch(`/session_track?samples=${MAX_POINTS}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const points = Array.isArray(data.points) ? data.points : [];
+      const loaded = [];
+      points.forEach((point) => {
+        const lon = Number(point.lon);
+        const lat = Number(point.lat);
+        if (isFinite(lon) && isFinite(lat)) loaded.push([lon, lat]);
+      });
+      if (!loaded.length) return;
+
+      coords.length = 0;
+      loaded.slice(-MAX_POINTS).forEach((coord) => coords.push(coord));
+      const last = coords[coords.length - 1];
+      lastLon = last[0];
+      lastLat = last[1];
+      if (posSource) {
+        posSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: last } });
+      }
+      refreshTrackSource();
+      updateRouteProgressFromGps(lastLon, lastLat);
+    } catch (e) {
+      // ignore
+    }
+  }
+
   async function switchBasemap(choice) {
     const style = await chooseStyle(choice);
     map.setStyle(style);
@@ -607,6 +714,7 @@
   async function initMap() {
     const container = document.getElementById('live-map');
     if (!container) return;
+    placeRouteControlsInMapToolbar();
 
     // Try to ensure pmtiles is available (load CDN if missing)
     await ensurePmtiles();
@@ -639,6 +747,7 @@
       posSource = map.getSource('pos');
       trackSource = map.getSource('track');
       routeSource = map.getSource('route');
+      loadSessionTrackFromServer();
       // Attempt loading persisted GPX route, if any
       loadRouteFromServer();
       if (initialChoice === BASEMAPS.TERRAIN_3D) {
@@ -689,8 +798,7 @@
       const lon = Number(s.lon), lat = Number(s.lat);
       if (!isFinite(lon) || !isFinite(lat)) return;
 
-      coords.push([lon, lat]);
-      if (coords.length > MAX_POINTS) coords.shift();
+      appendTrackCoord([lon, lat]);
 
       lastLon = lon; lastLat = lat;
       updateRouteProgressFromGps(lon, lat);
@@ -699,7 +807,7 @@
         posSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] } });
       }
       if (trackSource) {
-        trackSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords.slice() } }] });
+        refreshTrackSource();
       }
 
       // Determine target bearing if in trajectory mode and moving sufficiently
