@@ -474,9 +474,9 @@
               <td>{{ s["mode"] }}</td>
               <td>{{ "☀️" if s["solar_enabled"] else "" }}</td>
               <td>
-                <a class="download-arrow" href="/api/export_session?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}" aria-label="Download JSON">↓</a>
-                <a class="action-link primary" href="/api/export_gpx?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}">GPX</a>
-                <a class="action-link" href="/session_map?device_id={{ s['device_id'] }}&session_id={{ s['session_id'] }}&mode={{ s['mode'] }}">Map</a>
+                <a class="action-link primary" href="/api/export_session?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}" download>Session JSON</a>
+                <a class="action-link" href="/api/export_gpx?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}">GPX</a>
+                <a class="action-link" href="/session_map?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}">Map</a>
                 <button class="action-link danger session-delete-btn" type="button" aria-label="Delete session {{ s['session_id'] }}">Delete</button>
               </td>
               <td>{{ s["start_ts_fmt"] or "" }}</td>

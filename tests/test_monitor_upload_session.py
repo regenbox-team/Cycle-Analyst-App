@@ -161,6 +161,70 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertAlmostEqual(session[1], 2.0)
         self.assertEqual(sample_count, 3)
 
+    def test_export_session_downloads_full_json_payload(self):
+        payload = {
+            "device_id": "bike",
+            "session_id": "2026-05-07_10-00-00",
+            "mode": "supercycle_live",
+            "metrics": {"distance_km": 2.0, "solar_enabled": True},
+            "solar_enabled": 1,
+        }
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            self.monitor_app._insert_telemetry_samples(
+                conn,
+                payload["device_id"],
+                payload["session_id"],
+                payload["mode"],
+                [self.sample(0), self.sample(1)],
+                1,
+            )
+            samples = self.monitor_app._telemetry_samples_for_session(
+                conn,
+                payload["device_id"],
+                payload["session_id"],
+                payload["mode"],
+            )
+            self.monitor_app._insert_uploaded_session_summary(conn, payload, samples)
+            conn.execute(
+                """
+                INSERT INTO photos (
+                    device_id, session_id, mode, captured_at, relative_path, uploaded_at,
+                    is_public, gps_lat, gps_lon, solar_enabled, metrics_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "bike",
+                    "2026-05-07_10-00-00",
+                    "supercycle_live",
+                    "2026-05-07 10:00:00",
+                    "photos\\bike\\frame.jpg",
+                    "2026-05-07 10:01:00",
+                    1,
+                    48.0,
+                    2.0,
+                    1,
+                    '{"distance_km": 2.0}',
+                ),
+            )
+            conn.commit()
+
+        token = "Basic YWRtaW46c2VjcmV0"
+        response = self.monitor_app.app.test_client().get(
+            "/api/export_session?device_id=bike&session_id=2026-05-07_10-00-00&mode=supercycle_live",
+            headers={"Authorization": token},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "application/json")
+        self.assertIn("attachment;", response.headers["Content-Disposition"])
+        self.assertIn("bike_2026-05-07_10-00-00_supercycle_live.json", response.headers["Content-Disposition"])
+        exported = response.get_json()
+        self.assertEqual(exported["device_id"], "bike")
+        self.assertEqual(len(exported["telemetry_samples"]), 2)
+        self.assertEqual(len(exported["photos"]), 1)
+        self.assertEqual(exported["photos"][0]["relative_path"], "photos/bike/frame.jpg")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2232,6 +2232,19 @@ def create_app() -> Flask:
                 """,
                 (device_id, session_id, mode),
             ).fetchall()
+            photo_rows = conn.execute(
+                """
+                SELECT id, captured_at, distance_km, interval_km, filename, mime_type, relative_path,
+                       uploaded_at, test_mode, is_public, gps_lat, gps_lon, gps_alt, gps_speed_kph,
+                       gps_track_deg, gps_fix, gps_sats, gps_hdop, speed_kph, session_distance_km,
+                       gps_uphill_m, solar_power_w, generator_power_w, solar_wh, solar_enabled,
+                       user_id, user_initials, user_snapshot_json, metrics_json
+                FROM photos
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                ORDER BY captured_at, id
+                """,
+                (device_id, session_id, mode),
+            ).fetchall()
 
         metrics = None
         if session_row and session_row["metrics_json"]:
@@ -2270,22 +2283,71 @@ def create_app() -> Flask:
             for r in rows
         ]
 
-        return jsonify(
-            {
-                "device_id": device_id,
-                "session_id": session_id,
-                "mode": mode,
-                "meta": {
-                    "start_ts": session_row["start_ts"] if session_row else None,
-                    "end_ts": session_row["end_ts"] if session_row else None,
-                    "rows_count": session_row["rows_count"] if session_row else len(rows),
-                    "distance_km": session_row["distance_km"] if session_row else None,
-                    "uploaded_at": session_row["uploaded_at"] if session_row else None,
-                },
-                "metrics": metrics,
-                "telemetry_samples": samples,
-                "logs": samples,
-            }
+        photos = []
+        for row in photo_rows:
+            metrics_json = None
+            if row["metrics_json"]:
+                try:
+                    metrics_json = json.loads(row["metrics_json"])
+                except Exception:
+                    metrics_json = row["metrics_json"]
+            photos.append(
+                {
+                    "id": row["id"],
+                    "captured_at": row["captured_at"],
+                    "distance_km": row["distance_km"],
+                    "interval_km": row["interval_km"],
+                    "filename": row["filename"],
+                    "mime_type": row["mime_type"],
+                    "relative_path": str(row["relative_path"] or "").replace("\\", "/"),
+                    "uploaded_at": row["uploaded_at"],
+                    "test_mode": row["test_mode"],
+                    "is_public": row["is_public"],
+                    "gps_lat": row["gps_lat"],
+                    "gps_lon": row["gps_lon"],
+                    "gps_alt": row["gps_alt"],
+                    "gps_speed_kph": row["gps_speed_kph"],
+                    "gps_track_deg": row["gps_track_deg"],
+                    "gps_fix": row["gps_fix"],
+                    "gps_sats": row["gps_sats"],
+                    "gps_hdop": row["gps_hdop"],
+                    "speed_kph": row["speed_kph"],
+                    "session_distance_km": row["session_distance_km"],
+                    "gps_uphill_m": row["gps_uphill_m"],
+                    "solar_power_w": row["solar_power_w"],
+                    "generator_power_w": row["generator_power_w"],
+                    "solar_wh": row["solar_wh"],
+                    "solar_enabled": row["solar_enabled"],
+                    "user_id": row["user_id"],
+                    "user_initials": row["user_initials"],
+                    "user_snapshot_json": row["user_snapshot_json"],
+                    "metrics": metrics_json,
+                }
+            )
+
+        payload = {
+            "device_id": device_id,
+            "session_id": session_id,
+            "mode": mode,
+            "meta": {
+                "start_ts": session_row["start_ts"] if session_row else None,
+                "end_ts": session_row["end_ts"] if session_row else None,
+                "rows_count": session_row["rows_count"] if session_row else len(rows),
+                "distance_km": session_row["distance_km"] if session_row else None,
+                "uploaded_at": session_row["uploaded_at"] if session_row else None,
+            },
+            "metrics": metrics,
+            "telemetry_samples": samples,
+            "logs": samples,
+            "photos": photos,
+        }
+        safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in f"{device_id}_{session_id}_{mode}")
+        return Response(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_name}.json"',
+                "Content-Type": "application/json; charset=utf-8",
+            },
         )
 
     @app.route("/api/export_gpx")
