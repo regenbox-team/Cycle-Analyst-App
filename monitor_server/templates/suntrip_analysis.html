@@ -220,7 +220,7 @@
         display: block;
         width: 100%;
         min-width: 680px;
-        height: 260px;
+        height: 320px;
       }
       .chart-scroll {
         overflow-x: auto;
@@ -241,6 +241,24 @@
         color: var(--muted);
         font-size: 12px;
       }
+      .chart-scale-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .chart-scale-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #fffaf2;
+        padding: 6px 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
       .legend-item {
         display: inline-flex;
         align-items: center;
@@ -250,6 +268,15 @@
         width: 22px;
         height: 3px;
         border-radius: 999px;
+      }
+      .legend-swatch.dashed {
+        background: repeating-linear-gradient(
+          90deg,
+          currentColor 0,
+          currentColor 6px,
+          transparent 6px,
+          transparent 10px
+        ) !important;
       }
       @media (max-width: 760px) {
         main { padding: 24px 14px 40px; }
@@ -429,6 +456,16 @@
         supercycle_1: "#0d9488",
         supercycle_2: "#8a6a2f"
       };
+      const metricPalette = [
+        "#0d9488",
+        "#b45309",
+        "#2563eb",
+        "#be123c",
+        "#6d28d9",
+        "#15803d",
+        "#c2410c",
+        "#475569"
+      ];
       const chartMetrics = new Map();
       chartMetricGroups.forEach((group) => {
         (group.rows || []).forEach((metric) => {
@@ -553,6 +590,144 @@
         panel.appendChild(legend);
         return panel;
       };
+      const renderCombinedChart = (selected) => {
+        const panel = document.createElement("section");
+        panel.className = "chart-panel";
+
+        const title = document.createElement("div");
+        title.className = "chart-title";
+        const titleText = document.createElement("strong");
+        titleText.textContent = "Selected metrics";
+        const subtitle = document.createElement("span");
+        subtitle.textContent = "One Y scale per metric";
+        title.append(titleText, subtitle);
+        panel.appendChild(title);
+
+        const days = selected[0]?.days || [];
+        const metricScales = selected
+          .map((metric, index) => {
+            const values = (metric.series || [])
+              .flatMap((item) => (item.values || []).map(finiteValue))
+              .filter((value) => value !== null);
+            if (!values.length) return null;
+            let min = Math.min(...values);
+            let max = Math.max(...values);
+            if (min > 0) min = 0;
+            if (max < 0) max = 0;
+            if (min === max) {
+              const pad = Math.max(1, Math.abs(max) * 0.1);
+              min -= pad;
+              max += pad;
+            }
+            return {
+              metric,
+              color: metricPalette[index % metricPalette.length],
+              min,
+              max
+            };
+          })
+          .filter(Boolean);
+        if (!days.length || !metricScales.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = "No numeric data for the selected metrics.";
+          panel.appendChild(empty);
+          return panel;
+        }
+
+        const width = Math.max(760, 150 + days.length * 96);
+        const height = 320;
+        const margin = { top: 20, right: 28, bottom: 52, left: 54 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const x = (index) => margin.left + (days.length === 1 ? plotWidth / 2 : (plotWidth * index) / (days.length - 1));
+        const y = (value, scale) => margin.top + plotHeight - ((value - scale.min) / (scale.max - scale.min)) * plotHeight;
+
+        const scroll = document.createElement("div");
+        scroll.className = "chart-scroll";
+        const svg = svgNode("svg", { class: "chart-svg", viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Selected metrics chart" });
+
+        const ticks = 4;
+        for (let i = 0; i <= ticks; i += 1) {
+          const yy = margin.top + plotHeight - (plotHeight * i) / ticks;
+          svg.appendChild(svgNode("line", { class: "chart-grid", x1: margin.left, y1: yy, x2: width - margin.right, y2: yy }));
+          const label = svgNode("text", { class: "chart-label", x: margin.left - 8, y: yy + 4, "text-anchor": "end" });
+          label.textContent = `${Math.round((i / ticks) * 100)}%`;
+          svg.appendChild(label);
+        }
+        svg.appendChild(svgNode("line", { class: "chart-axis", x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom }));
+        svg.appendChild(svgNode("line", { class: "chart-axis", x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom }));
+
+        const dayStep = Math.max(1, Math.ceil(days.length / 8));
+        days.forEach((day, index) => {
+          if (index % dayStep !== 0 && index !== days.length - 1) return;
+          const label = svgNode("text", { class: "chart-label", x: x(index), y: height - 20, "text-anchor": "middle" });
+          label.textContent = day;
+          svg.appendChild(label);
+        });
+
+        metricScales.forEach((scale) => {
+          (scale.metric.series || []).forEach((item) => {
+            let path = "";
+            (item.values || []).forEach((raw, index) => {
+              const value = finiteValue(raw);
+              if (value === null) return;
+              path += `${path ? " L" : "M"} ${x(index).toFixed(2)} ${y(value, scale).toFixed(2)}`;
+            });
+            if (!path) return;
+            const dash = item.vehicle_key === "supercycle_2" ? "7 5" : "";
+            svg.appendChild(svgNode("path", { class: "chart-line", d: path, stroke: scale.color, "stroke-dasharray": dash }));
+            (item.values || []).forEach((raw, index) => {
+              const value = finiteValue(raw);
+              if (value === null) return;
+              svg.appendChild(svgNode("circle", { class: "chart-dot", cx: x(index), cy: y(value, scale), r: 4, fill: scale.color }));
+            });
+          });
+        });
+
+        scroll.appendChild(svg);
+        panel.appendChild(scroll);
+
+        const vehicleLegend = document.createElement("div");
+        vehicleLegend.className = "chart-legend";
+        [
+          { key: "supercycle_1", label: "Supercycle 1", dashed: false },
+          { key: "supercycle_2", label: "Supercycle 2", dashed: true }
+        ].forEach((item) => {
+          const legendItem = document.createElement("span");
+          legendItem.className = "legend-item";
+          const swatch = document.createElement("span");
+          swatch.className = item.dashed ? "legend-swatch dashed" : "legend-swatch";
+          swatch.style.color = vehicleColors[item.key] || "#666666";
+          swatch.style.background = vehicleColors[item.key] || "#666666";
+          const label = document.createElement("span");
+          label.textContent = item.label;
+          legendItem.append(swatch, label);
+          vehicleLegend.appendChild(legendItem);
+        });
+        panel.appendChild(vehicleLegend);
+
+        const scaleList = document.createElement("div");
+        scaleList.className = "chart-scale-list";
+        metricScales.forEach((scale) => {
+          const item = document.createElement("div");
+          item.className = "chart-scale-item";
+          const name = document.createElement("span");
+          name.className = "legend-item";
+          const swatch = document.createElement("span");
+          swatch.className = "legend-swatch";
+          swatch.style.background = scale.color;
+          const label = document.createElement("span");
+          label.textContent = scale.metric.label;
+          name.append(swatch, label);
+          const range = document.createElement("span");
+          range.textContent = `${formatAxisValue(scale.min, scale.metric.unit)} to ${formatAxisValue(scale.max, scale.metric.unit)}`;
+          item.append(name, range);
+          scaleList.appendChild(item);
+        });
+        panel.appendChild(scaleList);
+        return panel;
+      };
       const renderCharts = () => {
         const selected = Array.from(metricChecks)
           .filter((check) => check.checked)
@@ -560,7 +735,7 @@
           .filter(Boolean);
         if (chartEmpty) chartEmpty.hidden = selected.length > 0;
         if (!chartPanels) return;
-        chartPanels.replaceChildren(...selected.map(renderMetricChart));
+        chartPanels.replaceChildren(...(selected.length ? [renderCombinedChart(selected)] : []));
       };
       metricChecks.forEach((check) => {
         check.addEventListener("change", renderCharts);
