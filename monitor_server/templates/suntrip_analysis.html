@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Suntrip Analysis</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f3ec;
+        --panel: #ffffff;
+        --ink: #1a1a1a;
+        --muted: #5f5f5f;
+        --accent: #0d9488;
+        --accent-soft: #d5f1ee;
+        --border: #e6dfd3;
+        --shadow: 0 10px 30px rgba(20, 20, 20, 0.08);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        font-family: "Apfel Grotesk", "Helvetica Neue", Arial, sans-serif;
+        background: radial-gradient(circle at 10% 10%, #fff7eb 0%, #f7f3ec 45%, #efe7db 100%);
+      }
+      main { max-width: 1440px; margin: 0 auto; padding: 32px 24px 48px; }
+      h1 { margin: 0 0 6px 0; font-size: 30px; letter-spacing: 0; }
+      h2 { margin: 26px 0 12px 0; font-size: 19px; }
+      .muted { color: var(--muted); font-size: 12px; letter-spacing: 0.02em; text-transform: uppercase; }
+      .top-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .nav-actions,
+      .filter-form {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        box-shadow: var(--shadow);
+        padding: 16px 18px;
+      }
+      .btn,
+      .link-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 11px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: #fffaf2;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-decoration: none;
+        text-transform: uppercase;
+      }
+      .btn-primary {
+        background: var(--accent-soft);
+        color: #0f766e;
+        border-color: var(--accent);
+      }
+      label { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; }
+      input[type="date"] {
+        min-height: 31px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #fffdf9;
+        padding: 4px 8px;
+        color: var(--ink);
+      }
+      table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
+      th, td { border-bottom: 1px solid var(--border); padding: 7px 8px; text-align: left; vertical-align: top; }
+      th { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+      tbody tr:hover td { background: #faf7f0; }
+      .table-scroll {
+        overflow: auto;
+        max-height: 75vh;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+      .analysis-table {
+        min-width: max-content;
+      }
+      .analysis-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        background: #f4efe5;
+      }
+      .analysis-table .sticky-col {
+        position: sticky;
+        left: 0;
+        z-index: 4;
+        min-width: 210px;
+        background: #fffdf9;
+        box-shadow: 1px 0 0 var(--border);
+      }
+      .analysis-table thead .sticky-col { background: #f4efe5; }
+      .metric-category td {
+        background: #efe6d8;
+        color: #6f665b;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .value-cell {
+        min-width: 126px;
+        text-align: right;
+        white-space: nowrap;
+      }
+      .day-head { text-align: center; color: #0f766e; }
+      .vehicle-head { text-align: center; color: #1a1a1a; }
+      .session-head {
+        max-width: 170px;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.3;
+        text-align: center;
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .session-head a { color: #0f766e; text-decoration: none; }
+      .session-head a:hover { text-decoration: underline; }
+      .session-table td { white-space: nowrap; }
+      .stage-toggle {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--accent);
+      }
+      .included-row td { background: #f0fdfa; }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: #0f766e;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .empty {
+        padding: 24px;
+        color: var(--muted);
+        text-align: center;
+      }
+      @media (max-width: 760px) {
+        main { padding: 24px 14px 40px; }
+        .top-row { align-items: flex-start; }
+        .analysis-table .sticky-col { min-width: 170px; }
+        .value-cell { min-width: 112px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="top-row">
+        <div>
+          <h1>Suntrip Analysis</h1>
+          <div class="muted">{{ start_date }} to {{ end_date }} · {{ stage_count }} included sessions</div>
+        </div>
+        <div class="nav-actions">
+          <a class="btn" href="/">Back to monitor</a>
+          <a class="btn btn-primary" href="/suntrip">Public Suntrip page</a>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 16px;">
+        <form class="filter-form" method="get" action="/suntrip_analysis">
+          <label for="start">Start</label>
+          <input id="start" name="start" type="date" value="{{ start_date }}">
+          <label for="end">End</label>
+          <input id="end" name="end" type="date" value="{{ end_date }}">
+          <button class="btn btn-primary" type="submit">Update</button>
+          <span class="badge">Supercycle 1 / Supercycle 2</span>
+        </form>
+      </div>
+
+      <h2>Comparison Table</h2>
+      <div class="card">
+        {% if columns %}
+        <div class="table-scroll">
+          <table class="analysis-table">
+            <thead>
+              <tr>
+                <th class="sticky-col">Metric</th>
+                {% for day in day_groups %}
+                <th class="day-head" colspan="{{ day.columns|length }}">{{ day.day_label }}</th>
+                {% endfor %}
+              </tr>
+              <tr>
+                <th class="sticky-col">Vehicle</th>
+                {% for column in columns %}
+                <th class="vehicle-head">{{ column.vehicle_label }}</th>
+                {% endfor %}
+              </tr>
+              <tr>
+                <th class="sticky-col">Session</th>
+                {% for column in columns %}
+                <th class="session-head">
+                  <a href="{{ column.map_url }}">{{ column.session_id }}</a><br>
+                  {{ column.start_ts_fmt or column.device_id }}
+                </th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for group in metric_groups %}
+              <tr class="metric-category">
+                <td class="sticky-col">{{ group.category }}</td>
+                {% for column in columns %}
+                <td></td>
+                {% endfor %}
+              </tr>
+              {% for row in group.rows %}
+              <tr>
+                <td class="sticky-col">{{ row.label }}</td>
+                {% for value in row["values"] %}
+                <td class="value-cell">{{ value }}</td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty">No sessions marked as Suntrip stages in this period yet.</div>
+        {% endif %}
+      </div>
+
+      <h2>Sessions In Period</h2>
+      <div class="card">
+        {% if candidates %}
+        <div class="table-scroll">
+          <table class="session-table">
+            <thead>
+              <tr>
+                <th>Etape</th>
+                <th>Day</th>
+                <th>Vehicle</th>
+                <th>Device</th>
+                <th>Session</th>
+                <th>Start</th>
+                <th>Rows</th>
+                <th>Distance</th>
+                <th>Map</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for session in candidates %}
+              <tr class="{{ 'included-row' if session.suntrip_stage else '' }}">
+                <td>
+                  <input
+                    class="stage-toggle"
+                    type="checkbox"
+                    aria-label="Include {{ session.session_id }} as Suntrip stage"
+                    data-device-id="{{ session.device_id }}"
+                    data-session-id="{{ session.session_id }}"
+                    data-mode="{{ session.mode }}"
+                    {% if session.suntrip_stage %}checked{% endif %}
+                  >
+                </td>
+                <td>{{ session.day_label }}</td>
+                <td>{{ session.vehicle_label }}</td>
+                <td>{{ session.device_id }}</td>
+                <td>{{ session.session_id }}</td>
+                <td>{{ session.start_ts_fmt or "" }}</td>
+                <td>{{ session.rows_count or 0 }}</td>
+                <td>{{ "%.2f"|format(session.distance_km or 0) }} km</td>
+                <td><a class="link-btn" href="{{ session.map_url }}">Map</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty">No Supercycle 1 or Supercycle 2 sessions found in this period.</div>
+        {% endif %}
+      </div>
+    </main>
+
+    <script>
+      const toggles = document.querySelectorAll(".stage-toggle");
+      toggles.forEach((toggle) => {
+        toggle.addEventListener("change", async () => {
+          const payload = {
+            device_id: toggle.dataset.deviceId || "",
+            session_id: toggle.dataset.sessionId || "",
+            mode: toggle.dataset.mode || "default",
+            suntrip_stage: toggle.checked
+          };
+          toggle.disabled = true;
+          try {
+            const response = await fetch("/api/session/suntrip_stage", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+              const result = await response.json().catch(() => ({}));
+              throw new Error(result.error || "Update failed");
+            }
+            window.location.reload();
+          } catch (error) {
+            toggle.checked = !toggle.checked;
+            toggle.disabled = false;
+            window.alert(error.message || "Update failed");
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

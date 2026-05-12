@@ -257,6 +257,76 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn('data-session-row="1"', html)
         self.assertIn('data-month-key="2026-05"', html)
 
+    def test_suntrip_stage_toggle_feeds_analysis_page(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        sessions = [
+            {
+                "device_id": "Supercycle-1",
+                "session_id": "2026-05-07_10-00-00",
+                "mode": "supercycle_live",
+                "metrics": {"solar_enabled": True},
+                "solar_enabled": 1,
+            },
+            {
+                "device_id": "sc-vehicule-2",
+                "session_id": "2026-05-07_10-05-00",
+                "mode": "supercycle_live",
+                "metrics": {"solar_enabled": True},
+                "solar_enabled": 1,
+            },
+        ]
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            for index, payload in enumerate(sessions):
+                samples = [
+                    dict(self.sample(0), timestamp=f"2026-05-07 10:0{index}:00"),
+                    dict(self.sample(1), timestamp=f"2026-05-07 10:0{index}:01"),
+                ]
+                self.monitor_app._insert_telemetry_samples(
+                    conn,
+                    payload["device_id"],
+                    payload["session_id"],
+                    payload["mode"],
+                    samples,
+                    1,
+                )
+                stored_samples = self.monitor_app._telemetry_samples_for_session(
+                    conn,
+                    payload["device_id"],
+                    payload["session_id"],
+                    payload["mode"],
+                )
+                self.monitor_app._insert_uploaded_session_summary(conn, payload, stored_samples)
+            conn.commit()
+
+        client = self.monitor_app.app.test_client()
+        token = "Basic YWRtaW46c2VjcmV0"
+        response = client.patch(
+            "/api/sessions/suntrip_stage",
+            json={"sessions": sessions, "suntrip_stage": True},
+            headers={"Authorization": token},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["updated_count"], 2)
+
+        page = client.get(
+            "/suntrip_analysis?start=2026-05-04&end=2026-06-04",
+            headers={"Authorization": token},
+        )
+
+        self.assertEqual(page.status_code, 200)
+        html = page.get_data(as_text=True)
+        self.assertIn("2 included sessions", html)
+        self.assertIn("Supercycle 1", html)
+        self.assertIn("Supercycle 2", html)
+        self.assertIn("2026-05-07_10-00-00", html)
+        self.assertIn("2026-05-07_10-05-00", html)
+        self.assertIn("CA distance", html)
+        self.assertIn("Battery Used", html)
+
 
 if __name__ == "__main__":
     unittest.main()

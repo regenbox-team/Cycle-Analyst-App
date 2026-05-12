@@ -32,6 +32,13 @@
       h1 { margin: 0 0 6px 0; font-size: 32px; letter-spacing: -0.02em; }
       h2 { margin: 28px 0 12px 0; font-size: 20px; }
       .muted { color: var(--muted); font-size: 12px; letter-spacing: 0.02em; text-transform: uppercase; }
+      .top-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+      }
       .card {
         background: var(--panel);
         border: 1px solid var(--border);
@@ -190,6 +197,12 @@
         cursor: wait;
         opacity: 0.65;
       }
+      .stage-check {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--accent);
+      }
+      .stage-row td { background: #f0fdfa; }
       .modal-backdrop {
         position: fixed;
         inset: 0;
@@ -232,6 +245,12 @@
         justify-content: space-between;
         gap: 12px;
         margin-bottom: 10px;
+      }
+      .bulk-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
       }
       .bulk-count {
         color: var(--muted);
@@ -331,8 +350,13 @@
   </head>
   <body>
     <main>
-      <h1>Cycle Monitor</h1>
-      <div class="muted">Last refresh: {{ now }}</div>
+      <div class="top-actions">
+        <div>
+          <h1>Cycle Monitor</h1>
+          <div class="muted">Last refresh: {{ now }}</div>
+        </div>
+        <a class="action-link primary" href="/suntrip_analysis">Suntrip analysis</a>
+      </div>
 
       <h2>Devices</h2>
       <div class="card table-card">
@@ -453,7 +477,11 @@
       <div class="card table-card">
         <div class="bulk-actions">
           <div class="bulk-count"><span id="selected-count">0</span> selected</div>
-          <button id="bulk-delete-btn" class="action-link danger" type="button" disabled>Delete selected</button>
+          <div class="bulk-buttons">
+            <button id="bulk-stage-btn" class="action-link primary" type="button" disabled>Mark Suntrip</button>
+            <button id="bulk-unstage-btn" class="action-link" type="button" disabled>Unmark Suntrip</button>
+            <button id="bulk-delete-btn" class="action-link danger" type="button" disabled>Delete selected</button>
+          </div>
         </div>
         <table class="table-compact">
           <thead>
@@ -464,6 +492,7 @@
               <th>Device</th>
               <th>Session</th>
               <th>Mode</th>
+              <th>Suntrip</th>
               <th title="Solar session">☀️</th>
               <th>Actions</th>
               <th>
@@ -484,10 +513,11 @@
             {% if s["month_key"] != current_month.key %}
             {% set current_month.key = s["month_key"] %}
             <tr class="month-separator" data-month-separator="1">
-              <td colspan="10"><span>{{ s["month_label"] }}</span></td>
+              <td colspan="11"><span>{{ s["month_label"] }}</span></td>
             </tr>
             {% endif %}
             <tr
+              class="{{ 'stage-row' if s['suntrip_stage'] else '' }}"
               data-session-row="1"
               data-start="{{ s['start_ts'] or '' }}"
               data-distance="{{ s['distance_km'] or 0 }}"
@@ -503,6 +533,14 @@
               <td>{{ s["device_id"] }}</td>
               <td>{{ s["session_id"] }}</td>
               <td>{{ s["mode"] }}</td>
+              <td>
+                <input
+                  class="stage-check session-stage-check"
+                  type="checkbox"
+                  aria-label="Mark {{ s['session_id'] }} as Suntrip stage"
+                  {% if s["suntrip_stage"] %}checked{% endif %}
+                >
+              </td>
               <td>{{ "☀️" if s["solar_enabled"] else "" }}</td>
               <td>
                 <a class="action-link primary" href="/api/export_session?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}" download>Session JSON</a>
@@ -635,6 +673,8 @@
       const tbody = document.getElementById("sessions-body");
       const selectAllSessions = document.getElementById("select-all-sessions");
       const bulkDeleteBtn = document.getElementById("bulk-delete-btn");
+      const bulkStageBtn = document.getElementById("bulk-stage-btn");
+      const bulkUnstageBtn = document.getElementById("bulk-unstage-btn");
       const selectedCount = document.getElementById("selected-count");
       const getSessionPayload = (row) => ({
         device_id: row.dataset.deviceId || "",
@@ -658,7 +698,7 @@
           separator.className = "month-separator";
           separator.dataset.monthSeparator = "1";
           const cell = document.createElement("td");
-          cell.colSpan = 10;
+          cell.colSpan = 11;
           const label = document.createElement("span");
           label.textContent = row.dataset.monthLabel || "Date inconnue";
           cell.appendChild(label);
@@ -673,6 +713,8 @@
         const checkedCount = checks.filter((check) => check.checked).length;
         if (selectedCount) selectedCount.textContent = String(checkedCount);
         if (bulkDeleteBtn) bulkDeleteBtn.disabled = checkedCount === 0;
+        if (bulkStageBtn) bulkStageBtn.disabled = checkedCount === 0;
+        if (bulkUnstageBtn) bulkUnstageBtn.disabled = checkedCount === 0;
         if (selectAllSessions) {
           selectAllSessions.checked = checks.length > 0 && checkedCount === checks.length;
           selectAllSessions.indeterminate = checkedCount > 0 && checkedCount < checks.length;
@@ -682,6 +724,39 @@
         rows.forEach((row) => row.remove());
         renderMonthSeparators();
         updateSelectionState();
+      };
+      const applyStageState = (rows, suntripStage) => {
+        rows.forEach((row) => {
+          row.classList.toggle("stage-row", suntripStage);
+          const check = row.querySelector(".session-stage-check");
+          if (check) check.checked = suntripStage;
+        });
+      };
+      const updateRowsStage = async (rows, suntripStage) => {
+        if (!rows.length) return;
+        const sessions = rows.map(getSessionPayload);
+        const response = await fetch("/api/sessions/suntrip_stage", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessions, suntrip_stage: suntripStage })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result.error || "Suntrip update failed");
+        }
+        const updatedKeys = new Set(
+          (result.results || [])
+            .filter((item) => item.status === "updated")
+            .map((item) => `${item.device_id}\u0000${item.session_id}\u0000${item.mode}`)
+        );
+        const updatedRows = rows.filter((row) => {
+          const payload = getSessionPayload(row);
+          return updatedKeys.has(`${payload.device_id}\u0000${payload.session_id}\u0000${payload.mode}`);
+        });
+        applyStageState(updatedRows, suntripStage);
+        if (updatedRows.length !== rows.length) {
+          await showMonitorMessage(`${updatedRows.length} of ${rows.length} selected sessions were updated.`);
+        }
       };
       if (tbody) {
         tbody.addEventListener("click", async (event) => {
@@ -726,6 +801,22 @@
         tbody.addEventListener("change", (event) => {
           if (event.target.matches(".session-row-check")) {
             updateSelectionState();
+          }
+          if (event.target.matches(".session-stage-check")) {
+            const check = event.target;
+            const row = check.closest("tr");
+            if (!row) return;
+            const next = check.checked;
+            check.disabled = true;
+            updateRowsStage([row], next)
+              .catch(async (error) => {
+                check.checked = !next;
+                row.classList.toggle("stage-row", !next);
+                await showMonitorMessage(error.message || "Suntrip update failed", "Update failed");
+              })
+              .finally(() => {
+                check.disabled = false;
+              });
           }
         });
       }
@@ -788,6 +879,26 @@
           }
         });
       }
+      const wireBulkStage = (button, suntripStage) => {
+        if (!button || !tbody) return;
+        button.addEventListener("click", async () => {
+          const rows = selectedRows();
+          if (!rows.length) return;
+          const originalText = button.textContent;
+          button.disabled = true;
+          button.textContent = suntripStage ? "Marking" : "Unmarking";
+          try {
+            await updateRowsStage(rows, suntripStage);
+          } catch (error) {
+            await showMonitorMessage(error.message || "Suntrip update failed", "Update failed");
+          } finally {
+            button.textContent = originalText;
+            updateSelectionState();
+          }
+        });
+      };
+      wireBulkStage(bulkStageBtn, true);
+      wireBulkStage(bulkUnstageBtn, false);
       updateSelectionState();
       renderMonthSeparators();
       const getValue = (row, key) => {

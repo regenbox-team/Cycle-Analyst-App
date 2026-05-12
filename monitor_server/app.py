@@ -23,9 +23,11 @@ if REPO_ROOT in sys.path:
 sys.path.insert(0, REPO_ROOT)
 
 from app.session_summary import (
+    SUMMARY_GROUPS,
     build_summary_sections,
     compute_session_metrics,
     compute_timeline_metrics_by_user,
+    format_metric_value,
 )
 
 
@@ -47,6 +49,20 @@ TERRAIN_BACKFILL_LIMIT_POINTS = int(os.getenv("MONITOR_TERRAIN_BACKFILL_LIMIT_PO
 SUNTRIP_DEFAULT_START_DATE = "2026-05-04"
 SUNTRIP_DEFAULT_DEVICE_ALIASES = ("Supercycle-1", "sc-vehicule-1")
 SUNTRIP_DEFAULT_PHOTO_LIMIT = 5000
+SUNTRIP_ANALYSIS_START_DATE = "2026-05-04"
+SUNTRIP_ANALYSIS_END_DATE = "2026-06-04"
+SUNTRIP_ANALYSIS_VEHICLES = (
+    {
+        "key": "supercycle_1",
+        "label": "Supercycle 1",
+        "aliases": ("Supercycle-1", "supercycle-1", "sc-vehicule-1", "sc-vehicle-1"),
+    },
+    {
+        "key": "supercycle_2",
+        "label": "Supercycle 2",
+        "aliases": ("Supercycle-2", "supercycle-2", "sc-vehicule-2", "sc-vehicle-2"),
+    },
+)
 DEFAULT_DB_TIMEOUT_SEC = 30.0
 HEARTBEAT_ACTIVE_WINDOW_SEC = 120
 DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
@@ -177,6 +193,7 @@ def _init_db() -> None:
                 solar_enabled INTEGER DEFAULT 1,
                 user_ids_json TEXT,
                 metrics_json TEXT,
+                suntrip_stage INTEGER DEFAULT 0,
                 uploaded_at TEXT,
                 UNIQUE(device_id, session_id, mode)
             )
@@ -354,11 +371,13 @@ def _migrate_db() -> None:
             "raw_gps_uphill_m": "REAL",
             "solar_enabled": "INTEGER DEFAULT 1",
             "user_ids_json": "TEXT",
+            "suntrip_stage": "INTEGER DEFAULT 0",
         }
         for name, col_type in missing.items():
             if name not in columns:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {col_type}")
         conn.execute("UPDATE sessions SET solar_enabled = 1 WHERE solar_enabled IS NULL")
+        conn.execute("UPDATE sessions SET suntrip_stage = 0 WHERE suntrip_stage IS NULL")
 
         telemetry_columns = _table_columns(conn, TELEMETRY_TABLE)
         telemetry_missing = {
@@ -1531,6 +1550,84 @@ def _delete_sessions_data(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _normalize_device_id(value: str | None) -> str:
+    return "".join(ch for ch in (value or "").lower() if ch.isalnum())
+
+
+def _suntrip_vehicle_for_device(device_id: str | None) -> dict[str, Any] | None:
+    normalized = _normalize_device_id(device_id)
+    for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
+        aliases = [_normalize_device_id(str(alias)) for alias in vehicle["aliases"]]
+        if normalized in aliases:
+            return vehicle
+    return None
+
+
+def _session_day(start_ts: str | None, session_id: str | None) -> datetime.date | None:
+    parsed = _parse_upload_ts(start_ts)
+    if parsed:
+        return parsed.date()
+    if session_id:
+        try:
+            return datetime.strptime(str(session_id)[:10], "%Y-%m-%d").date()
+        except Exception:
+            return None
+    return None
+
+
+def _parse_date_param(value: str | None, fallback: str) -> datetime.date:
+    raw = value or fallback
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except Exception:
+        return datetime.strptime(fallback, "%Y-%m-%d").date()
+
+
+def _session_payload_from_request(data: dict[str, Any]) -> dict[str, str]:
+    return {
+        "device_id": str(data.get("device_id") or "").strip(),
+        "session_id": str(data.get("session_id") or "").strip(),
+        "mode": str(data.get("mode") or "default").strip() or "default",
+    }
+
+
+def _set_suntrip_stage_sessions(sessions: list[dict[str, Any]], suntrip_stage: bool) -> dict[str, Any]:
+    results = []
+    updated_count = 0
+    with _get_db() as conn:
+        for raw in sessions:
+            payload = _session_payload_from_request(raw)
+            if not payload["device_id"] or not payload["session_id"]:
+                results.append({**payload, "status": "skipped", "error": "missing device_id or session_id"})
+                continue
+            cursor = conn.execute(
+                """
+                UPDATE sessions
+                SET suntrip_stage = ?
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                """,
+                (
+                    1 if suntrip_stage else 0,
+                    payload["device_id"],
+                    payload["session_id"],
+                    payload["mode"],
+                ),
+            )
+            if cursor.rowcount:
+                updated_count += 1
+                results.append({**payload, "status": "updated", "suntrip_stage": bool(suntrip_stage)})
+            else:
+                results.append({**payload, "status": "not_found", "suntrip_stage": bool(suntrip_stage)})
+        conn.commit()
+    return {
+        "status": "ok",
+        "requested": len(sessions),
+        "updated_count": updated_count,
+        "suntrip_stage": bool(suntrip_stage),
+        "results": results,
+    }
+
+
 def _is_deleted_session(conn: sqlite3.Connection, device_id: str, session_id: str, mode: str) -> bool:
     row = conn.execute(
         """
@@ -1686,7 +1783,7 @@ def create_app() -> Flask:
             ).fetchall()
             sessions = conn.execute(
                 """
-                SELECT device_id, session_id, mode, solar_enabled, start_ts, end_ts, rows_count, distance_km, uploaded_at
+                SELECT device_id, session_id, mode, solar_enabled, suntrip_stage, start_ts, end_ts, rows_count, distance_km, uploaded_at
                 FROM sessions
                 ORDER BY start_ts DESC
                 LIMIT 50
@@ -1806,6 +1903,7 @@ def create_app() -> Flask:
                 "uploaded_at_fmt": _format_dt(s["uploaded_at"]),
                 "month_key": month_key,
                 "month_label": month_label,
+                "suntrip_stage": bool(s["suntrip_stage"]),
             }
 
         sessions = [_session_view_payload(s) for s in sessions]
@@ -1978,6 +2076,30 @@ def create_app() -> Flask:
         if result["deleted_count"] == 0:
             return jsonify({"error": "sessions not found", **result}), 404
 
+        return jsonify(result)
+
+    @app.route("/api/session/suntrip_stage", methods=["PATCH"])
+    @_require_auth
+    def update_session_suntrip_stage():
+        data = request.get_json(silent=True) or {}
+        payload = _session_payload_from_request(data)
+        if not payload["device_id"] or not payload["session_id"]:
+            return jsonify({"error": "missing device_id or session_id"}), 400
+        result = _set_suntrip_stage_sessions([payload], bool(data.get("suntrip_stage")))
+        if result["updated_count"] == 0:
+            return jsonify({"error": "session not found", **result}), 404
+        return jsonify(result["results"][0] | {"status": "ok"})
+
+    @app.route("/api/sessions/suntrip_stage", methods=["PATCH"])
+    @_require_auth
+    def update_sessions_suntrip_stage():
+        data = request.get_json(silent=True) or {}
+        sessions = data.get("sessions")
+        if not isinstance(sessions, list) or not sessions:
+            return jsonify({"error": "missing sessions"}), 400
+        result = _set_suntrip_stage_sessions(sessions, bool(data.get("suntrip_stage")))
+        if result["updated_count"] == 0:
+            return jsonify({"error": "sessions not found", **result}), 404
         return jsonify(result)
 
     @app.route("/api/heartbeat", methods=["POST"])
@@ -2643,6 +2765,103 @@ def create_app() -> Flask:
     @app.route("/public/suntrip")
     def public_suntrip_page():
         return render_template("suntrip.html")
+
+    @app.route("/suntrip_analysis")
+    @_require_auth
+    def suntrip_analysis():
+        start_date = _parse_date_param(request.args.get("start"), SUNTRIP_ANALYSIS_START_DATE)
+        end_date = _parse_date_param(request.args.get("end"), SUNTRIP_ANALYSIS_END_DATE)
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
+        vehicle_order = {vehicle["key"]: index for index, vehicle in enumerate(SUNTRIP_ANALYSIS_VEHICLES)}
+
+        with _get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT device_id, session_id, mode, solar_enabled, suntrip_stage,
+                       start_ts, end_ts, rows_count, distance_km, uploaded_at
+                FROM sessions
+                ORDER BY COALESCE(start_ts, session_id), device_id
+                """
+            ).fetchall()
+
+            candidates = []
+            for row in rows:
+                vehicle = _suntrip_vehicle_for_device(row["device_id"])
+                day = _session_day(row["start_ts"], row["session_id"])
+                if not vehicle or not day or day < start_date or day > end_date:
+                    continue
+                candidate = dict(row) | {
+                    "day": day,
+                    "day_key": day.isoformat(),
+                    "day_label": day.strftime("%d/%m/%Y"),
+                    "vehicle_key": vehicle["key"],
+                    "vehicle_label": vehicle["label"],
+                    "vehicle_order": vehicle_order.get(vehicle["key"], 99),
+                    "start_ts_fmt": _format_dt(row["start_ts"]),
+                    "end_ts_fmt": _format_dt(row["end_ts"]),
+                    "suntrip_stage": bool(row["suntrip_stage"]),
+                    "map_url": url_for(
+                        "session_map",
+                        device_id=row["device_id"],
+                        session_id=row["session_id"],
+                        mode=row["mode"],
+                    ),
+                }
+                candidates.append(candidate)
+
+            candidates.sort(
+                key=lambda item: (
+                    item["day"],
+                    item["vehicle_order"],
+                    item["start_ts"] or "",
+                    item["session_id"] or "",
+                )
+            )
+
+            columns = []
+            for candidate in candidates:
+                if not candidate["suntrip_stage"]:
+                    continue
+                samples = _telemetry_samples_for_session(
+                    conn,
+                    candidate["device_id"],
+                    candidate["session_id"],
+                    candidate["mode"],
+                )
+                metrics = compute_session_metrics(samples)
+                columns.append(candidate | {"metrics": metrics, "sample_count": len(samples)})
+
+        day_groups = []
+        for column in columns:
+            if not day_groups or day_groups[-1]["day_key"] != column["day_key"]:
+                day_groups.append({"day_key": column["day_key"], "day_label": column["day_label"], "columns": []})
+            day_groups[-1]["columns"].append(column)
+
+        metric_groups = []
+        for category, specs in SUMMARY_GROUPS:
+            rows = []
+            for label, unit, func in specs:
+                rows.append(
+                    {
+                        "label": label,
+                        "unit": unit,
+                        "values": [format_metric_value(func(column["metrics"]), unit) for column in columns],
+                    }
+                )
+            metric_groups.append({"category": category, "rows": rows})
+
+        return render_template(
+            "suntrip_analysis.html",
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+            vehicles=SUNTRIP_ANALYSIS_VEHICLES,
+            candidates=candidates,
+            columns=columns,
+            day_groups=day_groups,
+            metric_groups=metric_groups,
+            stage_count=len(columns),
+        )
 
     @app.route("/public/suntrip.json")
     def public_suntrip_data():
