@@ -82,7 +82,9 @@
       th { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
       tbody tr:hover td { background: #faf7f0; }
       .table-scroll {
-        overflow: auto;
+        width: 100%;
+        overflow-x: auto;
+        overflow-y: auto;
         max-height: 75vh;
         border: 1px solid var(--border);
         border-radius: 10px;
@@ -113,6 +115,31 @@
         letter-spacing: 0.04em;
         text-transform: uppercase;
       }
+      .category-toggle {
+        width: 22px;
+        height: 22px;
+        margin-right: 8px;
+        border: 1px solid #d9cdbc;
+        border-radius: 999px;
+        background: #fffaf2;
+        color: #6f665b;
+        cursor: pointer;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 1;
+      }
+      .metric-label-cell {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .metric-chart-check {
+        width: 16px;
+        height: 16px;
+        flex: 0 0 auto;
+        accent-color: var(--accent);
+      }
       .value-cell {
         min-width: 126px;
         text-align: center;
@@ -126,6 +153,13 @@
       .total-col {
         background: #fffaf0;
         border-left: 1px solid #f3c56e;
+      }
+      .sc2-col {
+        background: #ece9e3;
+      }
+      tbody tr:hover td.sc2-col { background: #e3ded5; }
+      .total-col.sc2-col {
+        background: #eee4d2;
       }
       .vehicle-head { text-align: center; color: #1a1a1a; }
       .session-head {
@@ -163,6 +197,60 @@
         color: var(--muted);
         text-align: center;
       }
+      .chart-panels {
+        display: grid;
+        gap: 14px;
+      }
+      .chart-panel {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #fffdf9;
+        padding: 12px;
+      }
+      .chart-title {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .chart-title strong { font-size: 14px; }
+      .chart-title span { color: var(--muted); font-size: 12px; }
+      .chart-svg {
+        display: block;
+        width: 100%;
+        min-width: 680px;
+        height: 260px;
+      }
+      .chart-scroll {
+        overflow-x: auto;
+      }
+      .chart-axis { stroke: #d8cdbd; stroke-width: 1; }
+      .chart-grid { stroke: #eee4d8; stroke-width: 1; }
+      .chart-line { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+      .chart-dot { stroke: #fffdf9; stroke-width: 2; }
+      .chart-label {
+        fill: var(--muted);
+        font-size: 11px;
+      }
+      .chart-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .legend-swatch {
+        width: 22px;
+        height: 3px;
+        border-radius: 999px;
+      }
       @media (max-width: 760px) {
         main { padding: 24px 14px 40px; }
         .top-row { align-items: flex-start; }
@@ -195,6 +283,12 @@
         </form>
       </div>
 
+      <h2>Graph</h2>
+      <div class="card">
+        <div id="chart-empty" class="empty">Select metrics from the table to display graph lines.</div>
+        <div id="chart-panels" class="chart-panels"></div>
+      </div>
+
       <h2>Comparison Table</h2>
       <div class="card">
         {% if columns %}
@@ -213,44 +307,55 @@
               <tr>
                 <th class="sticky-col">Vehicle</th>
                 {% for column in columns %}
-                <th class="vehicle-head">{{ column.vehicle_label }}</th>
+                <th class="vehicle-head{{ ' sc2-col' if column.vehicle_key == 'supercycle_2' else '' }}">{{ column.vehicle_label }}</th>
                 {% endfor %}
                 {% for total in total_columns %}
-                <th class="vehicle-head total-col">{{ total.vehicle_label }}</th>
+                <th class="vehicle-head total-col{{ ' sc2-col' if total.vehicle_key == 'supercycle_2' else '' }}">{{ total.vehicle_label }}</th>
                 {% endfor %}
               </tr>
               <tr>
                 <th class="sticky-col">Session</th>
                 {% for column in columns %}
-                <th class="session-head">
+                <th class="session-head{{ ' sc2-col' if column.vehicle_key == 'supercycle_2' else '' }}">
                   <a href="{{ column.map_url }}">{{ column.session_id }}</a><br>
                   {{ column.start_ts_fmt or column.device_id }}
                 </th>
                 {% endfor %}
                 {% for total in total_columns %}
-                <th class="session-head total-col">{{ total.session_count }} included stages</th>
+                <th class="session-head total-col{{ ' sc2-col' if total.vehicle_key == 'supercycle_2' else '' }}">{{ total.session_count }} included stages</th>
                 {% endfor %}
               </tr>
             </thead>
             <tbody>
               {% for group in metric_groups %}
+              {% set group_key = "group_" ~ loop.index0 %}
               <tr class="metric-category">
-                <td class="sticky-col">{{ group.category }}</td>
+                <td class="sticky-col">
+                  <button class="category-toggle" type="button" data-category="{{ group_key }}" aria-expanded="true">v</button>
+                  {{ group.category }}
+                </td>
                 {% for column in columns %}
-                <td></td>
+                <td class="{{ 'sc2-col' if column.vehicle_key == 'supercycle_2' else '' }}"></td>
                 {% endfor %}
                 {% for total in total_columns %}
-                <td class="total-col"></td>
+                <td class="total-col{{ ' sc2-col' if total.vehicle_key == 'supercycle_2' else '' }}"></td>
                 {% endfor %}
               </tr>
               {% for row in group.rows %}
-              <tr>
-                <td class="sticky-col">{{ row.label }}</td>
+              <tr data-metric-row data-category="{{ group_key }}">
+                <td class="sticky-col">
+                  <div class="metric-label-cell">
+                    <input class="metric-chart-check" type="checkbox" data-metric-key="{{ row.key }}" aria-label="Show {{ row.label }} in graph">
+                    <span>{{ row.label }}</span>
+                  </div>
+                </td>
                 {% for value in row["values"] %}
-                <td class="value-cell">{{ value }}</td>
+                {% set column = columns[loop.index0] %}
+                <td class="value-cell{{ ' sc2-col' if column.vehicle_key == 'supercycle_2' else '' }}">{{ value }}</td>
                 {% endfor %}
                 {% for value in row["total_values"] %}
-                <td class="value-cell total-col">{{ value }}</td>
+                {% set total = total_columns[loop.index0] %}
+                <td class="value-cell total-col{{ ' sc2-col' if total.vehicle_key == 'supercycle_2' else '' }}">{{ value }}</td>
                 {% endfor %}
               </tr>
               {% endfor %}
@@ -315,6 +420,164 @@
     </main>
 
     <script>
+      const chartMetricGroups = {{ chart_metric_groups | tojson }};
+      const chartPanels = document.getElementById("chart-panels");
+      const chartEmpty = document.getElementById("chart-empty");
+      const metricChecks = document.querySelectorAll(".metric-chart-check");
+      const categoryButtons = document.querySelectorAll(".category-toggle");
+      const vehicleColors = {
+        supercycle_1: "#0d9488",
+        supercycle_2: "#8a6a2f"
+      };
+      const chartMetrics = new Map();
+      chartMetricGroups.forEach((group) => {
+        (group.rows || []).forEach((metric) => {
+          chartMetrics.set(metric.key, metric);
+        });
+      });
+
+      const svgNode = (name, attrs = {}) => {
+        const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+        Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, String(value)));
+        return node;
+      };
+      const finiteValue = (value) => {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+      };
+      const formatAxisValue = (value, unit) => {
+        if (!Number.isFinite(value)) return "";
+        const abs = Math.abs(value);
+        const formatted = abs >= 100 ? value.toFixed(0) : abs >= 10 ? value.toFixed(1) : value.toFixed(2);
+        return unit ? `${formatted} ${unit}` : formatted;
+      };
+      const renderMetricChart = (metric) => {
+        const panel = document.createElement("section");
+        panel.className = "chart-panel";
+
+        const title = document.createElement("div");
+        title.className = "chart-title";
+        const titleText = document.createElement("strong");
+        titleText.textContent = metric.label;
+        const subtitle = document.createElement("span");
+        subtitle.textContent = metric.unit ? `${metric.category} · ${metric.unit}` : metric.category;
+        title.append(titleText, subtitle);
+        panel.appendChild(title);
+
+        const days = metric.days || [];
+        const series = metric.series || [];
+        const values = series.flatMap((item) => (item.values || []).map(finiteValue)).filter((value) => value !== null);
+        if (!days.length || !values.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = "No numeric data for this metric.";
+          panel.appendChild(empty);
+          return panel;
+        }
+
+        let min = Math.min(...values);
+        let max = Math.max(...values);
+        if (min > 0) min = 0;
+        if (max < 0) max = 0;
+        if (min === max) {
+          const pad = Math.max(1, Math.abs(max) * 0.1);
+          min -= pad;
+          max += pad;
+        }
+
+        const width = Math.max(760, 150 + days.length * 96);
+        const height = 260;
+        const margin = { top: 18, right: 28, bottom: 48, left: 68 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const x = (index) => margin.left + (days.length === 1 ? plotWidth / 2 : (plotWidth * index) / (days.length - 1));
+        const y = (value) => margin.top + plotHeight - ((value - min) / (max - min)) * plotHeight;
+
+        const scroll = document.createElement("div");
+        scroll.className = "chart-scroll";
+        const svg = svgNode("svg", { class: "chart-svg", viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `${metric.label} chart` });
+
+        const ticks = 4;
+        for (let i = 0; i <= ticks; i += 1) {
+          const value = min + ((max - min) * i) / ticks;
+          const yy = y(value);
+          svg.appendChild(svgNode("line", { class: "chart-grid", x1: margin.left, y1: yy, x2: width - margin.right, y2: yy }));
+          const label = svgNode("text", { class: "chart-label", x: margin.left - 8, y: yy + 4, "text-anchor": "end" });
+          label.textContent = formatAxisValue(value, metric.unit);
+          svg.appendChild(label);
+        }
+        svg.appendChild(svgNode("line", { class: "chart-axis", x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom }));
+        svg.appendChild(svgNode("line", { class: "chart-axis", x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom }));
+
+        const dayStep = Math.max(1, Math.ceil(days.length / 8));
+        days.forEach((day, index) => {
+          if (index % dayStep !== 0 && index !== days.length - 1) return;
+          const label = svgNode("text", { class: "chart-label", x: x(index), y: height - 20, "text-anchor": "middle" });
+          label.textContent = day;
+          svg.appendChild(label);
+        });
+
+        series.forEach((item) => {
+          const color = vehicleColors[item.vehicle_key] || "#666666";
+          let path = "";
+          (item.values || []).forEach((raw, index) => {
+            const value = finiteValue(raw);
+            if (value === null) return;
+            path += `${path ? " L" : "M"} ${x(index).toFixed(2)} ${y(value).toFixed(2)}`;
+          });
+          if (!path) return;
+          svg.appendChild(svgNode("path", { class: "chart-line", d: path, stroke: color }));
+          (item.values || []).forEach((raw, index) => {
+            const value = finiteValue(raw);
+            if (value === null) return;
+            svg.appendChild(svgNode("circle", { class: "chart-dot", cx: x(index), cy: y(value), r: 4, fill: color }));
+          });
+        });
+
+        scroll.appendChild(svg);
+        panel.appendChild(scroll);
+
+        const legend = document.createElement("div");
+        legend.className = "chart-legend";
+        series.forEach((item) => {
+          const legendItem = document.createElement("span");
+          legendItem.className = "legend-item";
+          const swatch = document.createElement("span");
+          swatch.className = "legend-swatch";
+          swatch.style.background = vehicleColors[item.vehicle_key] || "#666666";
+          const label = document.createElement("span");
+          label.textContent = item.vehicle_label;
+          legendItem.append(swatch, label);
+          legend.appendChild(legendItem);
+        });
+        panel.appendChild(legend);
+        return panel;
+      };
+      const renderCharts = () => {
+        const selected = Array.from(metricChecks)
+          .filter((check) => check.checked)
+          .map((check) => chartMetrics.get(check.dataset.metricKey))
+          .filter(Boolean);
+        if (chartEmpty) chartEmpty.hidden = selected.length > 0;
+        if (!chartPanels) return;
+        chartPanels.replaceChildren(...selected.map(renderMetricChart));
+      };
+      metricChecks.forEach((check) => {
+        check.addEventListener("change", renderCharts);
+      });
+      categoryButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const category = button.dataset.category;
+          const expanded = button.getAttribute("aria-expanded") !== "false";
+          button.setAttribute("aria-expanded", expanded ? "false" : "true");
+          button.textContent = expanded ? ">" : "v";
+          document.querySelectorAll(`[data-metric-row][data-category="${category}"]`).forEach((row) => {
+            row.hidden = expanded;
+          });
+        });
+      });
+      renderCharts();
+
       const toggles = document.querySelectorAll(".stage-toggle");
       toggles.forEach((toggle) => {
         toggle.addEventListener("change", async () => {

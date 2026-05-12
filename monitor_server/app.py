@@ -2917,11 +2917,15 @@ def create_app() -> Flask:
             )
 
         metric_groups = []
+        chart_metric_groups = []
         for category, specs in SUMMARY_GROUPS:
             rows = []
+            chart_rows = []
             for label, unit, func in specs:
+                metric_key = f"metric_{len(chart_metric_groups)}_{len(chart_rows)}"
                 rows.append(
                     {
+                        "key": metric_key,
                         "label": label,
                         "unit": unit,
                         "values": [format_metric_value(func(column["metrics"]), unit) for column in columns],
@@ -2931,7 +2935,41 @@ def create_app() -> Flask:
                         ],
                     }
                 )
+                series = []
+                for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
+                    values = []
+                    for day in day_groups:
+                        day_vehicle_columns = [
+                            column
+                            for column in day["columns"]
+                            if column["vehicle_key"] == vehicle["key"]
+                        ]
+                        if not day_vehicle_columns:
+                            values.append(None)
+                            continue
+                        metrics = _aggregate_session_metrics(
+                            [column["metrics"] for column in day_vehicle_columns]
+                        )
+                        values.append(func(metrics))
+                    series.append(
+                        {
+                            "vehicle_key": vehicle["key"],
+                            "vehicle_label": vehicle["label"],
+                            "values": values,
+                        }
+                    )
+                chart_rows.append(
+                    {
+                        "key": metric_key,
+                        "category": category,
+                        "label": label,
+                        "unit": unit,
+                        "days": [day["day_label"] for day in day_groups],
+                        "series": series,
+                    }
+                )
             metric_groups.append({"category": category, "rows": rows})
+            chart_metric_groups.append({"category": category, "rows": chart_rows})
 
         return render_template(
             "suntrip_analysis.html",
@@ -2943,6 +2981,7 @@ def create_app() -> Flask:
             total_columns=total_columns,
             day_groups=day_groups,
             metric_groups=metric_groups,
+            chart_metric_groups=chart_metric_groups,
             stage_count=len(columns),
         )
 
