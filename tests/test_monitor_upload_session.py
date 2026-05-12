@@ -370,6 +370,19 @@ class MonitorUploadSessionTest(unittest.TestCase):
                     ("bike", "2026-04-30_08-00-00", "supercycle_live", "2026-04-30 08:00:00", 2, 6.0, "2026-04-30 08:05:00"),
                 ],
             )
+            conn.execute(
+                """
+                INSERT INTO photos (device_id, session_id, mode, captured_at, relative_path)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    "bike",
+                    "2026-05-07_10-00-00",
+                    "supercycle_live",
+                    "2026-05-07 10:02:00",
+                    "photos/bike/2026-05-07_10-00-00/frame.jpg",
+                ),
+            )
             conn.commit()
 
         response = self.monitor_app.app.test_client().get(
@@ -384,6 +397,58 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("<span>avril 2026</span>", html)
         self.assertIn('data-session-row="1"', html)
         self.assertIn('data-month-key="2026-05"', html)
+        self.assertIn('data-photo-count="1"', html)
+        self.assertIn('title="1 photos"', html)
+        self.assertIn('id="bulk-video-btn"', html)
+
+    def test_photo_video_requires_video_encoder(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (device_id, session_id, mode, start_ts, rows_count, distance_km, uploaded_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("bike", "2026-05-07_10-00-00", "supercycle_live", "2026-05-07 10:00:00", 2, 2.0, "2026-05-07 10:05:00"),
+            )
+            conn.execute(
+                """
+                INSERT INTO photos (device_id, session_id, mode, captured_at, relative_path)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    "bike",
+                    "2026-05-07_10-00-00",
+                    "supercycle_live",
+                    "2026-05-07 10:02:00",
+                    "photos/bike/2026-05-07_10-00-00/frame.jpg",
+                ),
+            )
+            conn.commit()
+
+        original_which = self.monitor_app.shutil.which
+        self.monitor_app.shutil.which = lambda name: None
+        try:
+            response = self.monitor_app.app.test_client().post(
+                "/api/photos/video",
+                json={
+                    "sessions": [
+                        {
+                            "device_id": "bike",
+                            "session_id": "2026-05-07_10-00-00",
+                            "mode": "supercycle_live",
+                        }
+                    ]
+                },
+                headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+            )
+        finally:
+            self.monitor_app.shutil.which = original_which
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("ffmpeg", response.get_json()["error"])
 
     def test_suntrip_stage_toggle_feeds_analysis_page(self):
         if not hasattr(self.monitor_app.app, "test_client"):

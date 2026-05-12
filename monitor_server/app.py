@@ -3,9 +3,12 @@ import base64
 import json
 import math
 import os
+import shutil
 import sqlite3
+import subprocess
 import sys
 import time
+import tempfile
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
@@ -14,7 +17,7 @@ from functools import wraps
 from typing import Any
 from xml.sax.saxutils import escape
 
-from flask import Flask, jsonify, request, render_template, Response, send_from_directory, url_for
+from flask import Flask, jsonify, request, render_template, Response, send_file, send_from_directory, url_for
 from jinja2 import ChoiceLoader, FileSystemLoader
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1591,6 +1594,201 @@ def _session_payload_from_request(data: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _session_key(payload: dict[str, Any]) -> tuple[str, str, str] | None:
+    normalized = _session_payload_from_request(payload)
+    if not normalized["device_id"] or not normalized["session_id"]:
+        return None
+    return normalized["device_id"], normalized["session_id"], normalized["mode"]
+
+
+def _photo_counts_for_sessions(
+    conn: sqlite3.Connection,
+    session_keys: list[tuple[str, str, str]],
+) -> dict[tuple[str, str, str], int]:
+    counts: dict[tuple[str, str, str], int] = {}
+    for device_id, session_id, mode in session_keys:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM photos
+            WHERE device_id = ? AND session_id = ? AND mode = ?
+            """,
+            (device_id, session_id, mode),
+        ).fetchone()
+        counts[(device_id, session_id, mode)] = int(row["count"] or 0) if row else 0
+    return counts
+
+
+def _safe_media_path(relative_path: str | None) -> str | None:
+    if not relative_path:
+        return None
+    media_dir = os.path.abspath(_media_dir())
+    absolute_path = os.path.abspath(os.path.join(media_dir, relative_path))
+    if not absolute_path.startswith(media_dir + os.sep):
+        return None
+    return absolute_path
+
+
+def _photo_video_rows(conn: sqlite3.Connection, sessions: list[dict[str, Any]]) -> list[sqlite3.Row]:
+    rows: list[sqlite3.Row] = []
+    seen = set()
+    for raw in sessions:
+        key = _session_key(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        rows.extend(
+            conn.execute(
+                """
+                SELECT device_id, session_id, mode, captured_at, distance_km, interval_km,
+                       filename, mime_type, relative_path, uploaded_at, gps_lat, gps_lon,
+                       gps_alt, gps_speed_kph, speed_kph, session_distance_km, gps_uphill_m,
+                       solar_power_w, generator_power_w, solar_wh, metrics_json
+                FROM photos
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                ORDER BY captured_at, id
+                """,
+                key,
+            ).fetchall()
+        )
+    return rows
+
+
+def _format_photo_video_metadata(row: sqlite3.Row) -> list[str]:
+    metrics = {}
+    if row["metrics_json"]:
+        try:
+            parsed = json.loads(row["metrics_json"])
+            if isinstance(parsed, dict):
+                metrics = parsed
+        except Exception:
+            metrics = {}
+    distance = _safe_float(row["distance_km"])
+    session_distance = _safe_float(row["session_distance_km"]) or _safe_float(metrics.get("distance_km"))
+    gps_lat = _safe_float(row["gps_lat"])
+    gps_lon = _safe_float(row["gps_lon"])
+    speed = _safe_float(row["speed_kph"]) or _safe_float(row["gps_speed_kph"]) or _safe_float(metrics.get("speed_kph"))
+    solar_power = _safe_float(row["solar_power_w"]) or _safe_float(metrics.get("solar_power_w"))
+    generator_power = _safe_float(row["generator_power_w"]) or _safe_float(metrics.get("generator_power_w"))
+    solar_wh = _safe_float(row["solar_wh"]) or _safe_float(metrics.get("solar_Wh")) or _safe_float(metrics.get("solar_wh"))
+    line1 = f"{row['device_id']} | {row['session_id']} | {row['mode']} | {row['captured_at'] or ''}"
+    line2_parts = []
+    if distance is not None:
+        line2_parts.append(f"photo {distance:.2f} km")
+    if session_distance is not None:
+        line2_parts.append(f"session {session_distance:.2f} km")
+    if speed is not None:
+        line2_parts.append(f"{speed:.1f} km/h")
+    if gps_lat is not None and gps_lon is not None:
+        line2_parts.append(f"GPS {gps_lat:.5f}, {gps_lon:.5f}")
+    line3_parts = []
+    if solar_power is not None:
+        line3_parts.append(f"solar {solar_power:.0f} W")
+    if generator_power is not None:
+        line3_parts.append(f"generator {generator_power:.0f} W")
+    if solar_wh is not None:
+        line3_parts.append(f"solar {solar_wh:.0f} Wh")
+    return [line for line in (line1, " | ".join(line2_parts), " | ".join(line3_parts)) if line]
+
+
+def _load_video_font(size: int):
+    from PIL import ImageFont
+
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size=size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def _render_photo_video_frame(row: sqlite3.Row, source_path: str, output_path: str) -> None:
+    from PIL import Image, ImageDraw, ImageOps
+
+    width = 1280
+    height = 900
+    meta_height = 150
+    photo_height = height - meta_height
+    background = Image.new("RGB", (width, height), "#111111")
+    with Image.open(source_path) as raw_image:
+        image = ImageOps.exif_transpose(raw_image).convert("RGB")
+        resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
+        image.thumbnail((width, photo_height), resample)
+        x = (width - image.width) // 2
+        y = (photo_height - image.height) // 2
+        background.paste(image, (x, y))
+    draw = ImageDraw.Draw(background)
+    draw.rectangle((0, photo_height, width, height), fill="#f7f3ec")
+    title_font = _load_video_font(28)
+    body_font = _load_video_font(22)
+    y = photo_height + 22
+    for index, line in enumerate(_format_photo_video_metadata(row)[:3]):
+        font = title_font if index == 0 else body_font
+        draw.text((34, y), line, fill="#1a1a1a", font=font)
+        y += 38 if index == 0 else 30
+    background.save(output_path, "JPEG", quality=92, optimize=True)
+
+
+def _build_photo_video(rows: list[sqlite3.Row], *, fps: int = 24) -> tuple[str, int, int]:
+    try:
+        import PIL  # noqa: F401
+    except Exception as exc:
+        raise RuntimeError("Pillow is required to render photo metadata. Run: pip install -r requirements.txt") from exc
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg is required to create the MP4 video. Install it on Ubuntu with: sudo apt install ffmpeg")
+
+    fps = max(1, min(60, int(fps or 24)))
+    work_dir = tempfile.mkdtemp(prefix="monitor-photo-video-")
+    output_path = os.path.join(work_dir, "monitor_photos.mp4")
+    frame_count = 0
+    missing_count = 0
+    try:
+        for row in rows:
+            source_path = _safe_media_path(row["relative_path"])
+            if not source_path or not os.path.exists(source_path):
+                missing_count += 1
+                continue
+            frame_path = os.path.join(work_dir, f"frame_{frame_count:06d}.jpg")
+            _render_photo_video_frame(row, source_path, frame_path)
+            frame_count += 1
+        if frame_count == 0:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            raise RuntimeError("No photo files were found on disk for the selected sessions.")
+
+        command = [
+            ffmpeg,
+            "-y",
+            "-framerate",
+            str(fps),
+            "-i",
+            os.path.join(work_dir, "frame_%06d.jpg"),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            output_path,
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            detail = (result.stderr or result.stdout or "ffmpeg failed").strip().splitlines()[-1]
+            raise RuntimeError(f"ffmpeg failed: {detail}")
+        return output_path, frame_count, missing_count
+    except Exception:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise
+
+
 def _set_suntrip_stage_sessions(sessions: list[dict[str, Any]], suntrip_stage: bool) -> dict[str, Any]:
     results = []
     updated_count = 0
@@ -1885,6 +2083,10 @@ def create_app() -> Flask:
                 LIMIT 50
                 """
             ).fetchall()
+            photo_counts = _photo_counts_for_sessions(
+                conn,
+                [(s["device_id"], s["session_id"], s["mode"]) for s in sessions],
+            )
             daily_all_rows = conn.execute(
                 """
                 SELECT date(start_ts) AS day, SUM(COALESCE(distance_km, 0)) AS distance_km
@@ -2000,6 +2202,7 @@ def create_app() -> Flask:
                 "month_key": month_key,
                 "month_label": month_label,
                 "suntrip_stage": bool(s["suntrip_stage"]),
+                "photo_count": photo_counts.get((s["device_id"], s["session_id"], s["mode"]), 0),
             }
 
         sessions = [_session_view_payload(s) for s in sessions]
@@ -2201,6 +2404,37 @@ def create_app() -> Flask:
         if result["updated_count"] == 0:
             return jsonify({"error": "sessions not found", **result}), 404
         return jsonify(result)
+
+    @app.route("/api/photos/video", methods=["POST"])
+    @_require_auth
+    def export_photo_video():
+        data = request.get_json(force=True) or {}
+        sessions = data.get("sessions")
+        if not isinstance(sessions, list) or not sessions:
+            return jsonify({"error": "missing sessions"}), 400
+        fps = _safe_int(data.get("fps")) or 24
+        with _get_db() as conn:
+            rows = _photo_video_rows(conn, sessions)
+        if not rows:
+            return jsonify({"error": "no photos found for selected sessions"}), 404
+        try:
+            video_path, frame_count, missing_count = _build_photo_video(rows, fps=fps)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 503
+
+        first = _session_key(sessions[0]) or ("sessions", "photos", "default")
+        download_name = f"photos_{first[1]}_{frame_count}frames.mp4".replace("/", "_")
+
+        response = send_file(
+            video_path,
+            mimetype="video/mp4",
+            as_attachment=True,
+            download_name=download_name,
+        )
+        response.call_on_close(lambda: shutil.rmtree(os.path.dirname(video_path), ignore_errors=True))
+        response.headers["X-Photo-Frames"] = str(frame_count)
+        response.headers["X-Missing-Photo-Files"] = str(missing_count)
+        return response
 
     @app.route("/api/heartbeat", methods=["POST"])
     @_require_auth

@@ -3,3 +3,4 @@ pyserial==3.5
 smbus2==0.4.3
 python-can
 cantools
+Pillow
