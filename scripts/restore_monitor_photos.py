@@ -44,8 +44,12 @@ PHOTO_COLUMNS = [
 ]
 
 
-def _connect(path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+def _connect(path: str, *, read_only: bool = False) -> sqlite3.Connection:
+    if not os.path.exists(path):
+        raise SystemExit(f"DB not found: {path}")
+    mode = "ro" if read_only else "rw"
+    uri = f"file:{os.path.abspath(path)}?mode={mode}"
+    conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -90,7 +94,7 @@ def export_manifest(
     if not sessions:
         raise SystemExit("No sessions supplied. Use --session or --sessions-file.")
 
-    conn = _connect(source_db)
+    conn = _connect(source_db, read_only=True)
     try:
         available_columns = _table_columns(conn, "photos")
         selected_columns = [col for col in PHOTO_COLUMNS if col in available_columns]

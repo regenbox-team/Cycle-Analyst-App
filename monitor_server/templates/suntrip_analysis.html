@@ -476,6 +476,10 @@
         const formatted = abs >= 100 ? value.toFixed(0) : abs >= 10 ? value.toFixed(1) : value.toFixed(2);
         return unit ? `${formatted} ${unit}` : formatted;
       };
+      const metricAxisKey = (metric) => {
+        const unit = String(metric.unit || "").trim();
+        return unit ? `unit:${unit}` : `metric:${metric.key}`;
+      };
       const renderMetricChart = (metric) => {
         const panel = document.createElement("section");
         panel.className = "chart-panel";
@@ -587,34 +591,54 @@
         const titleText = document.createElement("strong");
         titleText.textContent = "Selected metrics";
         const subtitle = document.createElement("span");
-        subtitle.textContent = "Real-value mini axes per metric";
+        subtitle.textContent = "Shared scales for metrics with the same unit";
         title.append(titleText, subtitle);
         panel.appendChild(title);
 
         const days = selected[0]?.days || [];
+        const scaleMap = new Map();
+        const unitScales = [];
         const metricScales = selected
           .map((metric, index) => {
             const values = (metric.series || [])
               .flatMap((item) => (item.values || []).map(finiteValue))
               .filter((value) => value !== null);
             if (!values.length) return null;
-            let min = Math.min(...values);
-            let max = Math.max(...values);
-            if (min > 0) min = 0;
-            if (max < 0) max = 0;
-            if (min === max) {
-              const pad = Math.max(1, Math.abs(max) * 0.1);
-              min -= pad;
-              max += pad;
+            const axisKey = metricAxisKey(metric);
+            let scale = scaleMap.get(axisKey);
+            if (!scale) {
+              const unit = String(metric.unit || "").trim();
+              scale = {
+                key: axisKey,
+                label: unit || metric.label,
+                unit,
+                color: metricPalette[unitScales.length % metricPalette.length],
+                min: Infinity,
+                max: -Infinity,
+                metrics: []
+              };
+              scaleMap.set(axisKey, scale);
+              unitScales.push(scale);
             }
+            scale.min = Math.min(scale.min, ...values);
+            scale.max = Math.max(scale.max, ...values);
+            scale.metrics.push(metric);
             return {
               metric,
               color: metricPalette[index % metricPalette.length],
-              min,
-              max
+              scale
             };
           })
           .filter(Boolean);
+        unitScales.forEach((scale) => {
+          if (scale.min > 0) scale.min = 0;
+          if (scale.max < 0) scale.max = 0;
+          if (scale.min === scale.max) {
+            const pad = Math.max(1, Math.abs(scale.max) * 0.1);
+            scale.min -= pad;
+            scale.max += pad;
+          }
+        });
         if (!days.length || !metricScales.length) {
           const empty = document.createElement("div");
           empty.className = "empty";
@@ -624,7 +648,7 @@
         }
 
         const axisLaneWidth = 94;
-        const axisSpace = metricScales.length * axisLaneWidth;
+        const axisSpace = unitScales.length * axisLaneWidth;
         const width = Math.max(760, 150 + days.length * 96) + axisSpace;
         const height = 320;
         const margin = { top: 28, right: axisSpace + 28, bottom: 52, left: 46 };
@@ -653,26 +677,26 @@
           svg.appendChild(label);
         });
 
-        metricScales.forEach((scale) => {
-          (scale.metric.series || []).forEach((item) => {
+        metricScales.forEach((metricScale) => {
+          (metricScale.metric.series || []).forEach((item) => {
             let path = "";
             (item.values || []).forEach((raw, index) => {
               const value = finiteValue(raw);
               if (value === null) return;
-              path += `${path ? " L" : "M"} ${x(index).toFixed(2)} ${y(value, scale).toFixed(2)}`;
+              path += `${path ? " L" : "M"} ${x(index).toFixed(2)} ${y(value, metricScale.scale).toFixed(2)}`;
             });
             if (!path) return;
             const dash = item.vehicle_key === "supercycle_2" ? "7 5" : "";
-            svg.appendChild(svgNode("path", { class: "chart-line", d: path, stroke: scale.color, "stroke-dasharray": dash }));
+            svg.appendChild(svgNode("path", { class: "chart-line", d: path, stroke: metricScale.color, "stroke-dasharray": dash }));
             (item.values || []).forEach((raw, index) => {
               const value = finiteValue(raw);
               if (value === null) return;
-              svg.appendChild(svgNode("circle", { class: "chart-dot", cx: x(index), cy: y(value, scale), r: 4, fill: scale.color }));
+              svg.appendChild(svgNode("circle", { class: "chart-dot", cx: x(index), cy: y(value, metricScale.scale), r: 4, fill: metricScale.color }));
             });
           });
         });
 
-        metricScales.forEach((scale, index) => {
+        unitScales.forEach((scale, index) => {
           const axisX = width - margin.right + 22 + index * axisLaneWidth;
           svg.appendChild(svgNode("line", {
             class: "chart-metric-axis",
@@ -689,7 +713,7 @@
             fill: scale.color,
             "text-anchor": "middle"
           });
-          axisTitle.textContent = scale.metric.label.length > 14 ? `${scale.metric.label.slice(0, 13)}...` : scale.metric.label;
+          axisTitle.textContent = scale.label.length > 14 ? `${scale.label.slice(0, 13)}...` : scale.label;
           svg.appendChild(axisTitle);
           [scale.max, (scale.min + scale.max) / 2, scale.min].forEach((value) => {
             const yy = y(value, scale);
@@ -707,7 +731,7 @@
               y: yy + 4,
               style: `fill: ${scale.color}`
             });
-            label.textContent = formatAxisValue(value, scale.metric.unit);
+            label.textContent = formatAxisValue(value, scale.unit);
             svg.appendChild(label);
           });
         });
@@ -733,6 +757,21 @@
           vehicleLegend.appendChild(legendItem);
         });
         panel.appendChild(vehicleLegend);
+
+        const metricLegend = document.createElement("div");
+        metricLegend.className = "chart-legend";
+        metricScales.forEach((item) => {
+          const legendItem = document.createElement("span");
+          legendItem.className = "legend-item";
+          const swatch = document.createElement("span");
+          swatch.className = "legend-swatch";
+          swatch.style.background = item.color;
+          const label = document.createElement("span");
+          label.textContent = item.metric.unit ? `${item.metric.label} (${item.metric.unit})` : item.metric.label;
+          legendItem.append(swatch, label);
+          metricLegend.appendChild(legendItem);
+        });
+        panel.appendChild(metricLegend);
 
         return panel;
       };
