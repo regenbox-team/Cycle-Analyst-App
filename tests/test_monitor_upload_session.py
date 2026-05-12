@@ -322,6 +322,8 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("2 included sessions", html)
         self.assertIn("Supercycle 1", html)
         self.assertIn("Supercycle 2", html)
+        self.assertIn("Totals", html)
+        self.assertIn("1 included stages", html)
         self.assertIn("2026-05-07_10-00-00", html)
         self.assertIn("2026-05-07_10-05-00", html)
         self.assertIn("CA distance", html)

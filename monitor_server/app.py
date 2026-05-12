@@ -1628,6 +1628,70 @@ def _set_suntrip_stage_sessions(sessions: list[dict[str, Any]], suntrip_stage: b
     }
 
 
+def _aggregate_session_metrics(metrics_list: list[dict[str, Any]]) -> dict[str, Any]:
+    aggregate = compute_session_metrics([])
+    if not metrics_list:
+        return aggregate
+
+    sum_keys = {
+        "sample_count",
+        "speed_sum",
+        "speed_count",
+        "power_sum",
+        "human_power_sum",
+        "human_power_count",
+        "solar_power_sum",
+        "solar_power_count",
+        "positive_Wh",
+        "regen_Wh",
+        "human_Wh",
+        "solar_Wh",
+        "temp_sum",
+        "temp_count",
+        "distance",
+        "Ah",
+        "duration",
+        "ca_reset_count",
+        "gps_points",
+        "gps_distance_km",
+        "gps_uphill_m",
+        "gps_downhill_m",
+        "raw_gps_uphill_m",
+        "raw_gps_downhill_m",
+        "gps_speed_sum",
+        "gps_speed_count",
+        "gps_fix_count",
+        "gps_fix_samples",
+        "gps_sats_sum",
+        "gps_sats_count",
+        "gps_hdop_sum",
+        "gps_hdop_count",
+        "solar_samples",
+    }
+    max_keys = {
+        "speed_max",
+        "power_max",
+        "human_power_max",
+        "solar_power_max",
+        "temp_max",
+        "gps_speed_max",
+        "gps_alt_max",
+        "raw_gps_alt_max",
+    }
+    min_keys = {"power_min", "gps_alt_min", "raw_gps_alt_min"}
+
+    for key in sum_keys:
+        aggregate[key] = sum(float(metrics.get(key) or 0) for metrics in metrics_list)
+    for key in max_keys:
+        values = [metrics.get(key) for metrics in metrics_list if metrics.get(key) is not None]
+        aggregate[key] = max(values) if values else aggregate.get(key)
+    for key in min_keys:
+        values = [metrics.get(key) for metrics in metrics_list if metrics.get(key) is not None]
+        aggregate[key] = min(values) if values else aggregate.get(key)
+    aggregate["solar_enabled"] = all(bool(metrics.get("solar_enabled", True)) for metrics in metrics_list)
+    return aggregate
+
+
 def _is_deleted_session(conn: sqlite3.Connection, device_id: str, session_id: str, mode: str) -> bool:
     row = conn.execute(
         """
@@ -2838,6 +2902,20 @@ def create_app() -> Flask:
                 day_groups.append({"day_key": column["day_key"], "day_label": column["day_label"], "columns": []})
             day_groups[-1]["columns"].append(column)
 
+        total_columns = []
+        for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
+            vehicle_columns = [column for column in columns if column["vehicle_key"] == vehicle["key"]]
+            if not vehicle_columns:
+                continue
+            total_columns.append(
+                {
+                    "vehicle_key": vehicle["key"],
+                    "vehicle_label": vehicle["label"],
+                    "session_count": len(vehicle_columns),
+                    "metrics": _aggregate_session_metrics([column["metrics"] for column in vehicle_columns]),
+                }
+            )
+
         metric_groups = []
         for category, specs in SUMMARY_GROUPS:
             rows = []
@@ -2847,6 +2925,10 @@ def create_app() -> Flask:
                         "label": label,
                         "unit": unit,
                         "values": [format_metric_value(func(column["metrics"]), unit) for column in columns],
+                        "total_values": [
+                            format_metric_value(func(total_column["metrics"]), unit)
+                            for total_column in total_columns
+                        ],
                     }
                 )
             metric_groups.append({"category": category, "rows": rows})
@@ -2858,6 +2940,7 @@ def create_app() -> Flask:
             vehicles=SUNTRIP_ANALYSIS_VEHICLES,
             candidates=candidates,
             columns=columns,
+            total_columns=total_columns,
             day_groups=day_groups,
             metric_groups=metric_groups,
             stage_count=len(columns),

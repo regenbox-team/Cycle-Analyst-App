@@ -78,7 +78,7 @@
         color: var(--ink);
       }
       table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
-      th, td { border-bottom: 1px solid var(--border); padding: 7px 8px; text-align: left; vertical-align: top; }
+      th, td { border-bottom: 1px solid var(--border); padding: 7px 8px; text-align: center; vertical-align: middle; }
       th { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
       tbody tr:hover td { background: #faf7f0; }
       .table-scroll {
@@ -103,6 +103,7 @@
         min-width: 210px;
         background: #fffdf9;
         box-shadow: 1px 0 0 var(--border);
+        text-align: left;
       }
       .analysis-table thead .sticky-col { background: #f4efe5; }
       .metric-category td {
@@ -114,10 +115,18 @@
       }
       .value-cell {
         min-width: 126px;
-        text-align: right;
+        text-align: center;
         white-space: nowrap;
       }
       .day-head { text-align: center; color: #0f766e; }
+      .total-head {
+        color: #9a5a00;
+        background: #fff2d6 !important;
+      }
+      .total-col {
+        background: #fffaf0;
+        border-left: 1px solid #f3c56e;
+      }
       .vehicle-head { text-align: center; color: #1a1a1a; }
       .session-head {
         max-width: 170px;
@@ -197,11 +206,17 @@
                 {% for day in day_groups %}
                 <th class="day-head" colspan="{{ day.columns|length }}">{{ day.day_label }}</th>
                 {% endfor %}
+                {% if total_columns %}
+                <th class="total-head" colspan="{{ total_columns|length }}">Totals</th>
+                {% endif %}
               </tr>
               <tr>
                 <th class="sticky-col">Vehicle</th>
                 {% for column in columns %}
                 <th class="vehicle-head">{{ column.vehicle_label }}</th>
+                {% endfor %}
+                {% for total in total_columns %}
+                <th class="vehicle-head total-col">{{ total.vehicle_label }}</th>
                 {% endfor %}
               </tr>
               <tr>
@@ -212,6 +227,9 @@
                   {{ column.start_ts_fmt or column.device_id }}
                 </th>
                 {% endfor %}
+                {% for total in total_columns %}
+                <th class="session-head total-col">{{ total.session_count }} included stages</th>
+                {% endfor %}
               </tr>
             </thead>
             <tbody>
@@ -221,12 +239,18 @@
                 {% for column in columns %}
                 <td></td>
                 {% endfor %}
+                {% for total in total_columns %}
+                <td class="total-col"></td>
+                {% endfor %}
               </tr>
               {% for row in group.rows %}
               <tr>
                 <td class="sticky-col">{{ row.label }}</td>
                 {% for value in row["values"] %}
                 <td class="value-cell">{{ value }}</td>
+                {% endfor %}
+                {% for value in row["total_values"] %}
+                <td class="value-cell total-col">{{ value }}</td>
                 {% endfor %}
               </tr>
               {% endfor %}
