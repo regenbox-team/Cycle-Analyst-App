@@ -226,6 +226,8 @@
         overflow-x: auto;
       }
       .chart-axis { stroke: #d8cdbd; stroke-width: 1; }
+      .chart-metric-axis { stroke-width: 2; }
+      .chart-metric-tick { stroke-width: 2; }
       .chart-grid { stroke: #eee4d8; stroke-width: 1; }
       .chart-line { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
       .chart-dot { stroke: #fffdf9; stroke-width: 2; }
@@ -233,29 +235,15 @@
         fill: var(--muted);
         font-size: 11px;
       }
+      .chart-scale-label {
+        font-size: 10px;
+        font-weight: 800;
+      }
       .chart-legend {
         display: flex;
         flex-wrap: wrap;
         gap: 10px;
         margin-top: 6px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .chart-scale-list {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-        gap: 8px;
-        margin-top: 10px;
-      }
-      .chart-scale-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: #fffaf2;
-        padding: 6px 8px;
         color: var(--muted);
         font-size: 12px;
       }
@@ -599,7 +587,7 @@
         const titleText = document.createElement("strong");
         titleText.textContent = "Selected metrics";
         const subtitle = document.createElement("span");
-        subtitle.textContent = "One Y scale per metric";
+        subtitle.textContent = "Real-value mini axes per metric";
         title.append(titleText, subtitle);
         panel.appendChild(title);
 
@@ -635,9 +623,11 @@
           return panel;
         }
 
-        const width = Math.max(760, 150 + days.length * 96);
+        const axisLaneWidth = 94;
+        const axisSpace = metricScales.length * axisLaneWidth;
+        const width = Math.max(760, 150 + days.length * 96) + axisSpace;
         const height = 320;
-        const margin = { top: 20, right: 28, bottom: 52, left: 54 };
+        const margin = { top: 28, right: axisSpace + 28, bottom: 52, left: 46 };
         const plotWidth = width - margin.left - margin.right;
         const plotHeight = height - margin.top - margin.bottom;
         const x = (index) => margin.left + (days.length === 1 ? plotWidth / 2 : (plotWidth * index) / (days.length - 1));
@@ -651,9 +641,6 @@
         for (let i = 0; i <= ticks; i += 1) {
           const yy = margin.top + plotHeight - (plotHeight * i) / ticks;
           svg.appendChild(svgNode("line", { class: "chart-grid", x1: margin.left, y1: yy, x2: width - margin.right, y2: yy }));
-          const label = svgNode("text", { class: "chart-label", x: margin.left - 8, y: yy + 4, "text-anchor": "end" });
-          label.textContent = `${Math.round((i / ticks) * 100)}%`;
-          svg.appendChild(label);
         }
         svg.appendChild(svgNode("line", { class: "chart-axis", x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom }));
         svg.appendChild(svgNode("line", { class: "chart-axis", x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom }));
@@ -685,6 +672,46 @@
           });
         });
 
+        metricScales.forEach((scale, index) => {
+          const axisX = width - margin.right + 22 + index * axisLaneWidth;
+          svg.appendChild(svgNode("line", {
+            class: "chart-metric-axis",
+            x1: axisX,
+            y1: margin.top,
+            x2: axisX,
+            y2: height - margin.bottom,
+            stroke: scale.color
+          }));
+          const axisTitle = svgNode("text", {
+            class: "chart-scale-label",
+            x: axisX,
+            y: margin.top - 10,
+            fill: scale.color,
+            "text-anchor": "middle"
+          });
+          axisTitle.textContent = scale.metric.label.length > 14 ? `${scale.metric.label.slice(0, 13)}...` : scale.metric.label;
+          svg.appendChild(axisTitle);
+          [scale.max, (scale.min + scale.max) / 2, scale.min].forEach((value) => {
+            const yy = y(value, scale);
+            svg.appendChild(svgNode("line", {
+              class: "chart-metric-tick",
+              x1: axisX - 4,
+              y1: yy,
+              x2: axisX + 4,
+              y2: yy,
+              stroke: scale.color
+            }));
+            const label = svgNode("text", {
+              class: "chart-label",
+              x: axisX + 8,
+              y: yy + 4,
+              style: `fill: ${scale.color}`
+            });
+            label.textContent = formatAxisValue(value, scale.metric.unit);
+            svg.appendChild(label);
+          });
+        });
+
         scroll.appendChild(svg);
         panel.appendChild(scroll);
 
@@ -707,25 +734,6 @@
         });
         panel.appendChild(vehicleLegend);
 
-        const scaleList = document.createElement("div");
-        scaleList.className = "chart-scale-list";
-        metricScales.forEach((scale) => {
-          const item = document.createElement("div");
-          item.className = "chart-scale-item";
-          const name = document.createElement("span");
-          name.className = "legend-item";
-          const swatch = document.createElement("span");
-          swatch.className = "legend-swatch";
-          swatch.style.background = scale.color;
-          const label = document.createElement("span");
-          label.textContent = scale.metric.label;
-          name.append(swatch, label);
-          const range = document.createElement("span");
-          range.textContent = `${formatAxisValue(scale.min, scale.metric.unit)} to ${formatAxisValue(scale.max, scale.metric.unit)}`;
-          item.append(name, range);
-          scaleList.appendChild(item);
-        });
-        panel.appendChild(scaleList);
         return panel;
       };
       const renderCharts = () => {
