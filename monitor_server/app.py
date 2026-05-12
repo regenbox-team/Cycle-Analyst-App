@@ -1704,6 +1704,38 @@ def _is_deleted_session(conn: sqlite3.Connection, device_id: str, session_id: st
     return row is not None
 
 
+def _clear_deleted_session_marker(conn: sqlite3.Connection, device_id: str, session_id: str, mode: str) -> None:
+    conn.execute(
+        """
+        DELETE FROM deleted_sessions
+        WHERE device_id = ? AND session_id = ? AND mode = ?
+        """,
+        (device_id, session_id, mode),
+    )
+
+
+def _compact_monitor_db() -> dict[str, Any]:
+    path = _db_path()
+    before_bytes = os.path.getsize(path) if os.path.exists(path) else 0
+    with sqlite3.connect(path, timeout=_db_timeout_sec(), isolation_level=None) as conn:
+        before_page_count = int(conn.execute("PRAGMA page_count").fetchone()[0] or 0)
+        before_freelist_count = int(conn.execute("PRAGMA freelist_count").fetchone()[0] or 0)
+        conn.execute("PRAGMA optimize")
+        conn.execute("VACUUM")
+        after_page_count = int(conn.execute("PRAGMA page_count").fetchone()[0] or 0)
+        after_freelist_count = int(conn.execute("PRAGMA freelist_count").fetchone()[0] or 0)
+    after_bytes = os.path.getsize(path) if os.path.exists(path) else 0
+    return {
+        "before_bytes": before_bytes,
+        "after_bytes": after_bytes,
+        "saved_bytes": max(0, before_bytes - after_bytes),
+        "before_page_count": before_page_count,
+        "after_page_count": after_page_count,
+        "before_freelist_count": before_freelist_count,
+        "after_freelist_count": after_freelist_count,
+    }
+
+
 def create_app() -> Flask:
     app = Flask(
         __name__,
@@ -2033,10 +2065,8 @@ def create_app() -> Flask:
             rows = conn.execute(
                 """
                 SELECT session_id FROM sessions WHERE device_id = ? AND mode = ?
-                UNION
-                SELECT session_id FROM deleted_sessions WHERE device_id = ? AND mode = ?
                 """,
-                (device_id, mode, device_id, mode),
+                (device_id, mode),
             ).fetchall()
             deleted_rows = conn.execute(
                 """
@@ -2050,6 +2080,12 @@ def create_app() -> Flask:
                 "deleted_sessions": [r[0] for r in deleted_rows],
             }
         )
+
+    @app.route("/api/compact_db", methods=["POST"])
+    @_require_auth
+    def compact_db():
+        stats = _compact_monitor_db()
+        return jsonify({"status": "ok", **stats})
 
     @app.route("/api/users", methods=["GET"])
     @_require_auth
@@ -2189,14 +2225,13 @@ def create_app() -> Flask:
             return jsonify({"error": "missing device_id or session_id"}), 400
 
         with _get_db() as conn:
-            if _is_deleted_session(conn, device_id, session_id, mode):
-                return jsonify({"status": "exists", "deleted": True})
             existing = conn.execute(
                 "SELECT 1 FROM sessions WHERE device_id = ? AND session_id = ? AND mode = ?",
                 (device_id, session_id, mode),
             ).fetchone()
             if existing:
                 return jsonify({"status": "exists"})
+            _clear_deleted_session_marker(conn, device_id, session_id, mode)
 
             samples = _sanitize_upload_samples(data)
             _enrich_samples_with_terrain_altitude(conn, samples, allow_fallback=False)
@@ -2230,14 +2265,13 @@ def create_app() -> Flask:
         final = bool(data.get("final")) or chunk_index == total_chunks - 1
 
         with _get_db() as conn:
-            if _is_deleted_session(conn, device_id, session_id, mode):
-                return jsonify({"status": "exists", "deleted": True})
             existing = conn.execute(
                 "SELECT 1 FROM sessions WHERE device_id = ? AND session_id = ? AND mode = ?",
                 (device_id, session_id, mode),
             ).fetchone()
             if existing:
                 return jsonify({"status": "exists"})
+            _clear_deleted_session_marker(conn, device_id, session_id, mode)
 
             if chunk_index == 0 and data.get("replace", True):
                 conn.execute(

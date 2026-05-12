@@ -355,7 +355,10 @@
           <h1>Cycle Monitor</h1>
           <div class="muted">Last refresh: {{ now }}</div>
         </div>
-        <a class="action-link primary" href="/suntrip_analysis">Suntrip analysis</a>
+        <div class="bulk-buttons">
+          <button id="compact-db-btn" class="action-link" type="button">Compact DB</button>
+          <a class="action-link primary" href="/suntrip_analysis">Suntrip analysis</a>
+        </div>
       </div>
 
       <h2>Devices</h2>
@@ -675,7 +678,20 @@
       const bulkDeleteBtn = document.getElementById("bulk-delete-btn");
       const bulkStageBtn = document.getElementById("bulk-stage-btn");
       const bulkUnstageBtn = document.getElementById("bulk-unstage-btn");
+      const compactDbBtn = document.getElementById("compact-db-btn");
       const selectedCount = document.getElementById("selected-count");
+      const formatBytes = (bytes) => {
+        const value = Number(bytes || 0);
+        if (!Number.isFinite(value) || value <= 0) return "0 B";
+        const units = ["B", "KB", "MB", "GB"];
+        let scaled = value;
+        let unitIndex = 0;
+        while (scaled >= 1024 && unitIndex < units.length - 1) {
+          scaled /= 1024;
+          unitIndex += 1;
+        }
+        return `${scaled.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+      };
       const getSessionPayload = (row) => ({
         device_id: row.dataset.deviceId || "",
         session_id: row.dataset.sessionId || "",
@@ -732,6 +748,31 @@
           if (check) check.checked = suntripStage;
         });
       };
+      compactDbBtn?.addEventListener("click", async () => {
+        const confirmed = await showMonitorDialog({
+          title: "Compact database",
+          message: "Compact the monitor database file now? This can briefly lock the monitor while SQLite rebuilds the file.",
+          confirmLabel: "Compact",
+          cancelLabel: "Cancel"
+        });
+        if (!confirmed) return;
+        compactDbBtn.disabled = true;
+        try {
+          const response = await fetch("/api/compact_db", { method: "POST" });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(result.error || "Compaction failed");
+          }
+          await showMonitorMessage(
+            `Database compacted. Size: ${formatBytes(result.before_bytes)} -> ${formatBytes(result.after_bytes)}. Freed: ${formatBytes(result.saved_bytes)}.`,
+            "Compact complete"
+          );
+        } catch (error) {
+          await showMonitorMessage(error.message || "Compaction failed", "Compaction failed");
+        } finally {
+          compactDbBtn.disabled = false;
+        }
+      });
       const updateRowsStage = async (rows, suntripStage) => {
         if (!rows.length) return;
         const sessions = rows.map(getSessionPayload);

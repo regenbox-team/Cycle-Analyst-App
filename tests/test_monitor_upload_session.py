@@ -225,6 +225,134 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertEqual(len(exported["photos"]), 1)
         self.assertEqual(exported["photos"][0]["relative_path"], "photos/bike/frame.jpg")
 
+    def test_known_sessions_excludes_deleted_sessions_from_uploaded_list(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        payload = {
+            "device_id": "bike",
+            "session_id": "2026-05-07_10-00-00",
+            "mode": "supercycle_live",
+            "metrics": {"distance_km": 2.0, "solar_enabled": True},
+            "solar_enabled": 1,
+            "telemetry_samples": [self.sample(0), self.sample(1)],
+        }
+        token = "Basic YWRtaW46c2VjcmV0"
+        client = self.monitor_app.app.test_client()
+        upload = client.post("/api/upload_session", json=payload, headers={"Authorization": token})
+        self.assertEqual(upload.status_code, 200)
+
+        deleted = self.monitor_app._delete_session_data(
+            payload["device_id"],
+            payload["session_id"],
+            payload["mode"],
+        )
+        self.assertEqual(deleted["deleted_sessions"], 1)
+
+        response = client.get(
+            "/api/known_sessions?device_id=bike&mode=supercycle_live",
+            headers={"Authorization": token},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        known = response.get_json()
+        self.assertNotIn(payload["session_id"], known["sessions"])
+        self.assertIn(payload["session_id"], known["deleted_sessions"])
+
+    def test_deleted_session_can_be_uploaded_again_and_clears_tombstone(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        payload = {
+            "device_id": "bike",
+            "session_id": "2026-05-07_10-00-00",
+            "mode": "supercycle_live",
+            "metrics": {"distance_km": 2.0, "solar_enabled": True},
+            "solar_enabled": 1,
+            "telemetry_samples": [self.sample(0), self.sample(1)],
+        }
+        token = "Basic YWRtaW46c2VjcmV0"
+        client = self.monitor_app.app.test_client()
+        first_upload = client.post("/api/upload_session", json=payload, headers={"Authorization": token})
+        self.assertEqual(first_upload.status_code, 200)
+
+        self.monitor_app._delete_session_data(payload["device_id"], payload["session_id"], payload["mode"])
+        second_upload = client.post("/api/upload_session", json=payload, headers={"Authorization": token})
+
+        self.assertEqual(second_upload.status_code, 200)
+        self.assertEqual(second_upload.get_json()["status"], "ok")
+        with sqlite3.connect(self.db_path) as conn:
+            session_count = conn.execute(
+                """
+                SELECT COUNT(*) FROM sessions
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                """,
+                (payload["device_id"], payload["session_id"], payload["mode"]),
+            ).fetchone()[0]
+            tombstone_count = conn.execute(
+                """
+                SELECT COUNT(*) FROM deleted_sessions
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                """,
+                (payload["device_id"], payload["session_id"], payload["mode"]),
+            ).fetchone()[0]
+
+        self.assertEqual(session_count, 1)
+        self.assertEqual(tombstone_count, 0)
+
+    def test_deleted_session_can_be_uploaded_again_in_chunks(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        payload = {
+            "device_id": "bike",
+            "session_id": "2026-05-07_10-00-00",
+            "mode": "supercycle_live",
+            "metrics": {"distance_km": 2.0, "solar_enabled": True},
+            "solar_enabled": 1,
+            "telemetry_samples": [self.sample(0), self.sample(1)],
+        }
+        token = "Basic YWRtaW46c2VjcmV0"
+        client = self.monitor_app.app.test_client()
+        first_upload = client.post("/api/upload_session", json=payload, headers={"Authorization": token})
+        self.assertEqual(first_upload.status_code, 200)
+
+        self.monitor_app._delete_session_data(payload["device_id"], payload["session_id"], payload["mode"])
+        first_chunk = dict(payload, telemetry_samples=[self.sample(0)], chunk_index=0, total_chunks=2)
+        second_chunk = dict(payload, telemetry_samples=[self.sample(1)], chunk_index=1, total_chunks=2, final=True)
+
+        chunk_response = client.post("/api/upload_session_chunk", json=first_chunk, headers={"Authorization": token})
+        self.assertEqual(chunk_response.status_code, 200)
+        self.assertEqual(chunk_response.get_json()["status"], "ok")
+        final_response = client.post("/api/upload_session_chunk", json=second_chunk, headers={"Authorization": token})
+
+        self.assertEqual(final_response.status_code, 200)
+        self.assertEqual(final_response.get_json()["status"], "ok")
+        with sqlite3.connect(self.db_path) as conn:
+            session_count = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+            sample_count = conn.execute("SELECT COUNT(*) FROM telemetry_samples").fetchone()[0]
+            tombstone_count = conn.execute("SELECT COUNT(*) FROM deleted_sessions").fetchone()[0]
+
+        self.assertEqual(session_count, 1)
+        self.assertEqual(sample_count, 2)
+        self.assertEqual(tombstone_count, 0)
+
+    def test_compact_db_endpoint_returns_size_stats(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        response = self.monitor_app.app.test_client().post(
+            "/api/compact_db",
+            headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertIn("before_bytes", payload)
+        self.assertIn("after_bytes", payload)
+        self.assertIn("saved_bytes", payload)
+
     def test_index_groups_sessions_by_month(self):
         if not hasattr(self.monitor_app.app, "test_client"):
             self.skipTest("Flask test client is not available in this test environment.")
