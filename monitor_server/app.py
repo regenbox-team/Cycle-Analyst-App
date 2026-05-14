@@ -1654,6 +1654,127 @@ def _photo_video_rows(conn: sqlite3.Connection, sessions: list[dict[str, Any]]) 
     return rows
 
 
+def _solar_profile_for_sessions(
+    conn: sqlite3.Connection,
+    sessions: list[dict[str, Any]],
+    *,
+    max_points_per_session: int = 1440,
+) -> dict[str, Any]:
+    max_points = max(24, min(1440, int(max_points_per_session or 1440)))
+    bucket_minutes = max(1, math.ceil(1440 / max_points))
+    profiles = []
+    seen = set()
+    requested = 0
+    total_raw_samples = 0
+    total_profile_points = 0
+
+    for raw in sessions:
+        key = _session_key(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        requested += 1
+        device_id, session_id, mode = key
+        session_row = conn.execute(
+            """
+            SELECT start_ts, end_ts, rows_count, distance_km
+            FROM sessions
+            WHERE device_id = ? AND session_id = ? AND mode = ?
+            """,
+            key,
+        ).fetchone()
+        if not session_row:
+            profiles.append(
+                {
+                    "device_id": device_id,
+                    "session_id": session_id,
+                    "mode": mode,
+                    "label": f"{device_id} / {session_id}",
+                    "status": "not_found",
+                    "points": [],
+                    "raw_sample_count": 0,
+                }
+            )
+            continue
+
+        rows = conn.execute(
+            f"""
+            SELECT timestamp, solar_power_w, solar_current_a, solar_bus_v, solar_enabled
+            FROM {TELEMETRY_TABLE}
+            WHERE device_id = ? AND session_id = ? AND mode = ?
+              AND timestamp IS NOT NULL
+              AND COALESCE(solar_enabled, 1) = 1
+              AND (
+                solar_power_w IS NOT NULL
+                OR (solar_current_a IS NOT NULL AND solar_bus_v IS NOT NULL)
+              )
+            ORDER BY id
+            """,
+            key,
+        ).fetchall()
+
+        buckets: dict[int, dict[str, float]] = {}
+        raw_sample_count = 0
+        for row in rows:
+            ts = _parse_upload_ts(row["timestamp"])
+            if not ts:
+                continue
+            power = _safe_float(row["solar_power_w"])
+            if power is None:
+                current = _safe_float(row["solar_current_a"])
+                voltage = _safe_float(row["solar_bus_v"])
+                if current is None or voltage is None:
+                    continue
+                power = current * voltage
+            power = max(0.0, power)
+            minute_of_day = ts.hour * 60 + ts.minute + ts.second / 60.0
+            bucket = min(1439, int(minute_of_day // bucket_minutes) * bucket_minutes)
+            item = buckets.setdefault(bucket, {"sum": 0.0, "count": 0.0})
+            item["sum"] += power
+            item["count"] += 1
+            raw_sample_count += 1
+
+        points = [
+            {
+                "hour": round((bucket + bucket_minutes / 2) / 60.0, 4),
+                "w": round(values["sum"] / max(1.0, values["count"]), 3),
+            }
+            for bucket, values in sorted(buckets.items())
+            if values["count"] > 0
+        ]
+        total_raw_samples += raw_sample_count
+        total_profile_points += len(points)
+        label_date = session_row["start_ts"] or session_id
+        profiles.append(
+            {
+                "device_id": device_id,
+                "session_id": session_id,
+                "mode": mode,
+                "label": f"{device_id} / {session_id}",
+                "status": "ok",
+                "start_ts": session_row["start_ts"],
+                "end_ts": session_row["end_ts"],
+                "rows_count": session_row["rows_count"],
+                "distance_km": session_row["distance_km"],
+                "day_label": str(label_date)[:10],
+                "raw_sample_count": raw_sample_count,
+                "point_count": len(points),
+                "points": points,
+            }
+        )
+
+    ok_profiles = [profile for profile in profiles if profile.get("status") == "ok" and profile.get("points")]
+    return {
+        "status": "ok",
+        "requested": requested,
+        "session_count": len(ok_profiles),
+        "raw_sample_count": total_raw_samples,
+        "profile_point_count": total_profile_points,
+        "bucket_minutes": bucket_minutes,
+        "profiles": profiles,
+    }
+
+
 def _format_photo_video_metadata(row: sqlite3.Row) -> list[str]:
     metrics = {}
     if row["metrics_json"]:
@@ -2403,6 +2524,22 @@ def create_app() -> Flask:
         result = _set_suntrip_stage_sessions(sessions, bool(data.get("suntrip_stage")))
         if result["updated_count"] == 0:
             return jsonify({"error": "sessions not found", **result}), 404
+        return jsonify(result)
+
+    @app.route("/api/sessions/solar_profile", methods=["POST"])
+    @_require_auth
+    def sessions_solar_profile():
+        data = request.get_json(silent=True) or {}
+        sessions = data.get("sessions")
+        if not isinstance(sessions, list) or not sessions:
+            return jsonify({"error": "missing sessions"}), 400
+        max_points = _safe_int(data.get("max_points_per_session")) or 1440
+        with _get_db() as conn:
+            result = _solar_profile_for_sessions(
+                conn,
+                sessions,
+                max_points_per_session=max_points,
+            )
         return jsonify(result)
 
     @app.route("/api/photos/video", methods=["POST"])

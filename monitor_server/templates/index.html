@@ -312,6 +312,36 @@
       .chart-grid { stroke: #dfd4c4; stroke-width: 1; stroke-dasharray: 3 4; }
       .chart-label { fill: #6f665b; font-size: 11px; font-weight: 600; }
       .chart-axis-title { fill: #3c342c; font-size: 11px; font-weight: 700; }
+      .solar-profile-card { margin-top: 12px; }
+      #solar-profile-chart { width: 100%; height: 320px; }
+      .solar-profile-line {
+        fill: none;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .solar-profile-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 14px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .legend-swatch {
+        width: 18px;
+        height: 3px;
+        border-radius: 999px;
+        display: inline-block;
+      }
+      .solar-profile-status {
+        color: var(--muted);
+        font-size: 12px;
+      }
       .photo-card {
         display: grid;
         grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
@@ -483,6 +513,7 @@
           <div class="bulk-buttons">
             <button id="bulk-stage-btn" class="action-link primary" type="button" disabled>Mark Suntrip</button>
             <button id="bulk-unstage-btn" class="action-link" type="button" disabled>Unmark Suntrip</button>
+            <button id="bulk-solar-profile-btn" class="action-link primary" type="button" disabled>Solar profile</button>
             <button id="bulk-video-btn" class="action-link primary" type="button" disabled>Photo video</button>
             <button id="bulk-delete-btn" class="action-link danger" type="button" disabled>Delete selected</button>
           </div>
@@ -563,6 +594,18 @@
             {% endfor %}
           </tbody>
         </table>
+      </div>
+
+      <div id="solar-profile-card" class="card solar-profile-card" hidden>
+        <div class="chart-wrap">
+          <div class="chart-header">
+            <div class="pill">Solar production profile</div>
+            <div id="solar-profile-status" class="solar-profile-status"></div>
+          </div>
+          <svg id="solar-profile-chart" viewBox="0 0 1200 320" role="img" aria-label="Solar watts over 24 hours"></svg>
+          <div id="solar-profile-legend" class="solar-profile-legend"></div>
+          <div class="muted">X: 24h clock time. Y: solar watts. Curves are averaged per time bucket.</div>
+        </div>
       </div>
     </main>
     <div id="monitor-dialog-backdrop" class="modal-backdrop" hidden>
@@ -682,9 +725,15 @@
       const bulkDeleteBtn = document.getElementById("bulk-delete-btn");
       const bulkStageBtn = document.getElementById("bulk-stage-btn");
       const bulkUnstageBtn = document.getElementById("bulk-unstage-btn");
+      const bulkSolarProfileBtn = document.getElementById("bulk-solar-profile-btn");
       const bulkVideoBtn = document.getElementById("bulk-video-btn");
       const compactDbBtn = document.getElementById("compact-db-btn");
       const selectedCount = document.getElementById("selected-count");
+      const solarProfileCard = document.getElementById("solar-profile-card");
+      const solarProfileChart = document.getElementById("solar-profile-chart");
+      const solarProfileLegend = document.getElementById("solar-profile-legend");
+      const solarProfileStatus = document.getElementById("solar-profile-status");
+      let solarProfileData = null;
       const formatBytes = (bytes) => {
         const value = Number(bytes || 0);
         if (!Number.isFinite(value) || value <= 0) return "0 B";
@@ -736,6 +785,7 @@
         if (bulkDeleteBtn) bulkDeleteBtn.disabled = checkedCount === 0;
         if (bulkStageBtn) bulkStageBtn.disabled = checkedCount === 0;
         if (bulkUnstageBtn) bulkUnstageBtn.disabled = checkedCount === 0;
+        if (bulkSolarProfileBtn) bulkSolarProfileBtn.disabled = checkedCount === 0;
         if (bulkVideoBtn) {
           const selectedPhotoCount = selectedRows()
             .reduce((sum, row) => sum + (Number.parseInt(row.dataset.photoCount || "0", 10) || 0), 0);
@@ -980,6 +1030,41 @@
           }
         });
       }
+      if (bulkSolarProfileBtn && tbody) {
+        bulkSolarProfileBtn.addEventListener("click", async () => {
+          const rows = selectedRows();
+          if (!rows.length) return;
+          const originalText = bulkSolarProfileBtn.textContent;
+          bulkSolarProfileBtn.disabled = true;
+          bulkSolarProfileBtn.textContent = "Loading";
+          if (solarProfileCard) solarProfileCard.hidden = false;
+          if (solarProfileStatus) solarProfileStatus.textContent = "Loading selected sessions...";
+          if (solarProfileChart) {
+            solarProfileChart.innerHTML = `<rect x="0" y="0" width="1200" height="320" rx="12" class="chart-bg"></rect>` +
+              `<text x="24" y="34" fill="#6f665b" font-size="12">Loading solar data...</text>`;
+          }
+          try {
+            const response = await fetch("/api/sessions/solar_profile", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sessions: rows.map(getSessionPayload), max_points_per_session: 1440 })
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(result.error || "Solar profile extraction failed");
+            }
+            solarProfileData = result;
+            renderSolarProfileChart(result);
+            solarProfileCard?.scrollIntoView({ behavior: "smooth", block: "start" });
+          } catch (error) {
+            if (solarProfileStatus) solarProfileStatus.textContent = "";
+            await showMonitorMessage(error.message || "Solar profile extraction failed", "Solar profile failed");
+          } finally {
+            bulkSolarProfileBtn.textContent = originalText;
+            updateSelectionState();
+          }
+        });
+      }
       const wireBulkStage = (button, suntripStage) => {
         if (!button || !tbody) return;
         button.addEventListener("click", async () => {
@@ -1069,6 +1154,95 @@
         return niceFraction * Math.pow(10, exponent);
       };
 
+      const formatHourTick = (hour) => {
+        if (Number(hour) >= 24) return "24:00";
+        const safeHour = ((Math.round(hour) % 24) + 24) % 24;
+        return `${String(safeHour).padStart(2, "0")}:00`;
+      };
+
+      const renderSolarProfileChart = (profileData) => {
+        if (!solarProfileChart) return;
+        const profiles = (profileData?.profiles || [])
+          .filter((profile) => Array.isArray(profile.points) && profile.points.length);
+        const measuredWidth = Math.round(solarProfileChart.getBoundingClientRect().width || 1200);
+        const width = Math.max(640, measuredWidth);
+        const height = 320;
+        solarProfileChart.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        const margin = { top: 18, right: 22, bottom: 42, left: 56 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        if (!profiles.length) {
+          solarProfileChart.innerHTML = `<rect x="0" y="0" width="${width}" height="${height}" rx="12" class="chart-bg"></rect>` +
+            `<text x="24" y="34" fill="#6f665b" font-size="12">No solar watt data found for the selected sessions.</text>`;
+          if (solarProfileLegend) solarProfileLegend.innerHTML = "";
+          if (solarProfileStatus) solarProfileStatus.textContent = "No usable solar data";
+          return;
+        }
+
+        const maxWatts = niceMax(Math.max(
+          1,
+          ...profiles.flatMap((profile) => profile.points.map((point) => Number(point.w || 0)))
+        ));
+        const xForHour = (hour) => margin.left + (Math.max(0, Math.min(24, Number(hour || 0))) / 24) * plotWidth;
+        const yForWatts = (watts) => margin.top + plotHeight - (Math.max(0, Number(watts || 0)) / maxWatts) * plotHeight;
+        const colors = ["#0d9488", "#dc2626", "#2563eb", "#ca8a04", "#7c3aed", "#16a34a", "#db2777", "#475569"];
+
+        let grid = "";
+        const yTicks = 5;
+        for (let i = 0; i <= yTicks; i++) {
+          const value = (maxWatts / yTicks) * i;
+          const y = yForWatts(value);
+          grid += `<line x1="${margin.left}" y1="${y.toFixed(1)}" x2="${(width - margin.right).toFixed(1)}" y2="${y.toFixed(1)}" class="chart-grid"></line>`;
+          grid += `<text x="${margin.left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="chart-label">${formatKmTick(value)}</text>`;
+        }
+        for (let hour = 0; hour <= 24; hour += 4) {
+          const x = xForHour(hour);
+          grid += `<line x1="${x.toFixed(1)}" y1="${margin.top}" x2="${x.toFixed(1)}" y2="${(margin.top + plotHeight).toFixed(1)}" class="chart-grid"></line>`;
+          grid += `<text x="${x.toFixed(1)}" y="${height - 18}" text-anchor="middle" class="chart-label">${formatHourTick(hour)}</text>`;
+        }
+
+        const paths = profiles.map((profile, index) => {
+          const color = colors[index % colors.length];
+          const points = profile.points
+            .map((point) => ({ hour: Number(point.hour), w: Number(point.w) }))
+            .filter((point) => Number.isFinite(point.hour) && Number.isFinite(point.w))
+            .sort((a, b) => a.hour - b.hour);
+          if (!points.length) return "";
+          const d = points
+            .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${xForHour(point.hour).toFixed(1)} ${yForWatts(point.w).toFixed(1)}`)
+            .join(" ");
+          return `<path d="${d}" class="solar-profile-line" stroke="${color}"></path>`;
+        }).join("");
+        const axes = [
+          `<line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}" class="chart-axis"></line>`,
+          `<line x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${width - margin.right}" y2="${margin.top + plotHeight}" class="chart-axis"></line>`,
+          `<text x="${margin.left}" y="13" class="chart-axis-title">W solaires</text>`,
+          `<text x="${width - margin.right}" y="${height - 4}" text-anchor="end" class="chart-axis-title">heure</text>`
+        ].join("");
+        solarProfileChart.innerHTML = `<rect x="0" y="0" width="${width}" height="${height}" rx="12" class="chart-bg"></rect>` + grid + axes + paths;
+
+        if (solarProfileLegend) {
+          solarProfileLegend.innerHTML = "";
+          profiles.forEach((profile, index) => {
+            const item = document.createElement("span");
+            item.className = "legend-item";
+            const swatch = document.createElement("span");
+            swatch.className = "legend-swatch";
+            swatch.style.background = colors[index % colors.length];
+            const label = document.createElement("span");
+            label.textContent = `${profile.label || profile.session_id} (${profile.point_count || profile.points.length} pts)`;
+            item.appendChild(swatch);
+            item.appendChild(label);
+            solarProfileLegend.appendChild(item);
+          });
+        }
+        if (solarProfileStatus) {
+          const bucket = Number(profileData?.bucket_minutes || 1);
+          const rawCount = Number(profileData?.raw_sample_count || 0);
+          solarProfileStatus.textContent = `${profiles.length} session${profiles.length > 1 ? "s" : ""} · ${rawCount} samples · ${bucket} min buckets`;
+        }
+      };
+
       const renderChart = (rangeKey) => {
         const rawData = distanceSeries[rangeKey] || [];
         const measuredWidth = Math.round(chart.getBoundingClientRect().width || 1200);
@@ -1151,6 +1325,9 @@
       window.addEventListener("resize", () => {
         const activeButton = document.querySelector(".toggle-btn.active");
         renderChart(activeButton?.dataset.range || "30");
+        if (solarProfileData && solarProfileCard && !solarProfileCard.hidden) {
+          renderSolarProfileChart(solarProfileData);
+        }
       });
     </script>
   </body>

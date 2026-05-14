@@ -400,6 +400,77 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn('data-photo-count="1"', html)
         self.assertIn('title="1 photos"', html)
         self.assertIn('id="bulk-video-btn"', html)
+        self.assertIn('id="bulk-solar-profile-btn"', html)
+        self.assertIn('id="solar-profile-card"', html)
+
+    def test_solar_profile_endpoint_returns_overlay_series_for_selected_sessions(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        sessions = [
+            {
+                "device_id": "bike",
+                "session_id": "2026-05-07_10-00-00",
+                "mode": "supercycle_live",
+                "metrics": {"solar_enabled": True},
+                "solar_enabled": 1,
+                "samples": [
+                    dict(self.sample(0), timestamp="2026-05-07 06:00:00", solar_power_w=50),
+                    dict(self.sample(1), timestamp="2026-05-07 12:30:00", solar_power_w=180),
+                ],
+            },
+            {
+                "device_id": "bike",
+                "session_id": "2026-05-08_10-00-00",
+                "mode": "supercycle_live",
+                "metrics": {"solar_enabled": True},
+                "solar_enabled": 1,
+                "samples": [
+                    dict(self.sample(0), timestamp="2026-05-08 06:00:00", solar_power_w=30),
+                    dict(self.sample(1), timestamp="2026-05-08 12:30:00", solar_power_w=220),
+                ],
+            },
+        ]
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            for payload in sessions:
+                self.monitor_app._insert_telemetry_samples(
+                    conn,
+                    payload["device_id"],
+                    payload["session_id"],
+                    payload["mode"],
+                    payload["samples"],
+                    1,
+                )
+                stored_samples = self.monitor_app._telemetry_samples_for_session(
+                    conn,
+                    payload["device_id"],
+                    payload["session_id"],
+                    payload["mode"],
+                )
+                self.monitor_app._insert_uploaded_session_summary(conn, payload, stored_samples)
+            conn.commit()
+
+        response = self.monitor_app.app.test_client().post(
+            "/api/sessions/solar_profile",
+            json={
+                "sessions": [
+                    {"device_id": "bike", "session_id": "2026-05-07_10-00-00", "mode": "supercycle_live"},
+                    {"device_id": "bike", "session_id": "2026-05-08_10-00-00", "mode": "supercycle_live"},
+                ],
+                "max_points_per_session": 1440,
+            },
+            headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["session_count"], 2)
+        self.assertEqual(payload["raw_sample_count"], 4)
+        self.assertEqual(payload["bucket_minutes"], 1)
+        self.assertEqual(len(payload["profiles"]), 2)
+        self.assertEqual([point["w"] for point in payload["profiles"][0]["points"]], [50, 180])
+        self.assertAlmostEqual(payload["profiles"][0]["points"][0]["hour"], 6.0083, places=4)
 
     def test_photo_video_requires_video_encoder(self):
         if not hasattr(self.monitor_app.app, "test_client"):
