@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sqlite3
@@ -227,6 +228,35 @@ def diagnostics_monitor():
         return _json_status("error", lines), 500
 
 
+def solar_profile_status():
+    from app.solar_range import imported_solar_profile_status
+
+    return jsonify(imported_solar_profile_status())
+
+
+def import_solar_profile():
+    from app.solar_range import save_imported_solar_profile
+
+    try:
+        upload = request.files.get("profile")
+        if upload:
+            raw = upload.read().decode("utf-8")
+            data = json.loads(raw)
+        else:
+            data = request.get_json(silent=True) or {}
+        status = save_imported_solar_profile(data)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 400
+    return jsonify({"status": "ok", "profile": status})
+
+
+def delete_solar_profile():
+    from app.solar_range import delete_imported_solar_profile, imported_solar_profile_status
+
+    deleted = delete_imported_solar_profile()
+    return jsonify({"status": "ok", "deleted": deleted, "profile": imported_solar_profile_status()})
+
+
 def create_blueprint():
     from flask import Blueprint
 
@@ -238,6 +268,9 @@ def create_blueprint():
     bp.add_url_rule("/settings/diagnostics/camera_image", view_func=diagnostics_camera_image)
     bp.add_url_rule("/settings/diagnostics/cycle_analyst", view_func=diagnostics_cycle_analyst)
     bp.add_url_rule("/settings/diagnostics/monitor", methods=["POST"], view_func=diagnostics_monitor)
+    bp.add_url_rule("/settings/solar_profile", view_func=solar_profile_status)
+    bp.add_url_rule("/settings/solar_profile/import", methods=["POST"], view_func=import_solar_profile)
+    bp.add_url_rule("/settings/solar_profile", methods=["DELETE"], view_func=delete_solar_profile)
     return bp
 
 
@@ -249,3 +282,6 @@ def register(app):
     app.add_url_rule("/settings/diagnostics/camera_image", view_func=diagnostics_camera_image)
     app.add_url_rule("/settings/diagnostics/cycle_analyst", view_func=diagnostics_cycle_analyst)
     app.add_url_rule("/settings/diagnostics/monitor", methods=["POST"], view_func=diagnostics_monitor)
+    app.add_url_rule("/settings/solar_profile", view_func=solar_profile_status)
+    app.add_url_rule("/settings/solar_profile/import", methods=["POST"], view_func=import_solar_profile)
+    app.add_url_rule("/settings/solar_profile", methods=["DELETE"], view_func=delete_solar_profile)

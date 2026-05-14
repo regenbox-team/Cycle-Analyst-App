@@ -135,6 +135,14 @@ SETTINGS: tuple[EnvSetting, ...] = (
         detail="Utilisee avec la latitude pour estimer l'angle solaire. Le GPS live prendra le relais quand il fournit une position.",
     ),
     EnvSetting(
+        "APP_SOLAR_PROFILE_FILE",
+        "Imported solar profile",
+        "var/solar_profile.json",
+        "Fichier JSON optionnel de profil solaire importe.",
+        "Solar and battery",
+        detail="Quand ce fichier existe, son profil de production prend le pas sur l'estimation solaire theorique. Supprime le profil depuis Settings pour revenir au calcul automatique.",
+    ),
+    EnvSetting(
         "APP_BATTERY_NOMINAL_VOLTAGE",
         "Battery nominal voltage",
         "48.1",

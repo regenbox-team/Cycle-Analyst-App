@@ -2590,6 +2590,25 @@ th, td {
   margin-bottom: 0.65rem;
 }
 
+.settings-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.55rem 0;
+}
+
+.settings-profile-actions input[type="file"] {
+  max-width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 0.45rem;
+  background: rgba(255, 255, 255, 0.36);
+  color: var(--text-dark);
+  font-family: var(--font-main);
+  font-size: var(--font-small);
+}
+
 .settings-map-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(13rem, 0.8fr);

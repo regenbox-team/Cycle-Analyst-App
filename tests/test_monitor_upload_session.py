@@ -407,6 +407,8 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("max potential", html)
         self.assertIn("solar-profile-panel-wc", html)
         self.assertIn("solar-profile-utc-offset", html)
+        self.assertIn("solar-profile-export", html)
+        self.assertIn("cycle_analyst_solar_profile", html)
         self.assertIn("solar-control-point", html)
         self.assertIn("buildIdealSolarLine", html)
         self.assertIn("estimatedUtcOffsetFromLon", html)

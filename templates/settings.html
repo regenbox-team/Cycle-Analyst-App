@@ -40,6 +40,19 @@
       </div>
     </section>
 
+    <section class="summary-category-card settings-map-card">
+      <h2>Solar production profile</h2>
+      <div class="settings-variable-detail">
+        Import a profile exported from the monitor to override the automatic solar potential curve. Delete it to return to automatic estimation.
+      </div>
+      <div class="settings-profile-actions">
+        <input id="solar-profile-import-file" type="file" accept="application/json,.json">
+        <button class="dashboard-button" type="button" id="solar-profile-import-button">Import profile</button>
+        <button class="dashboard-button" type="button" id="solar-profile-delete-button">Delete imported profile</button>
+      </div>
+      <pre id="solar-profile-status" class="settings-log-box">Loading profile status...</pre>
+    </section>
+
     <section class="settings-diagnostics">
       <div class="summary-category-card settings-diagnostic-card">
         <h2>Current sensor</h2>

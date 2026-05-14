@@ -184,8 +184,114 @@
     });
   }
 
+  function formatSolarProfileStatus(profile) {
+    if (!profile || !profile.enabled) {
+      const path = profile && profile.path ? `\nPath: ${profile.path}` : '';
+      return `No imported profile. Automatic solar estimation is active.${path}`;
+    }
+    const lines = [
+      'Imported solar profile active.',
+      `Name: ${profile.name || 'Imported solar profile'}`,
+      `Points: ${profile.point_count || 0}`,
+      `Peak: ${Math.round(Number(profile.peak_w || 0))} W`,
+    ];
+    if (profile.panel_max_w) lines.push(`Panels: ${Math.round(Number(profile.panel_max_w))} Wc`);
+    if (profile.created_at) lines.push(`Created: ${profile.created_at}`);
+    if (profile.path) lines.push(`Path: ${profile.path}`);
+    return lines.join('\n');
+  }
+
+  async function refreshSolarProfileStatus() {
+    const status = document.getElementById('solar-profile-status');
+    if (!status) return;
+    status.textContent = 'Loading profile status...';
+    status.classList.remove('ok', 'error', 'warning');
+    try {
+      const response = await fetch('/settings/solar_profile', { cache: 'no-store' });
+      const data = await response.json();
+      status.textContent = formatSolarProfileStatus(data);
+      status.classList.add(data.enabled ? 'ok' : 'warning');
+    } catch (error) {
+      status.textContent = `Profile status failed: ${error}`;
+      status.classList.add('error');
+    }
+  }
+
+  function wireSolarProfileImport() {
+    const input = document.getElementById('solar-profile-import-file');
+    const importButton = document.getElementById('solar-profile-import-button');
+    const deleteButton = document.getElementById('solar-profile-delete-button');
+    const status = document.getElementById('solar-profile-status');
+
+    if (importButton && input) {
+      importButton.addEventListener('click', async () => {
+        const file = input.files && input.files[0];
+        if (!file) {
+          if (status) {
+            status.textContent = 'Select a JSON profile file first.';
+            status.classList.remove('ok', 'error');
+            status.classList.add('warning');
+          }
+          return;
+        }
+        const formData = new FormData();
+        formData.append('profile', file);
+        importButton.disabled = true;
+        if (status) {
+          status.textContent = 'Importing profile...';
+          status.classList.remove('ok', 'error', 'warning');
+        }
+        try {
+          const response = await fetch('/settings/solar_profile/import', { method: 'POST', body: formData });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || 'Profile import failed');
+          input.value = '';
+          if (status) {
+            status.textContent = formatSolarProfileStatus(data.profile);
+            status.classList.add('ok');
+          }
+        } catch (error) {
+          if (status) {
+            status.textContent = `Profile import failed: ${error.message || error}`;
+            status.classList.add('error');
+          }
+        } finally {
+          importButton.disabled = false;
+        }
+      });
+    }
+
+    if (deleteButton) {
+      deleteButton.addEventListener('click', async () => {
+        deleteButton.disabled = true;
+        if (status) {
+          status.textContent = 'Deleting imported profile...';
+          status.classList.remove('ok', 'error', 'warning');
+        }
+        try {
+          const response = await fetch('/settings/solar_profile', { method: 'DELETE', cache: 'no-store' });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || 'Profile deletion failed');
+          if (status) {
+            status.textContent = formatSolarProfileStatus(data.profile);
+            status.classList.add('warning');
+          }
+        } catch (error) {
+          if (status) {
+            status.textContent = `Profile deletion failed: ${error.message || error}`;
+            status.classList.add('error');
+          }
+        } finally {
+          deleteButton.disabled = false;
+        }
+      });
+    }
+  }
+
   window.addEventListener('DOMContentLoaded', () => {
     wireSolarMap();
     wireDiagnostics();
+    wireSolarProfileImport();
+    refreshSolarProfileStatus();
   });
 })();

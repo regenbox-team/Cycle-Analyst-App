@@ -70,6 +70,7 @@ VEHICLE_CONFIGS = {
 SOLAR_PANEL_MAX_W = float(os.getenv("APP_SOLAR_PANEL_MAX_W", "690"))
 SOLAR_LOCATION_LAT = float(os.getenv("APP_SOLAR_LAT", "48.8566"))
 SOLAR_LOCATION_LON = float(os.getenv("APP_SOLAR_LON", "2.3522"))
+SOLAR_PROFILE_FILE = os.getenv("APP_SOLAR_PROFILE_FILE", os.path.join(BASE_DIR, "solar_profile.json"))
 SOLAR_BATTERY_CURVE_FILE = os.getenv("APP_BATTERY_DISCHARGE_CURVE_FILE", "")
 
 # --- DB per mode helpers ---

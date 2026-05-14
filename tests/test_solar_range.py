@@ -19,10 +19,13 @@ class SolarRangeTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._old_state_file = solar_range.SOLAR_BATTERY_STATE_FILE
+        self._old_profile_file = solar_range.SOLAR_PROFILE_FILE
         solar_range.SOLAR_BATTERY_STATE_FILE = f"{self._tmp.name}/solar_battery_state.json"
+        solar_range.SOLAR_PROFILE_FILE = f"{self._tmp.name}/solar_profile.json"
 
     def tearDown(self):
         solar_range.SOLAR_BATTERY_STATE_FILE = self._old_state_file
+        solar_range.SOLAR_PROFILE_FILE = self._old_profile_file
         self._tmp.cleanup()
 
     def test_voltage_curve_interpolates_soc(self):
@@ -92,6 +95,34 @@ class SolarRangeTest(unittest.TestCase):
         self.assertEqual(profile["points"][-1]["hour"], 24)
         self.assertAlmostEqual(profile["now_hour"], 12.5)
         self.assertGreater(max(point["power_w"] for point in profile["points"]), 0)
+
+    def test_imported_solar_profile_overrides_theoretical_curve_until_deleted(self):
+        status = solar_range.save_imported_solar_profile({
+            "name": "Test imported profile",
+            "panel_max_w": 570,
+            "points": [
+                {"hour": 0, "power_w": 0},
+                {"hour": 12, "power_w": 480},
+                {"hour": 24, "power_w": 0},
+            ],
+        })
+        self.assertTrue(status["enabled"])
+        self.assertEqual(status["point_count"], 3)
+
+        morning = datetime(2026, 6, 21, 6, 0, tzinfo=ZoneInfo("Europe/Paris"))
+        noon = datetime(2026, 6, 21, 12, 0, tzinfo=ZoneInfo("Europe/Paris"))
+        self.assertAlmostEqual(theoretical_solar_power_w(morning, latitude=0, longitude=0, panel_max_w=10), 240.0)
+        self.assertAlmostEqual(theoretical_solar_power_w(noon, latitude=0, longitude=0, panel_max_w=10), 480.0)
+
+        profile = solar_power_profile_today(noon, step_minutes=360)
+        self.assertTrue(profile["imported_profile"])
+        self.assertEqual(profile["panel_max_w"], 570)
+        noon_point = next(point for point in profile["points"] if point["hour"] == 12)
+        self.assertEqual(noon_point["power_w"], 480.0)
+
+        self.assertTrue(solar_range.delete_imported_solar_profile())
+        self.assertFalse(solar_range.imported_solar_profile_status()["enabled"])
+        self.assertNotEqual(theoretical_solar_power_w(noon, latitude=0, longitude=0, panel_max_w=10), 480.0)
 
 
 if __name__ == "__main__":

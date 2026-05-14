@@ -695,6 +695,7 @@
               <output id="solar-profile-utc-offset-value">UTC+0</output>
             </label>
             <button id="solar-profile-reset-manual" class="action-link" type="button">Reset manual points</button>
+            <button id="solar-profile-export" class="action-link primary" type="button" disabled>Export profile</button>
           </div>
           <svg id="solar-profile-chart" viewBox="0 0 1200 320" role="img" aria-label="Solar watts over 24 hours"></svg>
           <div id="solar-profile-legend" class="solar-profile-legend"></div>
@@ -834,7 +835,9 @@
       const solarUtcOffsetInput = document.getElementById("solar-profile-utc-offset");
       const solarUtcOffsetValue = document.getElementById("solar-profile-utc-offset-value");
       const solarResetManualBtn = document.getElementById("solar-profile-reset-manual");
+      const solarExportProfileBtn = document.getElementById("solar-profile-export");
       let solarProfileData = null;
+      let solarProfileExportPayload = null;
       const solarProfileExcludedKeys = new Set();
       const solarManualPointWatts = new Map();
       let solarUtcOffsetTouched = false;
@@ -1290,6 +1293,26 @@
         return `UTC${sign}${Math.abs(value).toFixed(Math.abs(value) % 1 ? 1 : 0)}`;
       };
 
+      const localDateString = (date) => {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      };
+
+      const downloadJson = (payload, filename) => {
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      };
+
       const estimatedUtcOffsetFromLon = (lon) => {
         const value = Number(lon);
         if (!Number.isFinite(value)) return 0;
@@ -1466,6 +1489,8 @@
         const plotWidth = width - margin.left - margin.right;
         const plotHeight = height - margin.top - margin.bottom;
         if (!profiles.length) {
+          solarProfileExportPayload = null;
+          if (solarExportProfileBtn) solarExportProfileBtn.disabled = true;
           solarProfileChart.innerHTML = `<rect x="0" y="0" width="${width}" height="${height}" rx="12" class="chart-bg"></rect>` +
             `<text x="24" y="34" fill="#6f665b" font-size="12">No solar watt data found for the selected sessions.</text>`;
           if (solarProfileLegend) solarProfileLegend.innerHTML = "";
@@ -1519,6 +1544,38 @@
         const controlPoints = potentialPoints.map((point) => (
           `<circle class="solar-control-point${point.manual ? " active" : ""}" data-minute="${point.minute}" cx="${xForHour(point.hour).toFixed(1)}" cy="${yForWatts(point.w).toFixed(1)}" r="${point.manual ? 4.8 : 3.7}"></circle>`
         )).join("");
+        solarProfileExportPayload = potentialPoints.length ? {
+          type: "cycle_analyst_solar_profile",
+          version: 1,
+          name: `Monitor solar profile ${localDateString(new Date()) || ""}`.trim(),
+          created_at: new Date().toISOString(),
+          source: "cycle_monitor",
+          panel_max_w: Math.round(panelMaxW),
+          smoothing_percent: Math.round(smoothingPercent),
+          bucket_minutes: bucketMinutes,
+          session_count: enabledProfiles.length,
+          raw_sample_count: Number(profileData?.raw_sample_count || 0),
+          reference: {
+            lat: Number(idealLine.reference.lat.toFixed(6)),
+            lon: Number(idealLine.reference.lon.toFixed(6)),
+            utc_offset_hours: Number(idealLine.reference.utcOffsetHours || 0),
+            date: localDateString(idealLine.reference.date),
+            day_of_year: idealLine.reference.dayOfYear,
+          },
+          sessions: enabledProfiles.map((profile) => ({
+            device_id: profile.device_id || "",
+            session_id: profile.session_id || "",
+            mode: profile.mode || "",
+            date: profile.date || profile.day_label || "",
+          })),
+          points: potentialPoints.map((point) => ({
+            hour: Number(point.hour.toFixed(4)),
+            time: formatHourTick(point.hour),
+            power_w: Number(Math.max(0, point.w || 0).toFixed(3)),
+            manual: Boolean(point.manual),
+          })),
+        } : null;
+        if (solarExportProfileBtn) solarExportProfileBtn.disabled = !solarProfileExportPayload;
         const axes = [
           `<line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}" class="chart-axis"></line>`,
           `<line x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${width - margin.right}" y2="${margin.top + plotHeight}" class="chart-axis"></line>`,
@@ -1607,9 +1664,6 @@
         }
         if (solarProfileStatus) {
           const rawCount = Number(profileData?.raw_sample_count || 0);
-        }
-        if (solarProfileStatus) {
-          const rawCount = Number(profileData?.raw_sample_count || 0);
           solarProfileStatus.textContent = `${enabledProfiles.length}/${profiles.length} sessions used - ${rawCount} samples - ${bucketMinutes} min buckets - ref ${idealLine.reference.lat.toFixed(3)}, ${idealLine.reference.lon.toFixed(3)} ${formatUtcOffset(idealLine.reference.utcOffsetHours)}`;
         }
       };
@@ -1623,6 +1677,11 @@
       solarResetManualBtn?.addEventListener("click", () => {
         solarManualPointWatts.clear();
         if (solarProfileData) renderSolarProfileChart(solarProfileData);
+      });
+      solarExportProfileBtn?.addEventListener("click", () => {
+        if (!solarProfileExportPayload) return;
+        const date = localDateString(new Date()) || "profile";
+        downloadJson(solarProfileExportPayload, `solar_profile_${date}.json`);
       });
 
       const renderChart = (rangeKey) => {

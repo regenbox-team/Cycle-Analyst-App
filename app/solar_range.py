@@ -12,6 +12,7 @@ from .config import (
     SOLAR_LOCATION_LAT,
     SOLAR_LOCATION_LON,
     SOLAR_PANEL_MAX_W,
+    SOLAR_PROFILE_FILE,
     VEHICLE_CONFIGS,
 )
 
@@ -144,6 +145,126 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
+def _solar_profile_path() -> str:
+    return os.path.expanduser(SOLAR_PROFILE_FILE)
+
+
+def _normalize_profile_point(point) -> dict | None:
+    if not isinstance(point, dict):
+        return None
+    hour = point.get("hour")
+    power = point.get("power_w", point.get("w"))
+    try:
+        hour = float(hour)
+        power = max(0.0, float(power))
+    except Exception:
+        return None
+    if not math.isfinite(hour) or not math.isfinite(power):
+        return None
+    if hour < 0 or hour > 24:
+        return None
+    total_minutes = max(0, min(1440, int(round(hour * 60))))
+    time_label = "24:00" if total_minutes >= 1440 else f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+    return {
+        "hour": round(hour, 4),
+        "time": time_label,
+        "power_w": round(power, 3),
+    }
+
+
+def load_imported_solar_profile() -> dict | None:
+    path = _solar_profile_path()
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    points = [_normalize_profile_point(point) for point in raw.get("points", []) if isinstance(point, dict)]
+    points = sorted((point for point in points if point is not None), key=lambda point: point["hour"])
+    if len(points) < 2:
+        return None
+    return {
+        "type": raw.get("type") or "cycle_analyst_solar_profile",
+        "version": int(raw.get("version") or 1),
+        "name": raw.get("name") or "Imported solar profile",
+        "created_at": raw.get("created_at"),
+        "source": raw.get("source") or "settings_import",
+        "panel_max_w": raw.get("panel_max_w"),
+        "reference": raw.get("reference") if isinstance(raw.get("reference"), dict) else {},
+        "points": points,
+    }
+
+
+def imported_solar_profile_status() -> dict:
+    profile = load_imported_solar_profile()
+    path = _solar_profile_path()
+    if not profile:
+        return {"enabled": False, "path": path}
+    peak = max(point["power_w"] for point in profile["points"])
+    return {
+        "enabled": True,
+        "path": path,
+        "name": profile["name"],
+        "created_at": profile.get("created_at"),
+        "point_count": len(profile["points"]),
+        "peak_w": peak,
+        "panel_max_w": profile.get("panel_max_w"),
+    }
+
+
+def save_imported_solar_profile(profile: dict) -> dict:
+    if not isinstance(profile, dict):
+        raise ValueError("profile must be a JSON object")
+    points = [_normalize_profile_point(point) for point in profile.get("points", []) if isinstance(point, dict)]
+    points = sorted((point for point in points if point is not None), key=lambda point: point["hour"])
+    if len(points) < 2:
+        raise ValueError("profile must contain at least two valid points")
+    payload = {
+        "type": profile.get("type") or "cycle_analyst_solar_profile",
+        "version": int(profile.get("version") or 1),
+        "name": profile.get("name") or "Imported solar profile",
+        "created_at": profile.get("created_at") or _now_paris().isoformat(),
+        "source": profile.get("source") or "settings_import",
+        "panel_max_w": profile.get("panel_max_w"),
+        "reference": profile.get("reference") if isinstance(profile.get("reference"), dict) else {},
+        "points": points,
+    }
+    path = _solar_profile_path()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=True)
+    return imported_solar_profile_status()
+
+
+def delete_imported_solar_profile() -> bool:
+    path = _solar_profile_path()
+    if not path or not os.path.exists(path):
+        return False
+    os.remove(path)
+    return True
+
+
+def _imported_solar_power_at_hour(profile: dict, hour: float) -> float:
+    points = profile.get("points") or []
+    if not points:
+        return 0.0
+    hour = _clamp(float(hour), 0.0, 24.0)
+    if hour <= points[0]["hour"]:
+        return float(points[0]["power_w"])
+    if hour >= points[-1]["hour"]:
+        return float(points[-1]["power_w"])
+    for previous, next_point in zip(points, points[1:]):
+        if hour <= next_point["hour"]:
+            span = max(1e-9, float(next_point["hour"]) - float(previous["hour"]))
+            ratio = (hour - float(previous["hour"])) / span
+            return float(previous["power_w"]) + (float(next_point["power_w"]) - float(previous["power_w"])) * ratio
+    return 0.0
+
+
 def initialize_solar_session(
     session_metrics: dict,
     voltage: float | int | None,
@@ -222,6 +343,10 @@ def theoretical_solar_power_w(
     when = when or _now_paris()
     if when.tzinfo is None:
         when = when.replace(tzinfo=ZoneInfo("Europe/Paris"))
+    imported_profile = load_imported_solar_profile()
+    if imported_profile:
+        hour = when.hour + when.minute / 60.0 + when.second / 3600.0
+        return _imported_solar_power_at_hour(imported_profile, hour)
     latitude = SOLAR_LOCATION_LAT if latitude is None else latitude
     longitude = SOLAR_LOCATION_LON if longitude is None else longitude
     panel_max_w = SOLAR_PANEL_MAX_W if panel_max_w is None else panel_max_w
@@ -274,6 +399,27 @@ def solar_power_profile_today(
     when = when or _now_paris()
     if when.tzinfo is None:
         when = when.replace(tzinfo=ZoneInfo("Europe/Paris"))
+    imported_profile = load_imported_solar_profile()
+    if imported_profile:
+        step_minutes = max(15, min(120, int(step_minutes)))
+        day_start = when.replace(hour=0, minute=0, second=0, microsecond=0)
+        points = []
+        for minute in range(0, 1441, step_minutes):
+            hour = minute / 60.0
+            points.append({
+                "hour": round(hour, 3),
+                "time": "24:00" if hour >= 24.0 else f"{minute // 60:02d}:{minute % 60:02d}",
+                "power_w": round(_imported_solar_power_at_hour(imported_profile, hour), 1),
+            })
+        now_hour = (when - day_start).total_seconds() / 3600.0
+        return {
+            "points": points,
+            "now_hour": round(_clamp(now_hour, 0.0, 24.0), 3),
+            "date": day_start.date().isoformat(),
+            "panel_max_w": imported_profile.get("panel_max_w"),
+            "imported_profile": True,
+            "name": imported_profile.get("name"),
+        }
     latitude = SOLAR_LOCATION_LAT if latitude is None else latitude
     longitude = SOLAR_LOCATION_LON if longitude is None else longitude
     panel_max_w = SOLAR_PANEL_MAX_W if panel_max_w is None else panel_max_w
