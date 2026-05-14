@@ -402,6 +402,9 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn('id="bulk-video-btn"', html)
         self.assertIn('id="bulk-solar-profile-btn"', html)
         self.assertIn('id="solar-profile-card"', html)
+        self.assertIn("solarProfileExcludedKeys", html)
+        self.assertIn("buildSolarPotentialLine", html)
+        self.assertIn("max potential", html)
 
     def test_solar_profile_endpoint_returns_overlay_series_for_selected_sessions(self):
         if not hasattr(self.monitor_app.app, "test_client"):

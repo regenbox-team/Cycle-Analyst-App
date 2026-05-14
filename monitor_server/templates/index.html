@@ -320,6 +320,14 @@
         stroke-linecap: round;
         stroke-linejoin: round;
       }
+      .solar-profile-line.dimmed {
+        opacity: 0.28;
+      }
+      .solar-profile-line.potential {
+        stroke: #111827;
+        stroke-width: 3.6;
+        opacity: 0.95;
+      }
       .solar-profile-legend {
         display: flex;
         flex-wrap: wrap;
@@ -327,10 +335,28 @@
         font-size: 12px;
         color: var(--muted);
       }
-      .legend-item {
+      .legend-item,
+      .legend-toggle {
         display: inline-flex;
         align-items: center;
         gap: 6px;
+      }
+      .legend-toggle {
+        border: 0;
+        padding: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .legend-toggle input {
+        width: 14px;
+        height: 14px;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+      .legend-toggle.disabled {
+        opacity: 0.52;
       }
       .legend-swatch {
         width: 18px;
@@ -734,6 +760,7 @@
       const solarProfileLegend = document.getElementById("solar-profile-legend");
       const solarProfileStatus = document.getElementById("solar-profile-status");
       let solarProfileData = null;
+      const solarProfileExcludedKeys = new Set();
       const formatBytes = (bytes) => {
         const value = Number(bytes || 0);
         if (!Number.isFinite(value) || value <= 0) return "0 B";
@@ -1054,6 +1081,7 @@
               throw new Error(result.error || "Solar profile extraction failed");
             }
             solarProfileData = result;
+            solarProfileExcludedKeys.clear();
             renderSolarProfileChart(result);
             solarProfileCard?.scrollIntoView({ behavior: "smooth", block: "start" });
           } catch (error) {
@@ -1160,10 +1188,76 @@
         return `${String(safeHour).padStart(2, "0")}:00`;
       };
 
+      const solarProfileKey = (profile) => `${profile.device_id || ""}\u0000${profile.session_id || ""}\u0000${profile.mode || "default"}`;
+
+      const profilePoints = (profile) => (profile.points || [])
+        .map((point) => ({ hour: Number(point.hour), w: Number(point.w) }))
+        .filter((point) => Number.isFinite(point.hour) && Number.isFinite(point.w))
+        .sort((a, b) => a.hour - b.hour);
+
+      const medianValue = (values) => {
+        if (!values.length) return 0;
+        const sorted = values.slice().sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      };
+
+      const buildSolarPotentialLine = (profiles, bucketMinutes) => {
+        const maxByMinute = new Map();
+        profiles.forEach((profile) => {
+          profilePoints(profile).forEach((point) => {
+            const minute = Math.max(0, Math.min(1439, Math.round(point.hour * 60)));
+            const previous = maxByMinute.get(minute);
+            if (!previous || point.w > previous.w) {
+              maxByMinute.set(minute, { minute, w: point.w });
+            }
+          });
+        });
+        const raw = Array.from(maxByMinute.values()).sort((a, b) => a.minute - b.minute);
+        if (!raw.length) return [];
+
+        const neighborWindow = Math.max(8, bucketMinutes * 3);
+        const filtered = raw.map((point, index) => {
+          const neighbors = raw
+            .filter((candidate, candidateIndex) => (
+              candidateIndex !== index &&
+              Math.abs(candidate.minute - point.minute) <= neighborWindow
+            ))
+            .map((candidate) => candidate.w);
+          if (!neighbors.length) return point.w >= 55 ? null : point;
+          const neighborMedian = medianValue(neighbors);
+          const supported = neighbors.some((value) => value >= point.w * 0.72);
+          const isLoneSpike = !supported && point.w >= neighborMedian * 1.45 && point.w - neighborMedian >= 55;
+          return isLoneSpike ? { ...point, w: neighborMedian } : point;
+        }).filter(Boolean);
+        if (!filtered.length) return [];
+
+        const smoothWindow = Math.max(6, bucketMinutes * 4);
+        return filtered.map((point) => {
+          const nearby = filtered.filter((candidate) => Math.abs(candidate.minute - point.minute) <= smoothWindow);
+          const weightedSum = nearby.reduce((sum, candidate) => {
+            const distance = Math.abs(candidate.minute - point.minute);
+            const weight = 1 / (1 + distance / Math.max(1, bucketMinutes));
+            return sum + candidate.w * weight;
+          }, 0);
+          const weightSum = nearby.reduce((sum, candidate) => {
+            const distance = Math.abs(candidate.minute - point.minute);
+            return sum + 1 / (1 + distance / Math.max(1, bucketMinutes));
+          }, 0);
+          return {
+            hour: point.minute / 60,
+            w: Math.max(0, weightedSum / Math.max(1e-6, weightSum)),
+          };
+        });
+      };
+
       const renderSolarProfileChart = (profileData) => {
         if (!solarProfileChart) return;
         const profiles = (profileData?.profiles || [])
           .filter((profile) => Array.isArray(profile.points) && profile.points.length);
+        const enabledProfiles = profiles.filter((profile) => !solarProfileExcludedKeys.has(solarProfileKey(profile)));
+        const bucketMinutes = Math.max(1, Number(profileData?.bucket_minutes || 1));
+        const potentialPoints = buildSolarPotentialLine(enabledProfiles, bucketMinutes);
         const measuredWidth = Math.round(solarProfileChart.getBoundingClientRect().width || 1200);
         const width = Math.max(640, measuredWidth);
         const height = 320;
@@ -1181,7 +1275,8 @@
 
         const maxWatts = niceMax(Math.max(
           1,
-          ...profiles.flatMap((profile) => profile.points.map((point) => Number(point.w || 0)))
+          ...enabledProfiles.flatMap((profile) => profile.points.map((point) => Number(point.w || 0))),
+          ...potentialPoints.map((point) => Number(point.w || 0))
         ));
         const xForHour = (hour) => margin.left + (Math.max(0, Math.min(24, Number(hour || 0))) / 24) * plotWidth;
         const yForWatts = (watts) => margin.top + plotHeight - (Math.max(0, Number(watts || 0)) / maxWatts) * plotHeight;
@@ -1203,43 +1298,72 @@
 
         const paths = profiles.map((profile, index) => {
           const color = colors[index % colors.length];
-          const points = profile.points
-            .map((point) => ({ hour: Number(point.hour), w: Number(point.w) }))
-            .filter((point) => Number.isFinite(point.hour) && Number.isFinite(point.w))
-            .sort((a, b) => a.hour - b.hour);
+          const points = profilePoints(profile);
+          const excluded = solarProfileExcludedKeys.has(solarProfileKey(profile));
           if (!points.length) return "";
           const d = points
             .map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${xForHour(point.hour).toFixed(1)} ${yForWatts(point.w).toFixed(1)}`)
             .join(" ");
-          return `<path d="${d}" class="solar-profile-line" stroke="${color}"></path>`;
+          if (excluded) return "";
+          const dimmed = potentialPoints.length ? " dimmed" : "";
+          return `<path d="${d}" class="solar-profile-line${dimmed}" stroke="${color}"></path>`;
         }).join("");
+        const potentialPath = potentialPoints.length
+          ? `<path d="${potentialPoints.map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${xForHour(point.hour).toFixed(1)} ${yForWatts(point.w).toFixed(1)}`).join(" ")}" class="solar-profile-line potential"></path>`
+          : "";
         const axes = [
           `<line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}" class="chart-axis"></line>`,
           `<line x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${width - margin.right}" y2="${margin.top + plotHeight}" class="chart-axis"></line>`,
           `<text x="${margin.left}" y="13" class="chart-axis-title">W solaires</text>`,
           `<text x="${width - margin.right}" y="${height - 4}" text-anchor="end" class="chart-axis-title">heure</text>`
         ].join("");
-        solarProfileChart.innerHTML = `<rect x="0" y="0" width="${width}" height="${height}" rx="12" class="chart-bg"></rect>` + grid + axes + paths;
+        solarProfileChart.innerHTML = `<rect x="0" y="0" width="${width}" height="${height}" rx="12" class="chart-bg"></rect>` + grid + axes + paths + potentialPath;
 
         if (solarProfileLegend) {
           solarProfileLegend.innerHTML = "";
+          if (potentialPoints.length) {
+            const potentialItem = document.createElement("span");
+            potentialItem.className = "legend-item";
+            const potentialSwatch = document.createElement("span");
+            potentialSwatch.className = "legend-swatch";
+            potentialSwatch.style.background = "#111827";
+            potentialSwatch.style.height = "4px";
+            const potentialLabel = document.createElement("span");
+            potentialLabel.textContent = `max potential (${potentialPoints.length} pts)`;
+            potentialItem.appendChild(potentialSwatch);
+            potentialItem.appendChild(potentialLabel);
+            solarProfileLegend.appendChild(potentialItem);
+          }
           profiles.forEach((profile, index) => {
-            const item = document.createElement("span");
-            item.className = "legend-item";
+            const item = document.createElement("label");
+            const key = solarProfileKey(profile);
+            const excluded = solarProfileExcludedKeys.has(key);
+            item.className = `legend-toggle${excluded ? " disabled" : ""}`;
+            const check = document.createElement("input");
+            check.type = "checkbox";
+            check.checked = !excluded;
+            check.addEventListener("change", () => {
+              if (check.checked) {
+                solarProfileExcludedKeys.delete(key);
+              } else {
+                solarProfileExcludedKeys.add(key);
+              }
+              renderSolarProfileChart(profileData);
+            });
             const swatch = document.createElement("span");
             swatch.className = "legend-swatch";
             swatch.style.background = colors[index % colors.length];
             const label = document.createElement("span");
             label.textContent = `${profile.label || profile.session_id} (${profile.point_count || profile.points.length} pts)`;
+            item.appendChild(check);
             item.appendChild(swatch);
             item.appendChild(label);
             solarProfileLegend.appendChild(item);
           });
         }
         if (solarProfileStatus) {
-          const bucket = Number(profileData?.bucket_minutes || 1);
           const rawCount = Number(profileData?.raw_sample_count || 0);
-          solarProfileStatus.textContent = `${profiles.length} session${profiles.length > 1 ? "s" : ""} · ${rawCount} samples · ${bucket} min buckets`;
+          solarProfileStatus.textContent = `${enabledProfiles.length}/${profiles.length} sessions used · ${rawCount} samples · ${bucketMinutes} min buckets`;
         }
       };
 
