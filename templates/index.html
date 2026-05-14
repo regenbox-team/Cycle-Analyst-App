@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cycle Analyst</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=desktop-dashboard-columns">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=desktop-balanced-charts">
 </head>
 <body>
   <div id="page-scale-root">
@@ -391,7 +391,7 @@
       </div>
     </div>
 
-    <div class="box reset-box">
+    <div class="box reset-box flags-box">
       <div id="flags-container">
         <div id="primary-flag-row">
           <div class="flag-pill" data-flag="0">Neutral</div>
@@ -412,7 +412,7 @@
       </div>
     </div>
 
-    <div class="box reset-box">
+    <div class="box reset-box actions-box">
       <div id="session-id-display">Session ID: <span id="session-id">...</span></div>
       <button class="dashboard-button" onclick="showAhPopup()">+ Add Ah</button>
       <a class="dashboard-button" href="/select_session">View Session Summaries</a>

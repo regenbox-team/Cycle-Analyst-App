@@ -522,6 +522,117 @@
         line-height: 1.42;
       }
 
+      .thanks-card {
+        display: grid;
+        grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
+        gap: clamp(18px, 3vw, 36px);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: clamp(18px, 3.8vw, 46px);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .thanks-intro {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 24px;
+      }
+
+      .thanks-kicker {
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .thanks-card h2,
+      .thanks-card h3 {
+        margin: 0;
+        line-height: 0.98;
+        letter-spacing: 0;
+      }
+
+      .thanks-card h2 {
+        max-width: 560px;
+        font-size: clamp(34px, 5vw, 72px);
+        font-weight: 800;
+      }
+
+      .thanks-card h3 {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .thanks-copy {
+        max-width: 520px;
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: clamp(16px, 1.6vw, 20px);
+        line-height: 1.28;
+      }
+
+      .partner-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(130px, 1fr));
+        gap: 10px;
+      }
+
+      .partner-logo {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 86px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--paper);
+      }
+
+      .partner-logo img {
+        display: block;
+        width: 100%;
+        max-width: 170px;
+        max-height: 58px;
+        object-fit: contain;
+      }
+
+      .thanks-list {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .contributors-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .contributors-list li {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 10px;
+        background: var(--panel-soft);
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 750;
+        line-height: 1.12;
+      }
+
       .empty {
         display: grid;
         place-items: center;
@@ -560,6 +671,12 @@
         }
         .project-info {
           padding: 18px;
+        }
+        .thanks-card {
+          grid-template-columns: 1fr;
+        }
+        .partner-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
       }
 
@@ -638,6 +755,19 @@
         .link-button {
           justify-content: center;
           width: 100%;
+        }
+        .thanks-card {
+          padding: 18px;
+        }
+        .partner-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .partner-logo {
+          min-height: 74px;
+          padding: 12px;
+        }
+        .contributors-list {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
     </style>
@@ -796,6 +926,107 @@
             <p>Vous êtes une entreprise et notre projet fait écho à vos valeurs ? Devenez notre mécène, en échange d’une série de contreparties sur-mesure, bâties en lien direct avec vous, en fonction de votre secteur d’activité, votre taille et vos enjeux. Contactez-nous !</p>
 
             <p>Vous êtes une maison d’édition, une institution, un établissement d’enseignement supérieur ou un média, et vous souhaitez en savoir plus ? Nous serons ravis de vous présenter notre périple ainsi que les créations (photo, vidéo, écrit) qui en découleront !</p>
+          </div>
+        </section>
+
+        <section class="thanks-card" aria-labelledby="thanks-title">
+          <div class="thanks-intro">
+            <div>
+              <p class="thanks-kicker">Merci</p>
+              <h2 id="thanks-title">À celles et ceux qui rendent l’aventure possible.</h2>
+              <p class="thanks-copy">
+                Notre participation au Sun Trip 2026 en Supercycle est possible grâce au soutien de nos contributrices, contributeurs et partenaires. Un grand merci à chacune et chacun d'entre vous pour votre soutien et votre enthousiasme.
+              </p>
+            </div>
+
+            <div>
+              <h3>Nos partenaires</h3>
+              <div class="partner-grid" aria-label="Logos des partenaires">
+                <div class="partner-logo">
+                  <img src="/static/img/monitor/logos/logo-lowtechjournal.png" alt="Low-tech Journal">
+                </div>
+                <div class="partner-logo">
+                  <img src="/static/img/monitor/logos/logo_aazlaser.png" alt="AAZ Laser">
+                </div>
+                <div class="partner-logo">
+                  <img src="/static/img/monitor/logos/logo_atelier21.png" alt="Atelier 21">
+                </div>
+                <div class="partner-logo">
+                  <img src="/static/img/monitor/logos/logo_bib.png" alt="BIB">
+                </div>
+                <div class="partner-logo">
+                  <img src="/static/img/monitor/logos/logo_cycle%20en%20transition.png" alt="Cycle en Transition">
+                </div>
+                <div class="partner-logo">
+                  <img src="/static/img/monitor/logos/logo_energiemobile.png" alt="Energie Mobile">
+                </div>
+                <div class="partner-logo">
+                  <img src="/static/img/monitor/logos/logo_planetsolar.png" alt="PlanetSolar">
+                </div>
+                <div class="partner-logo">
+                  <img src="/static/img/monitor/logos/logo_viragecommun.png" alt="Virage Commun">
+                </div>
+                <div class="partner-logo">
+                  <img src="/static/img/monitor/logos/logo_woma.png" alt="WOMA">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="thanks-list">
+            <h3>Nos contributeurs</h3>
+            <ul class="contributors-list">
+              <li>agota-jeanne-primavera</li>
+              <li>Alice Martins</li>
+              <li>anny-lemasson</li>
+              <li>armellehameau</li>
+              <li>aubert-farida</li>
+              <li>aurelien-bigo</li>
+              <li>aurianerobert</li>
+              <li>benmontreal</li>
+              <li>bertrand-filhol</li>
+              <li>blin-lallie</li>
+              <li>bruno-armand-us</li>
+              <li>buste9</li>
+              <li>Cécile Doutriaux</li>
+              <li>christian-durteste</li>
+              <li>Clément Chabot</li>
+              <li>corblanchard</li>
+              <li>cp-revardel</li>
+              <li>curnier-quentin</li>
+              <li>danieldilg</li>
+              <li>Dieudonné Dard</li>
+              <li>donval-jean-francois</li>
+              <li>durteste-benoit</li>
+              <li>Elixir-de-voyage-à-vélo</li>
+              <li>Erwan JOUD</li>
+              <li>essenlive</li>
+              <li>evahameau-lsv</li>
+              <li>faber17</li>
+              <li>fabriceperrinet</li>
+              <li>id holl</li>
+              <li>jlcazes69</li>
+              <li>joss-salmon-94</li>
+              <li>juliakaren-witzmann</li>
+              <li>Laurence Debruyne</li>
+              <li>leanemr-14-1</li>
+              <li>Liz Stirling</li>
+              <li>Lowreka</li>
+              <li>Marc Laurencon</li>
+              <li>mariricohdez</li>
+              <li>morganfaverjon</li>
+              <li>nadine-gros</li>
+              <li>ncaumette</li>
+              <li>nfornier81</li>
+              <li>nicolastrub</li>
+              <li>olivier</li>
+              <li>Olivier Guyot</li>
+              <li>ptonnelier1</li>
+              <li>rachel-veron</li>
+              <li>rdomjan</li>
+              <li>Thibaut Salloignon</li>
+              <li>vnicoco</li>
+            </ul>
           </div>
         </section>
       </section>

@@ -483,14 +483,30 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 
   .grid-container {
     --dashboard-cols: 3;
+    --dashboard-track-size: calc((min(98vw, 1760px) - (var(--dashboard-cols) - 1) * var(--spacing)) / var(--dashboard-cols));
     grid-template-columns: repeat(var(--dashboard-cols), minmax(0, 1fr));
-    grid-template-rows: none;
-    grid-auto-flow: dense;
-    grid-auto-rows: minmax(4.4rem, auto);
+    grid-template-areas:
+      "battery battery flags"
+      "speed power human"
+      "solar history history"
+      "trip trip efficiency"
+      "map map actions"
+      "map map system"
+      "photo photo photo";
+    grid-template-rows:
+      minmax(3.2rem, calc(var(--dashboard-track-size) * 0.22))
+      var(--dashboard-track-size)
+      var(--dashboard-track-size)
+      minmax(8rem, calc(var(--dashboard-track-size) * 0.6))
+      minmax(9rem, calc(var(--dashboard-track-size) * 0.85))
+      minmax(4.4rem, calc(var(--dashboard-track-size) * 0.32))
+      minmax(5rem, calc(var(--dashboard-track-size) * 0.36));
+    grid-auto-flow: row dense;
+    grid-auto-rows: minmax(4rem, auto);
     align-items: stretch;
     width: min(98vw, 1760px);
-    height: auto;
-    min-height: calc(100vh - 2.4rem);
+    height: calc(100vh - 2.7rem);
+    min-height: 0;
     margin: 0 auto;
     padding: var(--spacing) 0 1rem;
   }
@@ -498,40 +514,77 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   .grid-container > .box {
     min-width: 0;
     min-height: 0;
+    overflow: hidden;
   }
 
-  .map-box,
-  .photo-preview-box {
-    grid-row: span 2;
+  .speed-box,
+  .power-box,
+  .human-box,
+  .solar-box {
+    aspect-ratio: 1 / 1;
   }
+
+  .bar-box { grid-area: battery; }
+  .speed-box { grid-area: speed; }
+  .power-box { grid-area: power; }
+  .human-box { grid-area: human; }
+  .solar-box { grid-area: solar; }
+  .power-history-box { grid-area: history; }
+  .trip-summary-box { grid-area: trip; }
+  .chart-box { grid-area: efficiency; }
+  .map-box { grid-area: map; }
+  .flags-box { grid-area: flags; }
+  .actions-box { grid-area: actions; }
+  .sys-box { grid-area: system; }
+  .photo-preview-box { grid-area: photo; }
 
   .speedometer,
   .power-meter,
   .human-meter,
   .solar-meter {
+    height: 100%;
     max-height: 13.5rem;
+    object-fit: contain;
   }
 
   #live-map {
-    aspect-ratio: 16 / 10;
+    flex: 1 1 auto;
+    min-height: 0;
+    aspect-ratio: auto;
   }
 }
 
 @media (min-width: 1200px) and (min-aspect-ratio: 4 / 3) {
   .grid-container {
-    --dashboard-cols: 4;
-  }
-}
-
-@media (min-width: 1600px) and (min-aspect-ratio: 16 / 9) {
-  .grid-container {
-    --dashboard-cols: 5;
+    --dashboard-cols: 6;
+    grid-template-areas:
+      "battery battery flags actions system system"
+      "solar speed power human map map"
+      "efficiency efficiency trip trip map map"
+      "efficiency efficiency trip trip map map"
+      "history history photo photo map map";
+    grid-template-rows:
+      minmax(4.2rem, calc(var(--dashboard-track-size) * 0.28))
+      var(--dashboard-track-size)
+      minmax(5rem, calc(var(--dashboard-track-size) * 0.35))
+      minmax(7rem, calc(var(--dashboard-track-size) * 0.6))
+      minmax(7rem, 1fr);
   }
 }
 
 @media (min-width: 2200px) and (min-aspect-ratio: 21 / 9) {
   .grid-container {
-    --dashboard-cols: 6;
+    --dashboard-cols: 8;
+    grid-template-areas:
+      "battery battery flags actions system system map map"
+      "solar speed power human history history map map"
+      "trip trip trip efficiency efficiency efficiency map map"
+      "photo photo photo photo photo photo map map";
+    grid-template-rows:
+      minmax(4.2rem, calc(var(--dashboard-track-size) * 0.28))
+      var(--dashboard-track-size)
+      minmax(8rem, calc(var(--dashboard-track-size) * 0.6))
+      minmax(7rem, 1fr);
   }
 }
 
@@ -1032,27 +1085,31 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 }
 
 @media (min-width: 900px) {
-  .speed-box,
-  .power-box,
-  .human-box,
-  .solar-box,
-  .reset-box,
-  .sys-box {
-    grid-column: span 1;
+  .bar-box { grid-area: battery; }
+  .speed-box { grid-area: speed; }
+  .power-box { grid-area: power; }
+  .human-box { grid-area: human; }
+  .solar-box { grid-area: solar; }
+  .power-history-box { grid-area: history; }
+  .trip-summary-box { grid-area: trip; }
+  .chart-box { grid-area: efficiency; }
+  .map-box { grid-area: map; }
+  .flags-box { grid-area: flags; }
+  .actions-box { grid-area: actions; }
+  .sys-box { grid-area: system; }
+  .photo-preview-box { grid-area: photo; }
+  .solar-potential-chart-box:not([hidden]) {
+    grid-area: map;
+    z-index: 3;
   }
 
-  .bar-box,
-  .trip-summary-box,
-  .power-history-box,
-  .chart-box,
-  .map-box,
-  .photo-preview-box,
-  .solar-potential-chart-box {
-    grid-column: span 2;
+  .bar-box {
+    padding-block: 0.25rem;
   }
 
   .bar-content {
     width: 100%;
+    margin-block: 0.2rem;
   }
 
   .bar-track {
@@ -1062,7 +1119,9 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   }
 
   .power-history-canvas-wrap {
-    height: clamp(10rem, 16vw, 15rem);
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
   }
 
   .chart-box {
@@ -1070,12 +1129,32 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   }
 
   .chart-box svg {
-    height: clamp(10rem, 16vw, 15rem);
-    min-height: 10rem;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
   }
 
   .photo-preview-image {
     max-height: clamp(12rem, 22vw, 20rem);
+  }
+
+  .trip-summary-grid {
+    align-content: center;
+    height: 100%;
+  }
+
+  .trip-stat {
+    min-height: 0;
+  }
+
+  .trip-stat-group {
+    gap: 0.18rem;
+    padding: 0.18rem;
+  }
+
+  .trip-stat-nested,
+  .trip-summary-row-range .trip-stat {
+    min-height: 0;
   }
 
   .trip-stat-value,
