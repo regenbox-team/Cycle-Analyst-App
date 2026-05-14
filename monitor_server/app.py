@@ -32,7 +32,6 @@ from app.session_summary import (
     compute_timeline_metrics_by_user,
     format_metric_value,
 )
-from app.config import SOLAR_LOCATION_LAT, SOLAR_LOCATION_LON, SOLAR_PANEL_MAX_W
 
 
 TELEMETRY_TABLE = "telemetry_samples"
@@ -70,6 +69,13 @@ SUNTRIP_ANALYSIS_VEHICLES = (
 DEFAULT_DB_TIMEOUT_SEC = 30.0
 HEARTBEAT_ACTIVE_WINDOW_SEC = 120
 DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def _db_path() -> str:
@@ -1790,9 +1796,9 @@ def _solar_profile_for_sessions(
         "profile_point_count": total_profile_points,
         "bucket_minutes": bucket_minutes,
         "reference": {
-            "default_panel_max_w": float(SOLAR_PANEL_MAX_W),
-            "default_lat": float(SOLAR_LOCATION_LAT),
-            "default_lon": float(SOLAR_LOCATION_LON),
+            "default_panel_max_w": _float_env("APP_SOLAR_PANEL_MAX_W", 690.0),
+            "default_lat": _float_env("APP_SOLAR_LAT", 48.8566),
+            "default_lon": _float_env("APP_SOLAR_LON", 2.3522),
         },
         "profiles": profiles,
     }
