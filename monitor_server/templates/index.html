@@ -689,6 +689,11 @@
               <input id="solar-profile-smoothing" type="range" min="0" max="100" step="5" value="45">
               <output id="solar-profile-smoothing-value">45%</output>
             </label>
+            <label class="solar-profile-control">
+              <span>UTC offset</span>
+              <input id="solar-profile-utc-offset" type="range" min="-2" max="3" step="0.5" value="0">
+              <output id="solar-profile-utc-offset-value">UTC+0</output>
+            </label>
             <button id="solar-profile-reset-manual" class="action-link" type="button">Reset manual points</button>
           </div>
           <svg id="solar-profile-chart" viewBox="0 0 1200 320" role="img" aria-label="Solar watts over 24 hours"></svg>
@@ -826,10 +831,13 @@
       const solarPanelWcValue = document.getElementById("solar-profile-panel-wc-value");
       const solarSmoothingInput = document.getElementById("solar-profile-smoothing");
       const solarSmoothingValue = document.getElementById("solar-profile-smoothing-value");
+      const solarUtcOffsetInput = document.getElementById("solar-profile-utc-offset");
+      const solarUtcOffsetValue = document.getElementById("solar-profile-utc-offset-value");
       const solarResetManualBtn = document.getElementById("solar-profile-reset-manual");
       let solarProfileData = null;
       const solarProfileExcludedKeys = new Set();
       const solarManualPointWatts = new Map();
+      let solarUtcOffsetTouched = false;
       const formatBytes = (bytes) => {
         const value = Number(bytes || 0);
         if (!Number.isFinite(value) || value <= 0) return "0 B";
@@ -1275,6 +1283,20 @@
         return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
       };
 
+      const formatUtcOffset = (offset) => {
+        const value = Number(offset || 0);
+        if (Math.abs(value) < 1e-6) return "UTC+0";
+        const sign = value >= 0 ? "+" : "-";
+        return `UTC${sign}${Math.abs(value).toFixed(Math.abs(value) % 1 ? 1 : 0)}`;
+      };
+
+      const estimatedUtcOffsetFromLon = (lon) => {
+        const value = Number(lon);
+        if (!Number.isFinite(value)) return 0;
+        if (value >= -18 && value <= 3) return 0;
+        return Math.max(-12, Math.min(14, Math.round(value / 15)));
+      };
+
       const interpolateSolarPoints = (points, hour) => {
         if (!points.length) return 0;
         if (hour <= points[0].hour) return points[0].w;
@@ -1398,7 +1420,7 @@
         const day = reference.dayOfYear;
         const b = ((360 / 365) * (day - 81)) * deg;
         const equationMinutes = 9.87 * Math.sin(2 * b) - 7.53 * Math.cos(b) - 1.5 * Math.sin(b);
-        const tzHours = -(reference.date.getTimezoneOffset() || 0) / 60;
+        const tzHours = Number(reference.utcOffsetHours ?? 0);
         const localStandardMeridian = 15 * tzHours;
         const solarTime = hour + (4 * (reference.lon - localStandardMeridian) + equationMinutes) / 60;
         const decl = 23.44 * deg * Math.sin(((360 / 365) * (day - 81)) * deg);
@@ -1410,6 +1432,10 @@
 
       const buildIdealSolarLine = (profiles, reference, panelMaxW) => {
         const avg = averageSolarReference(profiles, reference);
+        if (solarUtcOffsetInput && !solarUtcOffsetTouched) {
+          solarUtcOffsetInput.value = String(estimatedUtcOffsetFromLon(avg.lon));
+        }
+        avg.utcOffsetHours = Number(solarUtcOffsetInput?.value || 0);
         const points = [];
         for (let minute = 0; minute <= 1440; minute += 15) {
           const hour = minute / 60;
@@ -1430,6 +1456,7 @@
         if (solarSmoothingValue) solarSmoothingValue.textContent = `${Math.round(smoothingPercent)}%`;
         const potentialPoints = buildSolarPotentialLine(enabledProfiles, bucketMinutes, smoothingPercent);
         const idealLine = buildIdealSolarLine(enabledProfiles, profileData?.reference, panelMaxW);
+        if (solarUtcOffsetValue) solarUtcOffsetValue.textContent = formatUtcOffset(idealLine.reference.utcOffsetHours);
         const idealPoints = idealLine.points;
         const measuredWidth = Math.round(solarProfileChart.getBoundingClientRect().width || 1200);
         const width = Math.max(640, measuredWidth);
@@ -1583,12 +1610,13 @@
         }
         if (solarProfileStatus) {
           const rawCount = Number(profileData?.raw_sample_count || 0);
-          solarProfileStatus.textContent = `${enabledProfiles.length}/${profiles.length} sessions used - ${rawCount} samples - ${bucketMinutes} min buckets - ref ${idealLine.reference.lat.toFixed(3)}, ${idealLine.reference.lon.toFixed(3)}`;
+          solarProfileStatus.textContent = `${enabledProfiles.length}/${profiles.length} sessions used - ${rawCount} samples - ${bucketMinutes} min buckets - ref ${idealLine.reference.lat.toFixed(3)}, ${idealLine.reference.lon.toFixed(3)} ${formatUtcOffset(idealLine.reference.utcOffsetHours)}`;
         }
       };
 
-      [solarPanelWcInput, solarSmoothingInput].forEach((input) => {
+      [solarPanelWcInput, solarSmoothingInput, solarUtcOffsetInput].forEach((input) => {
         input?.addEventListener("input", () => {
+          if (input === solarUtcOffsetInput) solarUtcOffsetTouched = true;
           if (solarProfileData) renderSolarProfileChart(solarProfileData);
         });
       });

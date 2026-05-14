@@ -406,8 +406,10 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("buildSolarPotentialLine", html)
         self.assertIn("max potential", html)
         self.assertIn("solar-profile-panel-wc", html)
+        self.assertIn("solar-profile-utc-offset", html)
         self.assertIn("solar-control-point", html)
         self.assertIn("buildIdealSolarLine", html)
+        self.assertIn("estimatedUtcOffsetFromLon", html)
 
     def test_solar_profile_endpoint_returns_overlay_series_for_selected_sessions(self):
         if not hasattr(self.monitor_app.app, "test_client"):
