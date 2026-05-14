@@ -32,6 +32,7 @@ from app.session_summary import (
     compute_timeline_metrics_by_user,
     format_metric_value,
 )
+from app.config import SOLAR_LOCATION_LAT, SOLAR_LOCATION_LON, SOLAR_PANEL_MAX_W
 
 
 TELEMETRY_TABLE = "telemetry_samples"
@@ -1697,6 +1698,16 @@ def _solar_profile_for_sessions(
             )
             continue
 
+        gps_row = conn.execute(
+            f"""
+            SELECT AVG(gps_lat) AS avg_lat, AVG(gps_lon) AS avg_lon
+            FROM {TELEMETRY_TABLE}
+            WHERE device_id = ? AND session_id = ? AND mode = ?
+              AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
+              AND gps_lat != 0 AND gps_lon != 0
+            """,
+            key,
+        ).fetchone()
         rows = conn.execute(
             f"""
             SELECT timestamp, solar_power_w, solar_current_a, solar_bus_v, solar_enabled
@@ -1745,6 +1756,9 @@ def _solar_profile_for_sessions(
         total_raw_samples += raw_sample_count
         total_profile_points += len(points)
         label_date = session_row["start_ts"] or session_id
+        start_dt = _parse_upload_ts(session_row["start_ts"]) if session_row["start_ts"] else None
+        avg_lat = _safe_float(gps_row["avg_lat"]) if gps_row else None
+        avg_lon = _safe_float(gps_row["avg_lon"]) if gps_row else None
         profiles.append(
             {
                 "device_id": device_id,
@@ -1757,6 +1771,10 @@ def _solar_profile_for_sessions(
                 "rows_count": session_row["rows_count"],
                 "distance_km": session_row["distance_km"],
                 "day_label": str(label_date)[:10],
+                "date": start_dt.date().isoformat() if start_dt else str(label_date)[:10],
+                "day_of_year": start_dt.timetuple().tm_yday if start_dt else None,
+                "avg_lat": avg_lat,
+                "avg_lon": avg_lon,
                 "raw_sample_count": raw_sample_count,
                 "point_count": len(points),
                 "points": points,
@@ -1771,6 +1789,11 @@ def _solar_profile_for_sessions(
         "raw_sample_count": total_raw_samples,
         "profile_point_count": total_profile_points,
         "bucket_minutes": bucket_minutes,
+        "reference": {
+            "default_panel_max_w": float(SOLAR_PANEL_MAX_W),
+            "default_lat": float(SOLAR_LOCATION_LAT),
+            "default_lon": float(SOLAR_LOCATION_LON),
+        },
         "profiles": profiles,
     }
 

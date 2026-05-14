@@ -405,6 +405,9 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("solarProfileExcludedKeys", html)
         self.assertIn("buildSolarPotentialLine", html)
         self.assertIn("max potential", html)
+        self.assertIn("solar-profile-panel-wc", html)
+        self.assertIn("solar-control-point", html)
+        self.assertIn("buildIdealSolarLine", html)
 
     def test_solar_profile_endpoint_returns_overlay_series_for_selected_sessions(self):
         if not hasattr(self.monitor_app.app, "test_client"):
@@ -471,9 +474,13 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertEqual(payload["session_count"], 2)
         self.assertEqual(payload["raw_sample_count"], 4)
         self.assertEqual(payload["bucket_minutes"], 1)
+        self.assertIn("reference", payload)
+        self.assertGreater(payload["reference"]["default_panel_max_w"], 0)
         self.assertEqual(len(payload["profiles"]), 2)
         self.assertEqual([point["w"] for point in payload["profiles"][0]["points"]], [50, 180])
         self.assertAlmostEqual(payload["profiles"][0]["points"][0]["hour"], 6.0083, places=4)
+        self.assertAlmostEqual(payload["profiles"][0]["avg_lat"], 48.0005, places=4)
+        self.assertEqual(payload["profiles"][0]["date"], "2026-05-07")
 
     def test_photo_video_requires_video_encoder(self):
         if not hasattr(self.monitor_app.app, "test_client"):
