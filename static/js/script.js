@@ -4,6 +4,8 @@ const CENTER_X = 100;
 const CENTER_Y = 100;
 const START_ANGLE = -126;
 const END_ANGLE = 126;
+const AUX_METER_MAX_W = 300;
+const PV_METER_MAX_W = 600;
 
 let isLongRange = false;
 let metricsPaused = false;
@@ -238,14 +240,14 @@ function updateAmpArc(amps) {
   if (el) el.setAttribute("d", d);
 }
 
-function updateAuxMeter(prefix, live, avg, max) {
+function updateAuxMeter(prefix, live, avg, max, meterMax = AUX_METER_MAX_W) {
   const clampedLive = Math.max(0, num(live, 0));
   const clampedAvg = Math.max(0, num(avg, 0));
   const clampedMax = Math.max(0, num(max, 0));
 
-  setArcPath(`${prefix}-arc`, clampedLive, 0, 300);
-  rotateNeedle(`avg-${prefix}-line`, clampedAvg, 0, 300, clampedAvg.toFixed(0), `avg-${prefix}-label`, "blue");
-  rotateNeedle(`max-${prefix}-line`, clampedMax, 0, 300, clampedMax.toFixed(0), `max-${prefix}-label`, "red");
+  setArcPath(`${prefix}-arc`, clampedLive, 0, meterMax);
+  rotateNeedle(`avg-${prefix}-line`, clampedAvg, 0, meterMax, clampedAvg.toFixed(0), `avg-${prefix}-label`, "blue");
+  rotateNeedle(`max-${prefix}-line`, clampedMax, 0, meterMax, clampedMax.toFixed(0), `max-${prefix}-label`, "red");
   document.getElementById(`${prefix}-number`).textContent = clampedLive.toFixed(0);
   document.getElementById(`${prefix}-unit`).textContent = "W";
 }
@@ -1422,8 +1424,8 @@ async function resetSession() {
 ["speed-bg", "power-bg", "solar-bg", "pv-bg"].forEach(setBackgroundArc);
 drawTicks("speed-ticks", 0, 50, 1, 5, 80, 70, 75);
 drawTicks("power-ticks", -2000, 4000, 100, 500, 80, 70, 75);
-drawTicks("solar-ticks", 0, 300, 5, 50, 80, 70, 75);
-drawTicks("pv-ticks", 0, 300, 5, 50, 80, 70, 75);
+drawTicks("solar-ticks", 0, AUX_METER_MAX_W, 5, 50, 80, 70, 75);
+drawTicks("pv-ticks", 0, PV_METER_MAX_W, 10, 100, 80, 70, 75);
 
 /* ====== FETCH + RENDER LOOP ====== */
 async function fetchMetrics() {
@@ -1488,7 +1490,8 @@ async function fetchMetrics() {
       "pv",
       pvLive,
       solarEnabled ? num(json.calculated_CA_values?.solar_power_avg, 0) : 0,
-      solarEnabled ? num(json.calculated_CA_values?.solar_power_max, 0) : 0
+      solarEnabled ? num(json.calculated_CA_values?.solar_power_max, 0) : 0,
+      PV_METER_MAX_W
     );
 
     const pvPercent = powerLive > 0 ? (100 * pvLive / powerLive) : 0;
