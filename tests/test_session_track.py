@@ -37,7 +37,11 @@ class SessionTrackRouteTest(unittest.TestCase):
                     session TEXT,
                     gps_lat REAL,
                     gps_lon REAL,
-                    gps_fix INTEGER
+                    gps_fix INTEGER,
+                    solar_current_a REAL,
+                    solar_bus_v REAL,
+                    solar_power_w REAL,
+                    solar_enabled INTEGER
                 )
                 """
             )
@@ -106,6 +110,34 @@ class SessionTrackRouteTest(unittest.TestCase):
 
         self.assertEqual(payload["sample_count"], 100)
         self.assertEqual(payload["count"], 100)
+
+    def test_solar_session_profile_returns_time_of_day_power(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO logs (
+                    timestamp, session, solar_current_a, solar_bus_v, solar_power_w, solar_enabled
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    ("2026-05-14 09:02:00", "ride-a", 2.0, 50.0, None, 1),
+                    ("2026-05-14 09:04:00", "ride-a", None, None, 140.0, 1),
+                    ("2026-05-14 12:00:00", "ride-a", None, None, 300.0, 1),
+                    ("2026-05-14 12:01:00", "ride-a", None, None, 900.0, 0),
+                    ("2026-05-14 13:00:00", "other", None, None, 500.0, 1),
+                ],
+            )
+
+        core.request = SimpleNamespace(args={"bucket_minutes": "5", "samples": "50"})
+        payload = core.solar_session_profile().get_json()
+
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["bucket_minutes"], 5)
+        self.assertEqual(payload["peak_w"], 150.0)
+        self.assertEqual(payload["points"][0]["time"], "09:00")
+        self.assertEqual(payload["points"][0]["power_w"], 120.0)
+        self.assertEqual(payload["points"][1]["time"], "12:00")
+        self.assertEqual(payload["points"][1]["power_w"], 150.0)
 
 
 if __name__ == "__main__":

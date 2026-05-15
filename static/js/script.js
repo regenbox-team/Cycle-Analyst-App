@@ -9,6 +9,9 @@ let isLongRange = false;
 let metricsPaused = false;
 let solarPotentialChartOpen = false;
 let latestSolarBattery = null;
+let latestSolarSessionProfile = null;
+let solarSessionProfileLoading = false;
+let solarSessionProfileFetchedAt = 0;
 const photoPreviewState = {
   lastImageKey: null
 };
@@ -808,6 +811,24 @@ function solarPowerAtHour(points, hour) {
   return 0;
 }
 
+async function refreshSolarSessionProfile(force = false) {
+  if (!solarPotentialChartOpen || solarSessionProfileLoading) return;
+  const now = Date.now();
+  if (!force && now - solarSessionProfileFetchedAt < 5000) return;
+  solarSessionProfileLoading = true;
+  solarSessionProfileFetchedAt = now;
+  try {
+    const response = await fetch('/solar_session_profile?bucket_minutes=5&samples=360', { cache: 'no-store' });
+    const data = await response.json();
+    latestSolarSessionProfile = response.ok ? data : null;
+  } catch (error) {
+    latestSolarSessionProfile = null;
+  } finally {
+    solarSessionProfileLoading = false;
+    if (solarPotentialChartOpen) renderSolarPotentialChart();
+  }
+}
+
 function renderSolarPotentialChart(solarBattery = latestSolarBattery) {
   const box = document.getElementById("solar-potential-chart-box");
   const chart = document.getElementById("solar-potential-chart");
@@ -816,6 +837,9 @@ function renderSolarPotentialChart(solarBattery = latestSolarBattery) {
   const profile = solarBattery?.solar_power_profile_today;
   const points = Array.isArray(profile?.points) ? profile.points : [];
   const usablePoints = points
+    .map(point => ({ hour: num(point.hour, 0), power: Math.max(0, num(point.power_w, 0)) }))
+    .filter(point => Number.isFinite(point.hour) && point.hour >= 0 && point.hour <= 24);
+  const sessionPoints = (Array.isArray(latestSolarSessionProfile?.points) ? latestSolarSessionProfile.points : [])
     .map(point => ({ hour: num(point.hour, 0), power: Math.max(0, num(point.power_w, 0)) }))
     .filter(point => Number.isFinite(point.hour) && point.hour >= 0 && point.hour <= 24);
 
@@ -838,7 +862,7 @@ function renderSolarPotentialChart(solarBattery = latestSolarBattery) {
   plot.width = width - plot.left - plot.right;
   plot.height = height - plot.top - plot.bottom;
 
-  const peak = Math.max(1, ...usablePoints.map(point => point.power));
+  const peak = Math.max(1, ...usablePoints.map(point => point.power), ...sessionPoints.map(point => point.power));
   const bounds = niceChartBounds(0, peak, 4);
   bounds.min = 0;
   const xFor = hour => plot.left + (clamp(hour, 0, 24) / 24) * plot.width;
@@ -904,6 +928,54 @@ function renderSolarPotentialChart(solarBattery = latestSolarBattery) {
     "stroke-linejoin": "round"
   });
 
+  if (sessionPoints.length >= 2) {
+    const sessionLinePath = sessionPoints
+      .map((point, index) => `${index === 0 ? "M" : "L"} ${xFor(point.hour).toFixed(2)} ${yFor(point.power).toFixed(2)}`)
+      .join(" ");
+    addSvgElement(chart, "path", {
+      d: sessionLinePath,
+      fill: "none",
+      stroke: "#0ea5e9",
+      "stroke-width": 2,
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round"
+    });
+  }
+
+  const legendY = plot.top + 7;
+  addSvgElement(chart, "line", {
+    x1: width - 132,
+    x2: width - 118,
+    y1: legendY,
+    y2: legendY,
+    stroke: "orange",
+    "stroke-width": 2
+  });
+  addSvgElement(chart, "text", {
+    x: width - 114,
+    y: legendY + 3,
+    "font-size": 7.3,
+    "font-weight": "bold",
+    fill: "rgba(0,0,0,0.64)"
+  }, profile?.imported_profile ? "imported" : "ideal");
+  if (sessionPoints.length >= 2) {
+    addSvgElement(chart, "line", {
+      x1: width - 64,
+      x2: width - 50,
+      y1: legendY,
+      y2: legendY,
+      stroke: "#0ea5e9",
+      "stroke-width": 2
+    });
+    addSvgElement(chart, "text", {
+      x: width - 46,
+      y: legendY + 3,
+      "font-size": 7.3,
+      "font-weight": "bold",
+      fill: "rgba(0,0,0,0.64)"
+    }, "session");
+  }
+
   const nowHour = clamp(num(profile?.now_hour, new Date().getHours() + new Date().getMinutes() / 60), 0, 24);
   const nowPower = Math.max(0, solarPowerAtHour(usablePoints, nowHour));
   const nowX = xFor(nowHour);
@@ -929,9 +1001,14 @@ function renderSolarPotentialChart(solarBattery = latestSolarBattery) {
 
   const nowEl = document.getElementById("solar-chart-now-value");
   const peakEl = document.getElementById("solar-chart-peak-value");
+  const sessionPeakEl = document.getElementById("solar-chart-session-peak-value");
   const remainingEl = document.getElementById("solar-chart-remaining-value");
   if (nowEl) nowEl.textContent = num(solarBattery?.potential_power_now_w, nowPower).toFixed(0);
   if (peakEl) peakEl.textContent = peak.toFixed(0);
+  if (sessionPeakEl) {
+    const sessionPeak = sessionPoints.length ? Math.max(...sessionPoints.map(point => point.power)) : 0;
+    sessionPeakEl.textContent = sessionPeak > 0 ? sessionPeak.toFixed(0) : "-";
+  }
   if (remainingEl) remainingEl.textContent = num(solarBattery?.potential_remaining_today_wh, 0).toFixed(0);
 }
 
@@ -949,7 +1026,10 @@ function setSolarPotentialChartOpen(open) {
   box.hidden = !solarPotentialChartOpen;
   row.classList.toggle("is-expanded", solarPotentialChartOpen);
   row.setAttribute("aria-expanded", solarPotentialChartOpen ? "true" : "false");
-  if (solarPotentialChartOpen) renderSolarPotentialChart();
+  if (solarPotentialChartOpen) {
+    renderSolarPotentialChart();
+    refreshSolarSessionProfile(true);
+  }
 }
 
 function updateWhPerKmChart(totalValues, netValues = [], liveTotal = 0, liveNet = 0, range = 10) {
@@ -1503,6 +1583,7 @@ async function fetchMetrics() {
       if (!showSolarPotential && solarPotentialChartOpen) {
         setSolarPotentialChartOpen(false);
       } else if (showSolarPotential && solarPotentialChartOpen) {
+        refreshSolarSessionProfile(false);
         renderSolarPotentialChart(solarBattery);
       }
     }

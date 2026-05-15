@@ -20,6 +20,8 @@ POWER_HISTORY_DEFAULT_SAMPLES = 180
 POWER_HISTORY_MAX_SAMPLES = 180
 SESSION_TRACK_DEFAULT_SAMPLES = 5000
 SESSION_TRACK_MAX_SAMPLES = 10000
+SOLAR_SESSION_PROFILE_DEFAULT_SAMPLES = 360
+SOLAR_SESSION_PROFILE_MAX_SAMPLES = 720
 
 
 def _raw_distance_km(raw: str | None) -> float | None:
@@ -32,6 +34,26 @@ def _raw_distance_km(raw: str | None) -> float | None:
         return float(parts[4])
     except Exception:
         return None
+
+
+def _timestamp_hour(timestamp: str | None) -> float | None:
+    if not timestamp:
+        return None
+    text = str(timestamp).strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                dt = datetime.strptime(text[:19], fmt)
+                break
+            except ValueError:
+                dt = None
+        if dt is None:
+            return None
+    return dt.hour + dt.minute / 60.0 + dt.second / 3600.0
 
 
 def _session_metrics_distance(session_id: str | None) -> float | None:
@@ -355,6 +377,89 @@ def session_track():
     })
 
 
+def solar_session_profile():
+    if not state.session_id:
+        return jsonify({"points": [], "count": 0, "sample_count": 0})
+
+    bucket_minutes = _bounded_int_arg("bucket_minutes", 5, 1, 30)
+    sample_count = _bounded_int_arg(
+        "samples",
+        SOLAR_SESSION_PROFILE_DEFAULT_SAMPLES,
+        24,
+        SOLAR_SESSION_PROFILE_MAX_SAMPLES,
+    )
+
+    try:
+        with sqlite3.connect(get_db_file(request.args.get('mode'))) as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(logs)").fetchall()}
+            if "solar_power_w" not in cols and ("solar_current_a" not in cols or "solar_bus_v" not in cols):
+                return jsonify({"points": [], "count": 0, "sample_count": sample_count})
+            solar_power_col = "solar_power_w" if "solar_power_w" in cols else "NULL AS solar_power_w"
+            solar_current_col = "solar_current_a" if "solar_current_a" in cols else "NULL AS solar_current_a"
+            solar_bus_col = "solar_bus_v" if "solar_bus_v" in cols else "NULL AS solar_bus_v"
+            solar_enabled_col = "solar_enabled" if "solar_enabled" in cols else "1 AS solar_enabled"
+            rows = conn.execute(
+                f"""
+                SELECT timestamp, {solar_power_col}, {solar_current_col}, {solar_bus_col}, {solar_enabled_col}
+                FROM logs
+                WHERE session = ? AND timestamp IS NOT NULL
+                ORDER BY id ASC
+                """,
+                (state.session_id,),
+            ).fetchall()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    buckets = {}
+    for timestamp, solar_power_w, solar_current_a, solar_bus_v, solar_enabled in rows:
+        hour = _timestamp_hour(timestamp)
+        if hour is None:
+            continue
+        try:
+            enabled = bool(int(solar_enabled)) if solar_enabled is not None else True
+        except (TypeError, ValueError):
+            enabled = True
+        power = None
+        try:
+            if solar_power_w is not None:
+                power = float(solar_power_w)
+        except (TypeError, ValueError):
+            power = None
+        if power is None:
+            try:
+                power = float(solar_current_a or 0.0) * float(solar_bus_v or 0.0)
+            except (TypeError, ValueError):
+                power = 0.0
+        power = max(0.0, power) if enabled else 0.0
+        minute = max(0, min(1439, int(hour * 60)))
+        bucket = (minute // bucket_minutes) * bucket_minutes
+        item = buckets.setdefault(bucket, {"sum": 0.0, "count": 0, "last_timestamp": timestamp})
+        item["sum"] += power
+        item["count"] += 1
+        item["last_timestamp"] = timestamp
+
+    raw_points = [
+        {
+            "hour": round(minute / 60.0, 3),
+            "time": f"{minute // 60:02d}:{minute % 60:02d}",
+            "power_w": round(item["sum"] / max(1, item["count"]), 1),
+            "sample_count": item["count"],
+            "timestamp": item["last_timestamp"],
+        }
+        for minute, item in sorted(buckets.items())
+    ]
+    points = _sample_evenly(raw_points, sample_count)
+    powers = [point["power_w"] for point in raw_points]
+    return jsonify({
+        "points": points,
+        "count": len(raw_points),
+        "sample_count": sample_count,
+        "bucket_minutes": bucket_minutes,
+        "peak_w": round(max(powers), 1) if powers else 0.0,
+        "avg_w": round(sum(powers) / len(powers), 1) if powers else 0.0,
+    })
+
+
 def _smooth_power_points(points, window: int = 5):
     if not points:
         return []
@@ -478,6 +583,7 @@ def create_blueprint():
     bp.add_url_rule("/metrics", view_func=metrics)
     bp.add_url_rule("/power_history", view_func=power_history)
     bp.add_url_rule("/session_track", view_func=session_track)
+    bp.add_url_rule("/solar_session_profile", view_func=solar_session_profile)
     bp.add_url_rule("/logs", view_func=logs)
     bp.add_url_rule("/sessions", view_func=list_sessions)
     bp.add_url_rule("/", view_func=root)
@@ -490,6 +596,7 @@ def register(app):
     app.add_url_rule("/metrics", view_func=metrics)
     app.add_url_rule("/power_history", view_func=power_history)
     app.add_url_rule("/session_track", view_func=session_track)
+    app.add_url_rule("/solar_session_profile", view_func=solar_session_profile)
     app.add_url_rule("/logs", view_func=logs)
     app.add_url_rule("/sessions", view_func=list_sessions)
     app.add_url_rule("/", view_func=root)

@@ -944,7 +944,7 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 
 .solar-potential-chart-stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.3rem;
   margin: 0.2rem 0 0.3rem;
 }
