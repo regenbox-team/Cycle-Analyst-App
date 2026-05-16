@@ -29,6 +29,35 @@ function formatDistance(value) {
   return `${formatNumber(n, n >= 10 ? 1 : 2)} km`;
 }
 
+function formatSize(sizeKb) {
+  const n = Number(sizeKb);
+  if (!Number.isFinite(n) || n <= 0) return "--";
+  if (n >= 1024) return `${formatNumber(n / 1024, 1)} Mo`;
+  if (n < 1) return "< 1 Ko";
+  return `${formatNumber(n, n >= 10 ? 0 : 1)} Ko`;
+}
+
+function parseSessionDate(sessionId) {
+  const match = String(sessionId || "").match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second] = match;
+  return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
+}
+
+function formatSessionDate(session) {
+  const value = session.start_ts || session.session;
+  let date = value ? new Date(String(value).replace(" ", "T")) : null;
+  if (!date || Number.isNaN(date.getTime())) date = parseSessionDate(session.session);
+  if (!date || Number.isNaN(date.getTime())) return value || "--";
+  return date.toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -40,14 +69,13 @@ function escapeHtml(value) {
 
 function describeResult(result) {
   const session = result.session || result.session_id || "session";
-  const rows = result.rows_count != null ? `, ${result.rows_count} rows` : "";
-  const size = result.size_kb != null ? `, ${result.size_kb} KB` : "";
-  if (result.status === "ok") return `${session}: uploaded${rows}${size}`;
-  if (result.status === "already_uploaded") return `${session}: already uploaded`;
-  if (result.status === "missing_config") return `${session}: MONITOR_URL is not configured`;
-  if (result.status === "active_session") return `${session}: end the session before upload`;
-  if (result.status === "not_found") return `${session}: no local rows found`;
-  return `${session}: ${result.error || result.status || "upload failed"}`;
+  const size = result.size_kb != null ? `, ${formatSize(result.size_kb)}` : "";
+  if (result.status === "ok") return `${session}: envoye${size}`;
+  if (result.status === "already_uploaded") return `${session}: deja envoye`;
+  if (result.status === "missing_config") return `${session}: MONITOR_URL n'est pas configure`;
+  if (result.status === "active_session") return `${session}: termine la session avant l'envoi`;
+  if (result.status === "not_found") return `${session}: aucune donnee locale trouvee`;
+  return `${session}: ${result.error || result.status || "echec de l'envoi"}`;
 }
 
 function sessionSummaryUrl(session) {
@@ -58,9 +86,9 @@ function sessionSummaryUrl(session) {
 }
 
 function monitorBadge(uploaded) {
-  if (uploaded === true) return '<span class="session-badge uploaded">Uploaded</span>';
-  if (uploaded === false) return '<span class="session-badge pending">Local only</span>';
-  return '<span class="session-badge unknown">Unknown</span>';
+  if (uploaded === true) return '<span class="session-badge uploaded">Envoyee</span>';
+  if (uploaded === false) return '<span class="session-badge pending">Locale</span>';
+  return '<span class="session-badge unknown">?</span>';
 }
 
 function rowClass(session) {
@@ -74,33 +102,42 @@ function renderSessions(sessions) {
   if (!tbody) return;
   tbody.innerHTML = "";
   if (!sessions.length) {
-    tbody.innerHTML = '<tr><td colspan="6">No local session found.</td></tr>';
+    tbody.innerHTML = '<div class="session-empty">Aucune session locale.</div>';
     return;
   }
 
   sessions.forEach((session) => {
-    const tr = document.createElement("tr");
-    tr.className = `session-row ${rowClass(session)}`;
+    const tr = document.createElement("article");
+    tr.className = `session-row session-card-row ${rowClass(session)}`;
     tr.dataset.session = session.session || "";
+    tr.setAttribute("role", "listitem");
     const sessionName = escapeHtml(session.session);
-    const startTs = escapeHtml(session.start_ts);
+    const sessionDate = escapeHtml(formatSessionDate(session));
     const summaryUrl = escapeHtml(sessionSummaryUrl(session.session || ""));
     tr.innerHTML = `
-      <td>
+      <div class="session-card-main">
         <div class="session-name">${sessionName}</div>
-        <div class="session-sub">${startTs}</div>
-      </td>
-      <td>${formatDistance(session.distance_km)}</td>
-      <td>${session.rows_count || 0}</td>
-      <td>${formatNumber(session.size_kb, 1)} KB</td>
-      <td>${monitorBadge(session.uploaded)}</td>
-      <td>
-        <div class="session-row-actions">
-          <a class="session-action" href="${summaryUrl}">Summary</a>
-          <button class="session-action primary upload-session-row" type="button">Upload</button>
-          <button class="session-action danger delete-session-row" type="button">Delete</button>
+        <div class="session-sub">${sessionDate}</div>
+      </div>
+      <div class="session-card-stats" aria-label="Details session">
+        <div class="session-stat">
+          <span class="session-stat-label">Distance</span>
+          <strong>${formatDistance(session.distance_km)}</strong>
         </div>
-      </td>
+        <div class="session-stat">
+          <span class="session-stat-label">Poids</span>
+          <strong>${formatSize(session.size_kb)}</strong>
+        </div>
+        <div class="session-stat session-stat-monitor">
+          <span class="session-stat-label">Monitor</span>
+          ${monitorBadge(session.uploaded)}
+        </div>
+      </div>
+      <div class="session-row-actions">
+        <a class="session-action" href="${summaryUrl}">Voir</a>
+        <button class="session-action primary upload-session-row" type="button">Envoyer</button>
+        <button class="session-action danger delete-session-row" type="button">Supprimer</button>
+      </div>
     `;
     tbody.appendChild(tr);
   });
@@ -132,9 +169,9 @@ async function uploadSession(session, button) {
   const originalText = button ? button.textContent : "";
   if (button) {
     button.disabled = true;
-    button.textContent = "Uploading...";
+    button.textContent = "Envoi...";
   }
-  setStatus(`Uploading ${session}...`, "working");
+  setStatus(`Envoi de ${session}...`, "working");
   try {
     const payload = { session };
     const mode = currentMode();
@@ -148,7 +185,7 @@ async function uploadSession(session, button) {
     setStatus(describeResult(result), ["ok", "already_uploaded"].includes(result.status) ? "ok" : "error");
     await refreshSessions();
   } catch (err) {
-    setStatus(err.message || "Upload failed.", "error");
+    setStatus(err.message || "Echec de l'envoi.", "error");
   } finally {
     if (button) {
       button.disabled = false;
@@ -159,25 +196,28 @@ async function uploadSession(session, button) {
 
 async function deleteSession(session, button) {
   if (!session) return;
-  if (!confirm(`Delete session ${session}?`)) return;
+  if (!confirm(`Supprimer la session ${session} ?`)) return;
   const originalText = button ? button.textContent : "";
   if (button) {
     button.disabled = true;
-    button.textContent = "Deleting...";
+    button.textContent = "Suppression...";
   }
+  setStatus(`Suppression de ${session}...`, "working");
   try {
     const mode = currentMode();
-    const response = await fetch("/delete_session", {
+    const params = mode ? `?mode=${encodeURIComponent(mode)}` : "";
+    const response = await fetch(`/delete_session${params}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session, mode }),
     });
     const result = await response.json().catch(() => ({ error: response.statusText }));
     if (!response.ok || result.error) throw new Error(result.error || "Delete failed.");
-    setStatus(result.status || `${session}: deleted`, "ok");
+    button?.closest("[data-session]")?.remove();
+    setStatus(result.status || `${session}: supprimee`, "ok");
     await refreshSessions();
   } catch (err) {
-    setStatus(err.message || "Delete failed.", "error");
+    setStatus(err.message || "Echec de la suppression.", "error");
   } finally {
     if (button) {
       button.disabled = false;

@@ -112,14 +112,14 @@ def end_session():
 
 
 def delete_session():
-    data = request.json
-    session_to_delete = data.get("session")
+    data = request.get_json(silent=True) or request.form.to_dict() or {}
+    session_to_delete = (data.get("session") or request.args.get("session") or "").strip()
     mode = data.get("mode") or request.args.get("mode")
     if not session_to_delete:
         return jsonify({"error": "No session specified"}), 400
 
     with sqlite3.connect(get_db_file(mode)) as conn:
-        conn.execute("DELETE FROM logs WHERE session = ?", (session_to_delete,))
+        deleted_rows = conn.execute("DELETE FROM logs WHERE session = ?", (session_to_delete,)).rowcount
         conn.commit()
 
     import os
@@ -130,7 +130,11 @@ def delete_session():
         except Exception:
             pass
 
-    return jsonify({"status": f"Session {session_to_delete} deleted."})
+    return jsonify({
+        "status": f"Session {session_to_delete} supprimee.",
+        "session": session_to_delete,
+        "deleted_rows": deleted_rows,
+    })
 
 
 def select_session():

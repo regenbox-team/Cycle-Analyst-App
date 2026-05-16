@@ -6,42 +6,28 @@
   <title>Select Session</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body>
+<body class="sessions-page">
 
   <div class="section">
-    <h1>Select a Session</h1>
+    <h1>Sessions</h1>
 
-    <div class="card session-table-card">
+    <div class="card session-table-card session-list-card">
       <div class="session-table-head">
         <div>
-          <h2>Sessions</h2>
-          <p>Upload manually to the monitor server when the session looks correct.</p>
+          <h2>Historique local</h2>
+          <p>Date, distance et poids de chaque session enregistree sur le Pi.</p>
         </div>
-        <button id="refresh-sessions-button" type="button">Refresh</button>
+        <button id="refresh-sessions-button" type="button">Actualiser</button>
       </div>
       <div id="session-upload-status" class="session-upload-status" aria-live="polite"></div>
-      <div class="session-table-wrap">
-        <table class="session-table">
-          <thead>
-            <tr>
-              <th>Session</th>
-              <th>Distance</th>
-              <th>Rows</th>
-              <th>Size</th>
-              <th>Monitor</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="sessions-body">
-            <tr>
-              <td colspan="6">Loading sessions...</td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="session-list-wrap">
+        <div id="sessions-body" class="session-list" role="list">
+          <div class="session-empty">Chargement des sessions...</div>
+        </div>
       </div>
     </div>
 
-    <a class="dashboard-button" href="/dashboard">&larr; Back to Dashboard</a>
+    <a class="dashboard-button session-back-button" href="/dashboard">&larr; Retour dashboard</a>
   </div>
   <script src="{{ url_for('static', filename='js/select_session.js') }}"></script>
 
