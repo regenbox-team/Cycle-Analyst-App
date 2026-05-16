@@ -1,5 +1,6 @@
 from __future__ import annotations
 import base64
+import gzip
 import json
 import math
 import os
@@ -69,6 +70,7 @@ SUNTRIP_ANALYSIS_VEHICLES = (
 DEFAULT_DB_TIMEOUT_SEC = 30.0
 HEARTBEAT_ACTIVE_WINDOW_SEC = 120
 DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
+DEFAULT_UPLOAD_CHUNK_MAX_BYTES = 256 * 1024
 
 
 def _float_env(name: str, default: float) -> float:
@@ -102,6 +104,39 @@ def _startup_lock_timeout_sec() -> float:
         )
     except (TypeError, ValueError):
         return DEFAULT_STARTUP_LOCK_TIMEOUT_SEC
+
+
+def _upload_chunk_max_bytes() -> int:
+    try:
+        return max(16 * 1024, int(os.getenv("MONITOR_UPLOAD_CHUNK_MAX_BYTES", str(DEFAULT_UPLOAD_CHUNK_MAX_BYTES))))
+    except (TypeError, ValueError):
+        return DEFAULT_UPLOAD_CHUNK_MAX_BYTES
+
+
+def _read_json_request(max_bytes: int | None = None) -> tuple[dict[str, Any], tuple[Any, int] | None]:
+    encoding = (request.headers.get("Content-Encoding") or "identity").lower()
+    if encoding not in {"identity", "gzip"}:
+        return {}, (jsonify({"error": "unsupported content encoding"}), 415)
+    if encoding == "identity" and max_bytes is not None and request.content_length and request.content_length > max_bytes:
+        return {}, (jsonify({"error": "request body too large", "max_bytes": max_bytes}), 413)
+
+    raw = request.get_data(cache=False) or b""
+    if encoding == "gzip":
+        try:
+            raw = gzip.decompress(raw)
+        except OSError:
+            return {}, (jsonify({"error": "invalid gzip request body"}), 400)
+    if max_bytes is not None and len(raw) > max_bytes:
+        return {}, (jsonify({"error": "request body too large", "max_bytes": max_bytes}), 413)
+    if not raw:
+        return {}, None
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}, (jsonify({"error": "invalid json request body"}), 400)
+    if not isinstance(data, dict):
+        return {}, (jsonify({"error": "invalid json request body"}), 400)
+    return data, None
 
 
 @contextmanager
@@ -2617,7 +2652,9 @@ def create_app() -> Flask:
     @app.route("/api/upload_session", methods=["POST"])
     @_require_auth
     def upload_session():
-        data = request.get_json(force=True) or {}
+        data, json_error = _read_json_request()
+        if json_error:
+            return json_error
         device_id = data.get("device_id")
         session_id = data.get("session_id")
         mode = data.get("mode", "default")
@@ -2646,7 +2683,9 @@ def create_app() -> Flask:
     @app.route("/api/upload_session_chunk", methods=["POST"])
     @_require_auth
     def upload_session_chunk():
-        data = request.get_json(force=True) or {}
+        data, json_error = _read_json_request(max_bytes=_upload_chunk_max_bytes())
+        if json_error:
+            return json_error
         device_id = data.get("device_id")
         session_id = data.get("session_id")
         mode = data.get("mode", "default")

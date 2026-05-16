@@ -1,3 +1,5 @@
+import gzip
+import json
 import os
 import shutil
 import sqlite3
@@ -26,6 +28,7 @@ class MonitorUploadSessionTest(unittest.TestCase):
             "MONITOR_USER",
             "MONITOR_PASS",
             "MONITOR_TERRAIN_ELEVATION_ENABLED",
+            "MONITOR_UPLOAD_CHUNK_MAX_BYTES",
         ):
             os.environ.pop(key, None)
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
@@ -336,6 +339,62 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertEqual(session_count, 1)
         self.assertEqual(sample_count, 2)
         self.assertEqual(tombstone_count, 0)
+
+    def test_chunked_upload_accepts_gzipped_json(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        payload = {
+            "device_id": "bike",
+            "session_id": "2026-05-07_10-00-00",
+            "mode": "supercycle_live",
+            "metrics": {"distance_km": 1.0, "solar_enabled": True},
+            "solar_enabled": 1,
+            "telemetry_samples": [self.sample(0)],
+            "chunk_index": 0,
+            "total_chunks": 1,
+            "final": True,
+        }
+        raw = json.dumps(payload).encode("utf-8")
+        response = self.monitor_app.app.test_client().post(
+            "/api/upload_session_chunk",
+            data=gzip.compress(raw),
+            headers={
+                "Authorization": "Basic YWRtaW46c2VjcmV0",
+                "Content-Type": "application/json",
+                "Content-Encoding": "gzip",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "ok")
+        with sqlite3.connect(self.db_path) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM telemetry_samples").fetchone()[0], 1)
+
+    def test_chunked_upload_rejects_oversized_uncompressed_json(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        os.environ["MONITOR_UPLOAD_CHUNK_MAX_BYTES"] = "16384"
+        payload = {
+            "device_id": "bike",
+            "session_id": "2026-05-07_10-00-00",
+            "mode": "supercycle_live",
+            "telemetry_samples": [dict(self.sample(0), raw="x" * 20000)],
+            "chunk_index": 0,
+            "total_chunks": 1,
+        }
+        response = self.monitor_app.app.test_client().post(
+            "/api/upload_session_chunk",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": "Basic YWRtaW46c2VjcmV0",
+                "Content-Type": "application/json",
+            },
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.get_json()["error"], "request body too large")
 
     def test_compact_db_endpoint_returns_size_stats(self):
         if not hasattr(self.monitor_app.app, "test_client"):

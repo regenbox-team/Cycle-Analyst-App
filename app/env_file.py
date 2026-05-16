@@ -51,6 +51,12 @@ I2C_ADDR_CHOICES = (
 )
 SOLAR_INVERT_CHOICES = (("true", "Invert current sign"), ("false", "Keep current sign"))
 MONITOR_CHUNK_CHOICES = (("250", "250"), ("500", "500"), ("1000", "1000"), ("2000", "2000"))
+MONITOR_CHUNK_BYTES_CHOICES = (
+    ("131072", "128 KB"),
+    ("262144", "256 KB"),
+    ("524288", "512 KB"),
+    ("1048576", "1 MB"),
+)
 
 CAMERA_CHOICES = {
     "program": (("fswebcam", "fswebcam - USB webcam"), ("libcamera-still", "libcamera-still - Pi camera")),
@@ -299,6 +305,24 @@ SETTINGS: tuple[EnvSetting, ...] = (
         "Monitor sync",
         detail="1000 est un bon compromis. Diminue si le reseau est lent ou instable; augmente si les uploads sont trop nombreux.",
         choices=MONITOR_CHUNK_CHOICES,
+    ),
+    EnvSetting(
+        "MONITOR_UPLOAD_CHUNK_MAX_BYTES",
+        "Upload chunk max bytes",
+        "262144",
+        "Taille JSON non compressee maximale d'un paquet de session.",
+        "Monitor sync",
+        detail="Le Pi decoupe aussi par taille reelle, pas seulement par nombre de lignes. 256 KB evite les timeouts sur les reseaux lents.",
+        choices=MONITOR_CHUNK_BYTES_CHOICES,
+    ),
+    EnvSetting(
+        "MONITOR_UPLOAD_GZIP",
+        "Compress session uploads",
+        "1",
+        "Compresse les uploads de sessions avant envoi au monitor_server.",
+        "Monitor sync",
+        detail="Active par defaut. Reduit fortement le temps d'envoi des sessions car le JSON des logs se compresse bien.",
+        choices=(("1", "On"), ("0", "Off")),
     ),
     EnvSetting(
         "MONITOR_AUTO_UPLOAD_SESSIONS",

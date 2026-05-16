@@ -1,5 +1,6 @@
 from __future__ import annotations
 import base64
+import gzip
 import json
 import os
 import socket
@@ -18,6 +19,8 @@ from .user_profiles import load_profiles, profile_snapshot
 
 
 DEFAULT_UPLOAD_CHUNK_SIZE = 1000
+DEFAULT_UPLOAD_CHUNK_MAX_BYTES = 256 * 1024
+DEFAULT_UPLOAD_GZIP_MIN_BYTES = 1024
 
 
 def _device_id() -> str:
@@ -40,16 +43,47 @@ def _auth_header() -> dict[str, str]:
     return {"Authorization": f"Basic {token}"}
 
 
-def _request_json(method: str, url: str, payload: dict[str, Any] | None = None, timeout: int = 5) -> Any:
+def _encode_json_payload(payload: dict[str, Any]) -> bytes:
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
+def _request_json(
+    method: str,
+    url: str,
+    payload: dict[str, Any] | None = None,
+    timeout: int = 5,
+    gzip_payload: bool = False,
+) -> Any:
     headers = {"Content-Type": "application/json"}
     headers.update(_auth_header())
     data = None
     if payload is not None:
-        data = json.dumps(payload).encode("utf-8")
+        data = _encode_json_payload(payload)
+        if gzip_payload and len(data) >= _upload_gzip_min_bytes():
+            compressed = gzip.compress(data)
+            if len(compressed) < len(data):
+                headers["Content-Encoding"] = "gzip"
+                headers["X-Uncompressed-Length"] = str(len(data))
+                data = compressed
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8")
         return json.loads(body) if body else {}
+
+
+def _request_upload_json(
+    method: str,
+    url: str,
+    payload: dict[str, Any],
+    timeout: int,
+    gzip_payload: bool,
+) -> tuple[Any, bool]:
+    try:
+        return _request_json(method, url, payload, timeout=timeout, gzip_payload=gzip_payload), gzip_payload
+    except urllib.error.HTTPError as exc:
+        if gzip_payload and exc.code in {400, 415}:
+            return _request_json(method, url, payload, timeout=timeout, gzip_payload=False), False
+        raise
 
 
 def _upload_chunk_size() -> int:
@@ -57,6 +91,83 @@ def _upload_chunk_size() -> int:
         return max(1, int(os.getenv("MONITOR_UPLOAD_CHUNK_SIZE", str(DEFAULT_UPLOAD_CHUNK_SIZE))))
     except (TypeError, ValueError):
         return DEFAULT_UPLOAD_CHUNK_SIZE
+
+
+def _upload_chunk_max_bytes() -> int:
+    try:
+        return max(16 * 1024, int(os.getenv("MONITOR_UPLOAD_CHUNK_MAX_BYTES", str(DEFAULT_UPLOAD_CHUNK_MAX_BYTES))))
+    except (TypeError, ValueError):
+        return DEFAULT_UPLOAD_CHUNK_MAX_BYTES
+
+
+def _upload_gzip_enabled() -> bool:
+    return os.getenv("MONITOR_UPLOAD_GZIP", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _upload_gzip_min_bytes() -> int:
+    try:
+        return max(0, int(os.getenv("MONITOR_UPLOAD_GZIP_MIN_BYTES", str(DEFAULT_UPLOAD_GZIP_MIN_BYTES))))
+    except (TypeError, ValueError):
+        return DEFAULT_UPLOAD_GZIP_MIN_BYTES
+
+
+def _chunk_payload(
+    payload: dict[str, Any],
+    samples: list[dict[str, Any]],
+    upload_id: str,
+    chunk_index: int,
+    total_chunks: int,
+    total_rows: int,
+) -> dict[str, Any]:
+    chunk = dict(payload)
+    chunk["telemetry_samples"] = samples
+    chunk["upload_id"] = upload_id
+    chunk["chunk_index"] = chunk_index
+    chunk["total_chunks"] = total_chunks
+    chunk["total_rows"] = total_rows
+    chunk["final"] = chunk_index == total_chunks - 1
+    chunk["replace"] = chunk_index == 0
+    return chunk
+
+
+def _chunk_payload_size(
+    payload: dict[str, Any],
+    samples: list[dict[str, Any]],
+    total_rows: int | None = None,
+) -> int:
+    probe = _chunk_payload(payload, samples, "probe", 0, 1, len(samples) if total_rows is None else total_rows)
+    return len(_encode_json_payload(probe))
+
+
+def _split_upload_samples(
+    payload: dict[str, Any],
+    samples: list[dict[str, Any]],
+    chunk_size: int,
+    max_bytes: int,
+) -> list[list[dict[str, Any]]]:
+    chunks: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    base_size = _chunk_payload_size(payload, [], total_rows=len(samples))
+    metadata_slack = min(128, max(0, max_bytes // 20))
+    effective_max_bytes = max(1, max_bytes - metadata_slack)
+    current_size = base_size
+    for sample in samples:
+        sample_size = len(_encode_json_payload(sample))
+        candidate_size = current_size + sample_size + (1 if current else 0)
+        if current and (len(current) >= chunk_size or candidate_size > effective_max_bytes):
+            chunks.append(current)
+            current = []
+            current_size = base_size
+            candidate_size = current_size + sample_size
+        current.append(sample)
+        current_size = candidate_size
+        if len(current) == 1 and current_size > max_bytes:
+            chunks.append(current)
+            current = []
+            current_size = base_size
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _list_db_files() -> list[str]:
@@ -170,13 +281,24 @@ def _known_sessions(url: str, device_id: str, mode: str) -> set[str] | None:
 
 def _upload_session_whole(url: str, payload: dict[str, Any], timeout: int = 60) -> dict[str, Any]:
     try:
-        resp = _request_json("POST", f"{url}/api/upload_session", payload, timeout=timeout)
+        resp, _ = _request_upload_json(
+            "POST",
+            f"{url}/api/upload_session",
+            payload,
+            timeout=timeout,
+            gzip_payload=_upload_gzip_enabled(),
+        )
         return resp if isinstance(resp, dict) else {"status": "error", "error": "invalid monitor response"}
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
 
 
-def _upload_session_chunked(url: str, payload: dict[str, Any], chunk_size: int | None = None) -> dict[str, Any]:
+def _upload_session_chunked(
+    url: str,
+    payload: dict[str, Any],
+    chunk_size: int | None = None,
+    max_bytes: int | None = None,
+) -> dict[str, Any]:
     samples = payload.get("telemetry_samples") or []
     if not isinstance(samples, list):
         return {"status": "error", "error": "invalid telemetry_samples"}
@@ -184,22 +306,29 @@ def _upload_session_chunked(url: str, payload: dict[str, Any], chunk_size: int |
         return _upload_session_whole(url, payload)
 
     chunk_size = chunk_size or _upload_chunk_size()
-    total_chunks = max(1, (len(samples) + chunk_size - 1) // chunk_size)
+    max_bytes = max_bytes or _upload_chunk_max_bytes()
+    sample_chunks = _split_upload_samples(payload, samples, chunk_size, max_bytes)
+    total_chunks = len(sample_chunks)
     upload_id = f"{payload.get('device_id')}:{payload.get('mode')}:{payload.get('session_id')}:{int(time.time())}"
     last_resp: dict[str, Any] = {}
-    for chunk_index in range(total_chunks):
-        start = chunk_index * chunk_size
-        end = min(len(samples), start + chunk_size)
-        chunk_payload = dict(payload)
-        chunk_payload["telemetry_samples"] = samples[start:end]
-        chunk_payload["upload_id"] = upload_id
-        chunk_payload["chunk_index"] = chunk_index
-        chunk_payload["total_chunks"] = total_chunks
-        chunk_payload["total_rows"] = len(samples)
-        chunk_payload["final"] = chunk_index == total_chunks - 1
-        chunk_payload["replace"] = chunk_index == 0
+    gzip_payload = _upload_gzip_enabled()
+    for chunk_index, sample_chunk in enumerate(sample_chunks):
+        chunk_payload = _chunk_payload(
+            payload,
+            sample_chunk,
+            upload_id,
+            chunk_index,
+            total_chunks,
+            len(samples),
+        )
         try:
-            resp = _request_json("POST", f"{url}/api/upload_session_chunk", chunk_payload, timeout=60)
+            resp, gzip_payload = _request_upload_json(
+                "POST",
+                f"{url}/api/upload_session_chunk",
+                chunk_payload,
+                timeout=60,
+                gzip_payload=gzip_payload,
+            )
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 return {"status": "unsupported", "error": "monitor does not support chunked uploads"}
@@ -222,7 +351,7 @@ def _upload_session(url: str, payload: dict[str, Any]) -> bool:
 
 def _upload_session_with_status(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     samples = payload.get("telemetry_samples") or []
-    if isinstance(samples, list) and len(samples) > _upload_chunk_size():
+    if isinstance(samples, list) and (len(samples) > _upload_chunk_size() or len(_encode_json_payload(payload)) > _upload_chunk_max_bytes()):
         chunked = _upload_session_chunked(url, payload)
         if chunked.get("status") != "unsupported":
             return chunked
@@ -286,6 +415,7 @@ def upload_session_now(session_id: str, mode: str | None = None) -> dict[str, An
         "rows_count": rows_count,
         "size_kb": round(raw_bytes / 1024, 2),
         "chunk_size": _upload_chunk_size(),
+        "chunk_max_kb": round(_upload_chunk_max_bytes() / 1024, 2),
     }
 
 

@@ -35,6 +35,8 @@ class EnvFileTest(unittest.TestCase):
         self.assertIn("APP_VAR_DIR=var", text)
         self.assertIn("# APP_SOLAR_SENSOR=ina228", text)
         self.assertIn("MONITOR_UPLOAD_CHUNK_SIZE=1000", text)
+        self.assertIn("MONITOR_UPLOAD_CHUNK_MAX_BYTES=262144", text)
+        self.assertIn("MONITOR_UPLOAD_GZIP=1", text)
 
     def test_parse_disabled_and_enabled_values(self):
         self.path.write_text(
