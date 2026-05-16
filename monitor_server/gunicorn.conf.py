@@ -3,6 +3,7 @@ import os
 
 
 bind = os.getenv("MONITOR_GUNICORN_BIND", f"0.0.0.0:{os.getenv('MONITOR_PORT', '8080')}")
+preload_app = True
 workers = int(os.getenv("MONITOR_GUNICORN_WORKERS", str(max(2, min(4, multiprocessing.cpu_count())))))
 worker_class = os.getenv("MONITOR_GUNICORN_WORKER_CLASS", "gthread")
 threads = int(os.getenv("MONITOR_GUNICORN_THREADS", "4"))
