@@ -71,6 +71,7 @@ DEFAULT_DB_TIMEOUT_SEC = 30.0
 HEARTBEAT_ACTIVE_WINDOW_SEC = 120
 DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
 DEFAULT_UPLOAD_CHUNK_MAX_BYTES = 256 * 1024
+DEFAULT_RESPONSE_GZIP_MIN_BYTES = 1024
 
 
 def _float_env(name: str, default: float) -> float:
@@ -111,6 +112,17 @@ def _upload_chunk_max_bytes() -> int:
         return max(16 * 1024, int(os.getenv("MONITOR_UPLOAD_CHUNK_MAX_BYTES", str(DEFAULT_UPLOAD_CHUNK_MAX_BYTES))))
     except (TypeError, ValueError):
         return DEFAULT_UPLOAD_CHUNK_MAX_BYTES
+
+
+def _response_gzip_min_bytes() -> int:
+    try:
+        return max(0, int(os.getenv("MONITOR_RESPONSE_GZIP_MIN_BYTES", str(DEFAULT_RESPONSE_GZIP_MIN_BYTES))))
+    except (TypeError, ValueError):
+        return DEFAULT_RESPONSE_GZIP_MIN_BYTES
+
+
+def _response_gzip_enabled() -> bool:
+    return os.getenv("MONITOR_RESPONSE_GZIP", "1").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _read_json_request(max_bytes: int | None = None) -> tuple[dict[str, Any], tuple[Any, int] | None]:
@@ -2134,6 +2146,40 @@ def create_app() -> Flask:
     with _startup_db_lock():
         _init_db()
         _migrate_db()
+
+    @app.after_request
+    def _gzip_text_response(response):
+        if not _response_gzip_enabled():
+            return response
+        if response.status_code < 200 or response.status_code in {204, 304}:
+            return response
+        if response.direct_passthrough or response.is_streamed:
+            return response
+        if "gzip" not in (request.headers.get("Accept-Encoding") or "").lower():
+            return response
+        if response.headers.get("Content-Encoding"):
+            return response
+        if response.mimetype not in {
+            "application/json",
+            "application/javascript",
+            "image/svg+xml",
+            "text/css",
+            "text/html",
+            "text/javascript",
+            "text/plain",
+        }:
+            return response
+        body = response.get_data()
+        if len(body) < _response_gzip_min_bytes():
+            return response
+        compressed = gzip.compress(body, compresslevel=5)
+        if len(compressed) >= len(body):
+            return response
+        response.set_data(compressed)
+        response.headers["Content-Encoding"] = "gzip"
+        response.headers["Content-Length"] = str(len(compressed))
+        response.headers["Vary"] = "Accept-Encoding"
+        return response
 
     def _is_active(ts: str | None, window_sec: int = HEARTBEAT_ACTIVE_WINDOW_SEC, future_grace_sec: int = 10) -> bool:
         if not ts:

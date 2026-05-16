@@ -29,6 +29,8 @@ class MonitorUploadSessionTest(unittest.TestCase):
             "MONITOR_PASS",
             "MONITOR_TERRAIN_ELEVATION_ENABLED",
             "MONITOR_UPLOAD_CHUNK_MAX_BYTES",
+            "MONITOR_RESPONSE_GZIP",
+            "MONITOR_RESPONSE_GZIP_MIN_BYTES",
         ):
             os.environ.pop(key, None)
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
@@ -395,6 +397,24 @@ class MonitorUploadSessionTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 413)
         self.assertEqual(response.get_json()["error"], "request body too large")
+
+    def test_text_responses_can_be_gzipped(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        os.environ["MONITOR_RESPONSE_GZIP"] = "1"
+        os.environ["MONITOR_RESPONSE_GZIP_MIN_BYTES"] = "0"
+        response = self.monitor_app.app.test_client().get(
+            "/",
+            headers={
+                "Authorization": "Basic YWRtaW46c2VjcmV0",
+                "Accept-Encoding": "gzip",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Content-Encoding"], "gzip")
+        self.assertIn("<title>Cycle Monitor</title>", gzip.decompress(response.data).decode("utf-8"))
 
     def test_compact_db_endpoint_returns_size_stats(self):
         if not hasattr(self.monitor_app.app, "test_client"):

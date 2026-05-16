@@ -1113,7 +1113,7 @@ WorkingDirectory=/home/jeandard/Cycle-Analyst-App
 EnvironmentFile=-/etc/cycle-analyst/monitor.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=/home/jeandard/Cycle-Analyst-App/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/home/jeandard/Cycle-Analyst-App/.venv/bin/python /home/jeandard/Cycle-Analyst-App/monitor_server/app.py
+ExecStart=/home/jeandard/Cycle-Analyst-App/.venv/bin/gunicorn -c /home/jeandard/Cycle-Analyst-App/monitor_server/gunicorn.conf.py monitor_server.app:app
 Restart=always
 RestartSec=5
 KillSignal=SIGINT

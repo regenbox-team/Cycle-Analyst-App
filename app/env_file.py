@@ -325,6 +325,15 @@ SETTINGS: tuple[EnvSetting, ...] = (
         choices=(("1", "On"), ("0", "Off")),
     ),
     EnvSetting(
+        "MONITOR_RESPONSE_GZIP",
+        "Compress monitor responses",
+        "1",
+        "Compresse les pages et reponses JSON du monitor_server.",
+        "Monitor sync",
+        detail="Utile sur le VPS: la page monitor est plus petite a envoyer et resiste mieux aux connexions lentes.",
+        choices=(("1", "On"), ("0", "Off")),
+    ),
+    EnvSetting(
         "MONITOR_AUTO_UPLOAD_SESSIONS",
         "Auto-upload sessions",
         "0",
