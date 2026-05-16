@@ -63,6 +63,35 @@ class SessionSummaryTest(unittest.TestCase):
         self.assertAlmostEqual(metrics["solar_Wh"], 40 / 3600)
         self.assertAlmostEqual(metrics["solar_power_max"], 40)
 
+    def test_rejects_implausible_gps_distance_jumps(self):
+        samples = [
+            {
+                "timestamp": "2026-04-30T10:00:00.000000",
+                "gps_lat": 48.0000,
+                "gps_lon": 2.0000,
+            },
+            {
+                "timestamp": "2026-04-30T10:00:01.000000",
+                "gps_lat": 48.0001,
+                "gps_lon": 2.0000,
+            },
+            {
+                "timestamp": "2026-04-30T10:00:01.500000",
+                "gps_lat": 48.0100,
+                "gps_lon": 2.0000,
+            },
+            {
+                "timestamp": "2026-04-30T10:00:02.000000",
+                "gps_lat": 48.0002,
+                "gps_lon": 2.0000,
+            },
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertLess(metrics["gps_distance_km"], 0.03)
+        self.assertEqual(metrics["gps_distance_rejected_count"], 1)
+
     def test_ignores_energy_across_large_timestamp_gap(self):
         samples = [
             {"timestamp": "2026-04-30T10:00:00", "raw": raw_line(distance=0.0)},

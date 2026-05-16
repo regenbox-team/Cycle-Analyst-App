@@ -31,6 +31,7 @@ from app.session_summary import (
     build_summary_sections,
     compute_session_metrics,
     compute_timeline_metrics_by_user,
+    filter_plausible_gps_samples,
     format_metric_value,
 )
 
@@ -3105,17 +3106,27 @@ def create_app() -> Flask:
                 (device_id, session_id, mode),
             ).fetchall()
 
+        samples = [
+            {
+                "timestamp": row["timestamp"],
+                "gps_lat": row["gps_lat"],
+                "gps_lon": row["gps_lon"],
+                "gps_alt": row["gps_alt"],
+                "terrain_alt_m": row["terrain_alt_m"],
+            }
+            for row in rows
+        ]
         points = []
-        for row in rows:
+        for sample in filter_plausible_gps_samples(samples):
             try:
-                lat = float(row["gps_lat"])
-                lon = float(row["gps_lon"])
+                lat = float(sample["gps_lat"])
+                lon = float(sample["gps_lon"])
             except Exception:
                 continue
             alt = None
-            alt_value = row["gps_alt"] if altitude_mode == "gps" else row["terrain_alt_m"]
+            alt_value = sample["gps_alt"] if altitude_mode == "gps" else sample["terrain_alt_m"]
             if alt_value is None:
-                alt_value = row["gps_alt"]
+                alt_value = sample["gps_alt"]
             if alt_value is not None:
                 try:
                     alt = float(alt_value)
@@ -3126,7 +3137,7 @@ def create_app() -> Flask:
                     "lat": lat,
                     "lon": lon,
                     "alt": alt,
-                    "time": _format_gpx_time(row["timestamp"]),
+                    "time": _format_gpx_time(sample["timestamp"]),
                 }
             )
 
@@ -3662,31 +3673,32 @@ def create_app() -> Flask:
                 "solar_enabled": row["solar_enabled"],
             }
             samples.append(sample)
+        for sample in filter_plausible_gps_samples(samples):
             try:
-                lat = float(row["gps_lat"])
-                lon = float(row["gps_lon"])
+                lat = float(sample["gps_lat"])
+                lon = float(sample["gps_lon"])
             except Exception:
                 continue
             if lat == 0 or lon == 0:
                 continue
             point = {"lat": lat, "lon": lon}
-            alt_value = row["terrain_alt_m"] if row["terrain_alt_m"] is not None else row["gps_alt"]
+            alt_value = sample["terrain_alt_m"] if sample["terrain_alt_m"] is not None else sample["gps_alt"]
             if alt_value is not None:
                 try:
                     point["alt"] = float(alt_value)
                 except Exception:
                     point["alt"] = None
-            if row["gps_alt"] is not None:
+            if sample["gps_alt"] is not None:
                 try:
-                    point["gps_alt"] = float(row["gps_alt"])
+                    point["gps_alt"] = float(sample["gps_alt"])
                 except Exception:
                     point["gps_alt"] = None
-            if row["terrain_alt_m"] is not None:
+            if sample["terrain_alt_m"] is not None:
                 try:
-                    point["terrain_alt_m"] = float(row["terrain_alt_m"])
+                    point["terrain_alt_m"] = float(sample["terrain_alt_m"])
                 except Exception:
                     point["terrain_alt_m"] = None
-            time_str = _format_gpx_time(row["timestamp"])
+            time_str = _format_gpx_time(sample["timestamp"])
             if time_str:
                 point["time"] = time_str
             points.append(point)

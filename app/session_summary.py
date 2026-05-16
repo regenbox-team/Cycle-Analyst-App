@@ -8,6 +8,10 @@ from typing import Any, Callable, Iterable
 from .distance import update_ca_distance
 
 MAX_SUMMARY_DT_SECONDS = 5.0
+MAX_GPS_DISTANCE_KPH = 250.0
+GPS_DISTANCE_JUMP_FLOOR_KM = 0.05
+GPS_DISTANCE_JUMP_MARGIN_KM = 0.05
+GPS_UNTIMED_SEGMENT_LIMIT_KM = 1.0
 ELEVATION_DEADBAND_M = 5.0
 _ELEVATION_ANCHOR_KEY = "_elevation_anchor_m"
 _RAW_GPS_ELEVATION_ANCHOR_KEY = "_raw_gps_elevation_anchor_m"
@@ -94,6 +98,45 @@ def _haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
     return 6371.0088 * 2 * math.asin(min(1.0, math.sqrt(h)))
 
 
+def gps_segment_plausible(
+    previous_sample: dict[str, Any] | None,
+    current_sample: dict[str, Any],
+    distance_km: float,
+) -> bool:
+    if previous_sample is None:
+        return True
+
+    previous_ts = parse_timestamp(previous_sample.get("timestamp"))
+    current_ts = parse_timestamp(current_sample.get("timestamp"))
+    if previous_ts is None or current_ts is None:
+        return distance_km <= GPS_UNTIMED_SEGMENT_LIMIT_KM
+
+    dt = (current_ts - previous_ts).total_seconds()
+    if dt < 0:
+        return False
+
+    max_distance = (MAX_GPS_DISTANCE_KPH * dt / 3600.0) + GPS_DISTANCE_JUMP_MARGIN_KM
+    return distance_km <= max(GPS_DISTANCE_JUMP_FLOOR_KM, max_distance)
+
+
+def filter_plausible_gps_samples(samples: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    last_gps = None
+    last_sample = None
+    for sample in samples:
+        gps = _valid_gps(sample.get("gps_lat"), sample.get("gps_lon"))
+        if gps is None:
+            continue
+        if last_gps is not None:
+            distance_km = _haversine_km(last_gps, gps)
+            if not gps_segment_plausible(last_sample, sample, distance_km):
+                continue
+        filtered.append(sample)
+        last_gps = gps
+        last_sample = sample
+    return filtered
+
+
 def _empty_metrics() -> dict[str, Any]:
     return {
         "sample_count": 0,
@@ -123,6 +166,7 @@ def _empty_metrics() -> dict[str, Any]:
         "ca_reset_count": 0,
         "gps_points": 0,
         "gps_distance_km": 0.0,
+        "gps_distance_rejected_count": 0,
         "gps_uphill_m": 0.0,
         "gps_downhill_m": 0.0,
         "gps_alt_min": None,
@@ -327,7 +371,11 @@ def _add_interval_metrics(
     gps = _valid_gps(sample.get("gps_lat"), sample.get("gps_lon"))
     previous_gps = _valid_gps(previous_sample.get("gps_lat"), previous_sample.get("gps_lon")) if previous_sample else None
     if gps is not None and previous_gps is not None:
-        m["gps_distance_km"] += _haversine_km(previous_gps, gps)
+        gps_distance = _haversine_km(previous_gps, gps)
+        if gps_segment_plausible(previous_sample, sample, gps_distance):
+            m["gps_distance_km"] += gps_distance
+        else:
+            m["gps_distance_rejected_count"] += 1
 
 
 def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]:
@@ -336,6 +384,7 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
     first_ts = None
     final_ts = None
     last_gps = None
+    last_gps_sample = None
 
     for sample in samples:
         values = parse_raw_values(sample.get("raw"))
@@ -403,8 +452,16 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
         if gps is not None:
             m["gps_points"] += 1
             if last_gps is not None:
-                m["gps_distance_km"] += _haversine_km(last_gps, gps)
-            last_gps = gps
+                gps_distance = _haversine_km(last_gps, gps)
+                if gps_segment_plausible(last_gps_sample, sample, gps_distance):
+                    m["gps_distance_km"] += gps_distance
+                    last_gps = gps
+                    last_gps_sample = sample
+                else:
+                    m["gps_distance_rejected_count"] += 1
+            else:
+                last_gps = gps
+                last_gps_sample = sample
 
             _add_altitude_metrics(m, sample)
 
