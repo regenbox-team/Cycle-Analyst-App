@@ -1596,6 +1596,68 @@ th, td {
   overflow: auto;
 }
 
+body.sessions-page .session-list-card {
+  display: block;
+  align-items: stretch;
+  justify-content: flex-start;
+  width: min(94vw, 760px);
+  max-width: 760px;
+  padding: 0.85rem;
+  text-align: left;
+  overflow: visible;
+}
+
+body.sessions-page .session-table-head {
+  width: 100%;
+}
+
+body.sessions-page .session-list-wrap,
+body.sessions-page .session-list {
+  width: 100%;
+}
+
+body.sessions-page .session-card-row {
+  width: 100%;
+}
+
+body.sessions-page .session-sub,
+body.sessions-page .session-stat-label,
+body.sessions-page .session-badge,
+body.sessions-page .session-action {
+  font-size: 0.48rem;
+}
+
+body.sessions-page .session-stat strong {
+  font-size: 0.56rem;
+  line-height: 1.2;
+}
+
+@media (max-width: 700px) {
+  body.sessions-page .session-list-card {
+    width: min(96vw, 520px);
+    padding: 0.7rem;
+  }
+
+  body.sessions-page .session-table-head {
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  body.sessions-page .session-card-stats {
+    gap: 0.45rem;
+  }
+
+  body.sessions-page .session-stat-label {
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
+  body.sessions-page .session-action {
+    font-size: 0.82rem;
+    line-height: 1.1;
+  }
+}
+
 .form-group {
   text-align: center;
   flex-direction: column;
