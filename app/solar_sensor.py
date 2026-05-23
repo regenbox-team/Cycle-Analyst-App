@@ -182,6 +182,7 @@ class INA228Sensor:
     def _detect_address(self, requested_address: int) -> int:
         candidates = PROBE_ADDRESSES if requested_address == 0 else (requested_address,)
         last_error = None
+        mismatches: list[str] = []
 
         for address in candidates:
             try:
@@ -192,16 +193,28 @@ class INA228Sensor:
                 continue
 
             if manufacturer_id != EXPECTED_MANUFACTURER_ID:
+                mismatches.append(
+                    f"0x{address:02x}: manufacturer=0x{manufacturer_id:04x}, device=0x{device_id:04x}"
+                )
                 continue
             if (device_id & EXPECTED_DEVICE_ID_MASK) != EXPECTED_DEVICE_ID:
+                mismatches.append(
+                    f"0x{address:02x}: manufacturer=0x{manufacturer_id:04x}, device=0x{device_id:04x}"
+                )
                 continue
             return address
 
+        details = "; ".join(mismatches)
         if requested_address == 0:
-            raise RuntimeError("no INA228 found on supported Matek addresses 0x41/0x44/0x45") from last_error
+            message = "no INA228 found on supported Matek addresses 0x41/0x44/0x45"
+            if details:
+                message = f"{message}; ids read: {details}"
+            raise RuntimeError(message) from last_error
+        if not details:
+            details = "no readable identity registers"
         raise RuntimeError(
             f"unexpected INA228 ids at 0x{requested_address:02x}: "
-            f"manufacturer/device mismatch"
+            f"{details}"
         ) from last_error
 
     def _write_u16(self, register: int, value: int) -> None:
