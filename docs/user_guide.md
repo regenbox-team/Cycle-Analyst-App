@@ -1,165 +1,154 @@
-# Cycle Analyst App — User Guide
+# Cycle Analyst App - User Guide
 
 ## Overview
-- Purpose: Live dashboard and session logging for Cycle Analyst/vehicle telemetry. Supports Supercycle test/live sources.
-- Stack: Flask app with background reader (serial) publishing raw values and session metrics. Per-mode SQLite databases under `var/`.
+- Purpose: live dashboard and session logging for Cycle Analyst / vehicle telemetry.
+- Supported sources: Supercycle live serial data, test-mode fake data, optional GPS, optional INA228 solar sensor, optional camera photos.
+- Runtime data lives under `var/` by default.
 
 ## Quick Start
-- Install deps: `pip install -r requirements.txt`
 - Run dev server: `python cycle_server.py`
 - Open: `http://localhost:5050`
-- Switch mode: Dashboard UI or POST `{"mode":"supercycle_test"}` to `/set_vehicle_mode`
-- Start session: Use Start page → choose user and click Start
+- Switch mode: dashboard UI or POST `{"mode":"supercycle_test"}` to `/set_vehicle_mode`
+- Start session: use Start page, choose user, click Start
 
 ## Project Structure
-- `cycle_server.py`: App factory `create_app()`, starts reader if requested, registers routes.
-- `app/`:
-  - `config.py`: Paths, baudrate, mode config, per‑mode DB helpers.
-  - `modes.py`: Current mode + test mode, apply/save/load functions.
-  - `state.py`: Runtime state (session_id, current_user, latest_raw_values, session_active), metric store, JSON persistence.
-  - `metrics.py`: Metric updates, reset, restore from DB/JSON.
-  - `reader.py`: Background loop. Test mode generates fake data, live mode reads serial.
-  - `db.py`: Initializes SQLite schema for the active mode DB.
-  - `bootstrap.py`: Migrates legacy files into `var/` at startup.
-  - `routes/`: Flask route groups (core, sessions, admin, modes).
+- `cycle_server.py`: app factory `create_app()`, runtime initialization, compatibility exports.
+- `cycle_recorder.py`: recorder entrypoint for split-service Raspberry Pi installs.
+- `cycle_web.py`: dashboard entrypoint for split-service Raspberry Pi installs.
+- `app/`: config, modes, state, metrics, reader, DB, routes.
 - `templates/`, `static/`: UI.
-- `scripts/`: Utilities (DB tools).
-- `var/`: Runtime data (per‑mode DB, session metrics JSON, user/mode flags).
+- `scripts/`: utility scripts and Pi service setup.
+- `var/`: runtime data, per-mode DBs, session metrics JSON, user/mode/session flags.
 
 ## Runtime Storage
-- Default directory: `var/` (override with `APP_VAR_DIR=/custom/path`).
-- Files created under `var/`:
-  - Per‑mode DB: `ride_data_<vehicle_mode>.db`
-  - Session metrics snapshots: `session_metrics/*_session_metrics.json`
-  - Flags/state: `current_session.txt`, `session_state.txt`, `current_user.txt`, `vehicle_mode.txt`, `test_mode.txt`
-- Legacy migration: On startup, files in project root are moved/copied into `var/`.
+- Default directory: `var/`; override with `APP_VAR_DIR=/custom/path`.
+- Per-mode DB: `var/ride_data_<vehicle_mode>.db`
+- Session metrics snapshots: `var/session_metrics/*_session_metrics.json`
+- State files: `current_session.txt`, `session_state.txt`, `current_user.txt`, `vehicle_mode.txt`, `test_mode.txt`
+- Legacy migration: on startup, root-level legacy files are moved or copied into `var/`.
 
 ## Vehicle Modes
-- Built‑in modes:
-  - `supercycle_live`: serial `/dev/ttyUSB0`, test_mode=false
-  - `supercycle_test`: serial `/dev/ttyUSB0`, test_mode=true (fake data)
+- Built-in modes:
+  - `supercycle_live`: serial `/dev/ttyUSB0`, test mode false.
+  - `supercycle_test`: serial `/dev/ttyUSB0`, test mode true.
 - Switch mode:
-  - UI control (if present), or
-  - POST `/set_vehicle_mode` with body `{"mode":"supercycle_test"}`
-- Test mode toggle (advanced):
-  - POST `/set_test_mode` with `{"enabled": true|false}`
-  - GET `/get_test_mode` → `{"test_mode": true|false}`
+  - UI control if present.
+  - POST `/set_vehicle_mode` with `{"mode":"supercycle_test"}`.
 - Reader behavior:
-  - Starts automatically when entering test mode (even under WSGI).
-  - In live mode without data for >3s, connection shows inactive.
+  - Starts in development with `python cycle_server.py`.
+  - Starts in production through `cycle-recorder.service`.
+  - In live mode without data for more than 3 seconds, connection shows inactive.
 
-## Per‑Mode Databases
-- Each mode writes to its own DB: `var/ride_data_<mode>.db`
-- The app reads/writes the DB for the current vehicle mode by default.
-- Browsing other DBs: add `?mode=<vehicle_mode>` to list/fetch routes:
-  - `/sessions?mode=supercycle_live`
-  - `/logs?mode=supercycle_live`
-  - `/select_session?mode=supercycle_test`
-  - `/summary?session=<id>&mode=supercycle_test`
-
-## Sessions Workflow
-- Start:
-  - Page `/start`: choose user (JD/LL) → Start
-  - New `session_id` assigned, metrics reset, `session_active=true`
-- Resume:
-  - On `/start`, choose a recent session ID and Resume
-- End:
-  - End session button → redirect to summary for the session
-- Delete:
-  - POST `/delete_session` with `{"session":"<id>"}` (also removes metrics JSON)
-- Select session:
-  - `/select_session` to choose session for editing or viewing
-- Edit rows:
-  - Fetch first 200 rows: `/api/session_rows?session=<id>`
-  - Delete row: POST `/api/delete_row` `{"id": <row_id>}`
+## Sessions
+- Start: `/start`, choose user, click Start.
+- Resume: choose a recent session ID on `/start`.
+- End: end session button redirects to summary.
+- Delete: POST `/delete_session` with `{"session":"<id>"}`.
+- Select session: `/select_session`.
 
 ## Live Metrics
 - Endpoint: `/metrics`
-  - `raw_CA_values`: 15‑item list or null if inactive
-  - `calculated_CA_values`:
-    - Speed: `speed_avg`, `speed_max`
-    - Power: `power_live`, `power_avg`, `power_max`, `power_min`
-    - Energy: `Wh_pos`, `Wh_regen`, `human_Wh`, `solar_Wh`, `net_Wh` (pos - regen - human - solar), `%_regen`, `%_human`, `%_solar`
-    - Efficiency: `net_Wh_per_km`, per‑km lists (`Wh_per_km_last`, `net_Wh_per_km_last`)
-    - Human/solar/regen per‑km %: `human_pct_per_km_last`, `solar_pct_per_km_last`, `regen_pct_per_km_last`
-    - Temperature: `temp_avg`, `temp_max`
-    - Autonomy estimates: `autonomy.range_session_avg`, plus last km / 10km metrics when available
-- Staleness:
-  - No new data for >3s → `raw_CA_values` cleared; UI shows “inactive”.
+- `raw_CA_values`: 15-item list or null if inactive.
+- `calculated_CA_values`: speed, power, energy, per-km efficiency, regen/human/solar percentages, temperature, autonomy estimates.
+- Staleness: no new data for more than 3 seconds clears `raw_CA_values`.
+- In split-service mode, the web service reads live metrics from JSON files written by the recorder.
 
 ## Summary Report
 - Page: `/summary?session=<id>[&mode=<vehicle_mode>]`
-- Groups per user and total:
-  - Duration & Distance, Speed, Power, Energy, Efficiency, Percentages, Temperature, Human Effort
-- Aggregation uses DB rows; robust timing based on stored timestamps.
+- Summary is built from DB rows, not browser state.
+- Exports and maintenance scripts can use the same per-mode DB files.
 
 ## Admin Actions
-- Switch user: POST `/switch_user` → flips JD/LL during a session
-- Add Ah offset: POST `/add_ah` `{"added_ah": 2.5}` → adjusts `ah_offset`
-- Reset session state: POST `/reset` → new session id, metrics cleared
-
-## Scripts
-- `scripts/export_sessions.py`:
-  - Exports each session to CSV in `sessions_csv/` from the current mode DB.
-- `scripts/db_viewer.py` (micro viewer API):
-  - Endpoints accept `?mode=<vehicle_mode>`, returns sessions and downsampled time‑series.
-- `scripts/checkdb.py`:
-  - Summarizes sessions per DB; defaults to current mode DB. Example: `python scripts/checkdb.py`
-- `scripts/merge_sessions.py`:
-  - Merge rows from one session into another inside a DB (backup created automatically).
-- `scripts/user_change.py`:
-  - Simple web UI to annotate/override user changes within a session for the current mode DB.
+- Switch user: POST `/switch_user`
+- Add Ah offset: POST `/add_ah` with `{"added_ah": 2.5}`
+- Reset session state: POST `/reset`
+- Restart web service: POST `/restart_service`
 
 ## Configuration
-- Env vars:
-  - `APP_VAR_DIR`: override runtime directory (default: `var/`)
-  - `APP_START_READER=1`: force reader thread to start under factory (not needed for test mode)
-- Serial:
-  - `SERIAL_PORT_DEFAULT` in `app/config.py` (`/dev/ttyUSB0`)
-- Optional INA228 solar sensor on Raspberry Pi I2C:
-  - Enable with `APP_SOLAR_SENSOR=ina228`
-  - Bus with `APP_SOLAR_I2C_BUS=1`
-  - Address with `APP_SOLAR_I2C_ADDR=0x45` (`0x44` and `0x41` also supported by the board, `0` probes them)
-  - Shunt with `APP_SOLAR_SHUNT_OHMS=0.0002`
-  - Full-scale current with `APP_SOLAR_MAX_AMPS=204.8`
-  - Invert sign if needed with `APP_SOLAR_INVERT_SIGN=true`
-  - Optional calibration trims: `APP_SOLAR_CURRENT_GAIN=1.0`, `APP_SOLAR_CURRENT_OFFSET=0.0`
-  - Small-current deadband with `APP_SOLAR_CURRENT_DEADBAND_A=0.15` (default: values below this are treated as `0 A` in the app/DB/UI)
-  - Debug with `python scripts/ina228_debug.py --addr 0 --interval 1`
+- `APP_VAR_DIR`: runtime directory, default `var`.
+- `APP_START_READER=1`: force reader thread in-process. Prefer `cycle-recorder.service` on Raspberry Pi.
+- `APP_START_GPS=0`: skip GPS thread in the web process.
+- `APP_START_MONITOR=0`: skip monitor sync in the web process.
+- `APP_LIVE_STATE_FROM_FILES=1`: web dashboard reads state written by recorder.
+- `APP_SCHEDULE_PHOTOS=0`: disables photo scheduling from the reader. The split-service setup uses this in the recorder to protect data recording.
+- `APP_PHOTO_WORKER_INTERVAL_SECONDS=1`: photo worker polling interval.
+- `APP_PHOTO_UPLOAD_RETRY_SECONDS=15`: retry interval for queued photo uploads.
+- `APP_SOLAR_SENSOR=ina228`: enable optional INA228 sensor.
+- `APP_CAMERA_COMMAND`: camera command for local captures.
+- `MONITOR_URL`: remote monitor URL; leave empty to disable upload.
 
-## API Reference (Selected)
-- GET `/metrics`
-- POST `/set_vehicle_mode` `{ "mode": "supercycle_test" | "supercycle_live" }`
-- GET `/get_vehicle_mode`
-- POST `/set_test_mode` `{ "enabled": true|false }`
-- GET `/get_test_mode`
-- GET `/sessions[?mode=...]`
-- GET `/logs[?mode=...]`
-- GET `/summary?session=<id>[&mode=...]`
-- GET `/api/session_rows?session=<id>[&mode=...]`
-- POST `/api/delete_row` `{ "id": <row_id> }`
-- POST `/delete_session` `{ "session": "<id>" }`
+## Scripts
+- `scripts/export_sessions.py`: export sessions to CSV.
+- `scripts/db_viewer.py`: micro viewer API.
+- `scripts/checkdb.py`: summarize DB/session health.
+- `scripts/merge_sessions.py`: merge session logs.
+- `scripts/user_change.py`: annotate user changes.
+- `scripts/ina228_debug.py`: debug INA228 sensor on the Pi.
+- `scripts/setup_pi_services.py`: install/update Raspberry Pi systemd and nginx services.
+
+## Raspberry Pi Deployment
+- Recommended road install: split services.
+- `cycle-recorder.service`: reads serial/GPS/I2C and writes SQLite + metrics snapshots.
+- `cycle-photo.service`: captures/uploads photos from live recorder snapshots.
+- `cycle-analyst.service`: serves the web dashboard only.
+- Setup dry run:
+
+```bash
+python3 scripts/setup_pi_services.py
+```
+
+- Apply setup:
+
+```bash
+python3 scripts/setup_pi_services.py --apply
+```
+
+- More detail: `docs/services_setup.md`.
+
+## Health Checks
+- Service status:
+
+```bash
+systemctl status cycle-recorder.service cycle-photo.service cycle-analyst.service --no-pager
+```
+
+- Confirm dashboard:
+
+```bash
+curl http://127.0.0.1:5050/metrics
+curl http://127.0.0.1/
+```
+
+- Confirm DB recording:
+
+```bash
+cd /home/jeandard/Cycle-Analyst-App
+for db in var/ride_data*.db; do
+  echo "$db"
+  sqlite3 "$db" "SELECT COUNT(*), MAX(timestamp), MAX(session) FROM logs;"
+done
+```
 
 ## Troubleshooting
-- Connection shows “inactive”:
-  - Verify test mode is enabled (`/get_test_mode`). In test mode, the reader should auto‑start and publish fake data.
-  - For live mode, check the serial port. After >3s without data, connection goes inactive by design.
-- Switching test → live remains “active”:
-  - The app clears simulated values immediately when switching to a non‑test mode; refresh `/metrics` to see `raw_CA_values: null`.
+- Connection inactive:
+  - Check serial port and mode.
+  - Check `cycle-recorder.service`, not only the web service.
+- 502 from nginx:
+  - The web backend is not accepting connections yet or has restarted.
+- 504 from nginx:
+  - The web backend accepted the connection but did not respond in time.
+  - Recorder should continue in split-service mode.
+- Data-first emergency:
 
-## Backups & Maintenance
-- DBs are simple SQLite files per mode under `var/`:
-  - Backup by copying `var/ride_data_<mode>.db` while the app is idle, or export sessions via `scripts/export_sessions.py`.
-- `scripts/merge_sessions.py` creates timestamped DB backups before changes.
-- To purge metrics snapshots, delete files under `var/session_metrics/` (they’re regenerated if needed).
-
-## Deployment
-- WSGI entrypoint: `wsgi:application`
-  - Example: `gunicorn -w 2 wsgi:application`
-  - For test mode demo under WSGI: POST `/set_test_mode` `{"enabled": true}` → the reader auto‑starts.
-- Dev: `python cycle_server.py` (port 5050). Starts reader thread automatically.
+```bash
+sed -i 's/^MONITOR_URL=.*/MONITOR_URL=/' cycle-analyst.env
+sed -i 's/^APP_CAMERA_COMMAND=.*/APP_CAMERA_COMMAND=/' cycle-analyst.env
+sudo systemctl stop cycle-photo.service
+sudo systemctl restart cycle-recorder.service cycle-analyst.service
+```
 
 ## Development
-- App factory: `create_app(start_reader=False)` registers blueprints and initializes state/DB. Use `start_reader=True` for dev runs.
-- Route modules in `app/routes/*` — add endpoints by extending these modules or creating new blueprints.
-- Metrics logic resides in `app/metrics.py`; changes here affect both live calculations and summary.
+- App factory: `create_app(start_reader=False)`.
+- Use `start_reader=True` for local dev runs.
+- Route modules live in `app/routes/*`.
+- Metrics logic resides in `app/metrics.py`.

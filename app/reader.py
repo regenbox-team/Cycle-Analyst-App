@@ -2,6 +2,7 @@ from __future__ import annotations
 import time
 import random
 import re
+import os
 import shlex, subprocess
 import serial
 import sqlite3
@@ -12,7 +13,7 @@ from .modes import is_test_mode
 from .metrics import update_metrics, update_solar_only_metrics
 from .photo_capture import maybe_schedule_photo_capture
 from . import state
-from .modes import vehicle_mode
+from . import modes
 from .solar_sensor import read_solar_sample
 
 
@@ -49,7 +50,7 @@ def generate_fake_data():
     voltage = 50
 
     generate_fake_data.ah += max(0, amps) * dt
-    capacity_ah = VEHICLE_CONFIGS.get(vehicle_mode, {}).get("battery_capacity_ah", 64)
+    capacity_ah = VEHICLE_CONFIGS.get(modes.vehicle_mode, {}).get("battery_capacity_ah", 64)
     generate_fake_data.ah = max(0, min(capacity_ah, generate_fake_data.ah))
 
     return [
@@ -94,6 +95,8 @@ def _update_live_gps_climb() -> None:
 def read_serial():
     last_db_write_time = time.time()
     last_data_time = time.time()
+    last_control_sync_time = 0.0
+    last_session_active = state.session_active
     serial_port_opened = False
     ser = None
     proc = None
@@ -105,8 +108,38 @@ def read_serial():
         time.sleep(0.1)
         data = None
 
-        # Clear stale values regardless of source errors
         now_ts = time.time()
+        if now_ts - last_control_sync_time >= 0.5:
+            last_control_sync_time = now_ts
+            try:
+                from . import modes as _modes
+                requested_mode = _modes.load_vehicle_mode()
+                if requested_mode != _modes.vehicle_mode:
+                    _modes.apply_vehicle_mode(requested_mode)
+            except Exception:
+                pass
+            try:
+                loaded_session_id = state.load_session_id()
+                loaded_active = state.load_session_active()
+                session_changed = loaded_session_id != state.session_id
+                active_started = loaded_active and not last_session_active
+                state.session_id = loaded_session_id
+                state.session_active = loaded_active
+                last_session_active = loaded_active
+                if session_changed or active_started:
+                    state.load_session_metrics_from_file(loaded_session_id)
+                state.current_user = state.load_current_user()
+                state.current_user_id = state.load_current_user_id()
+                state.solar_roof_enabled = state.load_solar_roof_enabled()
+                try:
+                    from .user_profiles import get_profile
+                    state.current_user_profile = get_profile(state.current_user_id or state.current_user)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        # Clear stale values regardless of source errors
         if now_ts - last_data_time > 3:
             if state.latest_raw_values is not None:
                 state.latest_raw_values = None
@@ -225,7 +258,8 @@ def read_serial():
         if data is not None:
             update_metrics(data, now, solar_sample=solar_sample)
             _update_live_gps_climb()
-            maybe_schedule_photo_capture(state.session_metrics.get("distance_km"))
+            if os.getenv("APP_SCHEDULE_PHOTOS", "1").strip().lower() not in {"0", "false", "no", "off"}:
+                maybe_schedule_photo_capture(state.session_metrics.get("distance_km"))
         elif solar_sample is not None:
             update_solar_only_metrics(solar_sample, now)
 

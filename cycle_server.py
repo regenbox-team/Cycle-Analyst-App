@@ -1,4 +1,6 @@
 from flask import Flask
+import os
+import threading
 import time
 
 from app.config import get_db_file
@@ -14,7 +16,78 @@ from app.bootstrap import migrate_legacy_files
 session_metrics = state.session_metrics
 
 
-def create_app(start_reader: bool = False) -> Flask:
+def initialize_runtime(
+    *,
+    start_reader: bool = False,
+    start_gps: bool = True,
+    start_monitor: bool = True,
+) -> None:
+    # Initialize basic state
+    state.session_id = state.session_id or state.load_session_id()
+    state.session_start_time = time.time()
+    state.latest_raw_values = None
+    state.current_user = state.load_current_user()
+    state.session_active = state.load_session_active()
+    state.solar_roof_enabled = state.load_solar_roof_enabled()
+
+    # Migrate legacy files, then init DB and restore metrics snapshot
+    migrate_legacy_files()
+    # Initialize DB for current mode and restore metrics snapshot from that DB
+    init_db()
+    try:
+        for _mode in modes.VEHICLE_CONFIGS:
+            init_db(_mode)
+    except Exception:
+        pass
+    try:
+        from app.user_profiles import get_profile
+        state.current_user_id = state.load_current_user_id()
+        state.current_user_profile = get_profile(state.current_user_id or state.current_user)
+        if state.current_user_profile:
+            state.current_user_id = state.current_user_profile["user_id"]
+            state.current_user = state.current_user_profile["initials"]
+            state.save_current_user_id(state.current_user_id)
+            state.save_current_user(state.current_user)
+    except Exception:
+        pass
+    # Initialize game scores DB
+    try:
+        from app.game_db import init_game_db
+        init_game_db()
+    except Exception:
+        pass
+    db_path = get_db_file()
+    restore_session_metrics(state.session_id, db_path, parse_line)
+
+    # Optional background reader thread.
+    if start_reader and not getattr(state, "reader_started", False):
+        threading.Thread(target=read_serial, daemon=True).start()
+        state.reader_started = True
+
+    # Start GPS reader thread (safe to run even if device missing)
+    try:
+        if start_gps and not getattr(state, 'gps_reader_started', False):
+            from app.gps import read_gps
+            threading.Thread(target=read_gps, daemon=True).start()
+            state.gps_reader_started = True
+    except Exception:
+        pass
+
+    # Start monitor sync thread if configured
+    try:
+        if start_monitor:
+            from app.monitor_client import start_monitor_sync
+            start_monitor_sync()
+    except Exception:
+        pass
+
+
+def create_app(
+    start_reader: bool = False,
+    *,
+    start_gps: bool | None = None,
+    start_monitor: bool | None = None,
+) -> Flask:
     app = Flask(__name__)
 
     # Register routes (each in isolation so one failure won't block others)
@@ -56,74 +129,45 @@ def create_app(start_reader: bool = False) -> Flask:
     ):
         _register_group(mod)
 
-    # Initialize basic state
-    state.session_id = state.session_id or state.load_session_id()
-    state.session_start_time = time.time()
-    state.latest_raw_values = None
-    state.current_user = state.load_current_user()
-    state.session_active = state.load_session_active()
-    state.solar_roof_enabled = state.load_solar_roof_enabled()
+    if start_gps is None:
+        start_gps = os.getenv("APP_START_GPS", "1").strip().lower() not in {"0", "false", "no", "off"}
+    if start_monitor is None:
+        start_monitor = os.getenv("APP_START_MONITOR", "1").strip().lower() not in {"0", "false", "no", "off"}
 
-    # Migrate legacy files, then init DB and restore metrics snapshot
-    migrate_legacy_files()
-    # Initialize DB for current mode and restore metrics snapshot from that DB
-    init_db()
-    try:
-        for _mode in modes.VEHICLE_CONFIGS:
-            init_db(_mode)
-    except Exception:
-        pass
-    try:
-        from app.user_profiles import get_profile
-        state.current_user_id = state.load_current_user_id()
-        state.current_user_profile = get_profile(state.current_user_id or state.current_user)
-        if state.current_user_profile:
-            state.current_user_id = state.current_user_profile["user_id"]
-            state.current_user = state.current_user_profile["initials"]
-            state.save_current_user_id(state.current_user_id)
-            state.save_current_user(state.current_user)
-    except Exception:
-        pass
-    # Initialize game scores DB
-    try:
-        from app.game_db import init_game_db
-        init_game_db()
-    except Exception:
-        pass
-    db_path = get_db_file()
-    restore_session_metrics(state.session_id, db_path, parse_line)
+    initialize_runtime(
+        start_reader=start_reader,
+        start_gps=start_gps,
+        start_monitor=start_monitor,
+    )
 
-    # Optional background reader thread
-    # Always ensure reader runs when test mode is enabled, even under WSGI.
-    if start_reader or modes.is_test_mode():
-        import threading
-        threading.Thread(target=read_serial, daemon=True).start()
-        state.reader_started = True
-
-    # Start GPS reader thread (safe to run even if device missing)
-    try:
-        if not getattr(state, 'gps_reader_started', False):
-            import threading
-            from app.gps import read_gps
-            threading.Thread(target=read_gps, daemon=True).start()
-            state.gps_reader_started = True
-    except Exception:
-        pass
-
-    # Start monitor sync thread if configured
-    try:
-        from app.monitor_client import start_monitor_sync
-        start_monitor_sync()
-    except Exception:
-        pass
+    live_state_from_files = os.getenv("APP_LIVE_STATE_FROM_FILES", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    if not start_reader and live_state_from_files and hasattr(app, "before_request"):
+        @app.before_request
+        def _refresh_state_from_recorder_files():
+            try:
+                state.session_id = state.load_session_id()
+                state.session_active = state.load_session_active()
+                state.current_user = state.load_current_user()
+                state.current_user_id = state.load_current_user_id()
+                state.solar_roof_enabled = state.load_solar_roof_enabled()
+                state.load_session_metrics_from_file(state.session_id)
+            except Exception:
+                pass
 
     return app
 
 
-# Create app for import-time usage
-import os as _os
-_start_reader_flag = _os.getenv("APP_START_READER", "0") == "1"
-app = create_app(start_reader=_start_reader_flag)
+# Create app for import-time WSGI usage unless an entrypoint opts out.
+if os.getenv("CYCLE_ANALYST_SKIP_AUTO_APP", "0") == "1":
+    app = None
+else:
+    _start_reader_flag = os.getenv("APP_START_READER", "0") == "1"
+    app = create_app(start_reader=_start_reader_flag)
 
 
 if __name__ == "__main__":

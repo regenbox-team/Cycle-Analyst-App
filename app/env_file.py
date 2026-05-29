@@ -258,7 +258,7 @@ SETTINGS: tuple[EnvSetting, ...] = (
     EnvSetting(
         "APP_CAMERA_COMMAND",
         "Camera command",
-        "fswebcam -d /dev/video0 -q -S 60 --palette YUYV -r 640x480 --jpeg 85 --no-banner {output}",
+        "fswebcam -d /dev/video0 -q -S 10 --palette YUYV -r 640x480 --jpeg 70 --no-banner {output}",
         "Commande de capture photo.",
         "Camera",
         detail="La page decompose cette commande en champs simples puis reconstruit APP_CAMERA_COMMAND. Le marqueur {output} est ajoute automatiquement a la fin.",

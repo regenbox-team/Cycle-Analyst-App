@@ -259,6 +259,8 @@ def restore_session_metrics(session_id: str, db_file: str, parse_line_func):
         try:
             with open(json_path, "r") as f:
                 loaded = json.load(f)
+            if isinstance(loaded, dict):
+                loaded.pop("_runtime", None)
             _migrate_legacy_metrics(loaded)
             _sm.update(loaded)
             return

@@ -208,7 +208,66 @@ def save_session_metrics_to_file() -> None:
     try:
         path = metrics_json_path()
         if path:
-            with open(path, "w") as f:
-                json.dump(session_metrics, f)
+            payload = dict(session_metrics)
+            if os.getenv("APP_PRESERVE_PHOTO_STATE_FROM_FILE", "0").strip().lower() in {"1", "true", "yes", "on"}:
+                try:
+                    if os.path.exists(path):
+                        with open(path, "r", encoding="utf-8") as existing_file:
+                            existing_payload = json.load(existing_file)
+                        existing_photo = existing_payload.get("photo_capture")
+                        if isinstance(existing_photo, dict):
+                            payload["photo_capture"] = existing_photo
+                except Exception:
+                    pass
+            payload["_runtime"] = {
+                "saved_at": time.time(),
+                "session_id": session_id,
+                "session_active": session_active,
+                "latest_raw_values": latest_raw_values,
+                "gps_state": gps_state,
+                "solar_sensor": solar_sensor,
+                "current_user": current_user,
+                "current_user_id": current_user_id,
+            }
+            tmp_path = f"{path}.tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(payload, f)
+            os.replace(tmp_path, path)
     except Exception:
         pass
+
+
+def load_session_metrics_from_file(for_session: str | None = None) -> bool:
+    path = metrics_json_path(for_session)
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if not isinstance(payload, dict):
+            return False
+
+        runtime = payload.pop("_runtime", None)
+        session_metrics.update(payload)
+
+        if isinstance(runtime, dict):
+            raw_values = runtime.get("latest_raw_values")
+            if isinstance(raw_values, list):
+                globals()["latest_raw_values"] = raw_values
+            gps = runtime.get("gps_state")
+            if isinstance(gps, dict):
+                gps_state.update(gps)
+            solar = runtime.get("solar_sensor")
+            if isinstance(solar, dict):
+                solar_sensor.update(solar)
+            globals()["session_id"] = runtime.get("session_id") or globals()["session_id"]
+            globals()["session_active"] = bool(runtime.get("session_active"))
+            user = runtime.get("current_user")
+            if isinstance(user, str) and user:
+                globals()["current_user"] = user
+            user_id = runtime.get("current_user_id")
+            if isinstance(user_id, str) and user_id:
+                globals()["current_user_id"] = user_id
+        return True
+    except Exception:
+        return False

@@ -8,10 +8,12 @@ Ce guide decrit une installation propre d'un nouveau Raspberry Pi avec le repo
 
 Le setup recommande installe :
 
-- l'app embarquee Cycle Analyst sur le port `5050`
+- l'enregistreur embarque `cycle-recorder.service`
+- le worker photo `cycle-photo.service`
+- l'interface Cycle Analyst sur le port `5050`
 - un nom local stable en `.local` via mDNS
 - un proxy `nginx` sur le port `80`
-- un service `systemd` `cycle-analyst.service`
+- trois services `systemd` : `cycle-recorder.service`, `cycle-photo.service` et `cycle-analyst.service`
 - un fichier de variables local dedie : `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env`
 - optionnellement le `monitor_server` sur le port `8080`
 
@@ -26,7 +28,9 @@ Pi.
 - dossier runtime : `/home/jeandard/Cycle-Analyst-App/var`
 - app locale : `http://127.0.0.1:5050`
 - app exposee via nginx : `http://sc-vehicule-1.local`
-- service app : `cycle-analyst.service`
+- service enregistrement : `cycle-recorder.service`
+- service photo : `cycle-photo.service`
+- service interface : `cycle-analyst.service`
 - fichier env app : `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env`
 
 Exemple de noms par vehicule :
@@ -325,9 +329,11 @@ Exemple de contenu pour le Pi 1 :
 # Runtime local
 APP_VAR_DIR=var
 
-# A utiliser seulement si l'app est lancee via wsgi/gunicorn.
-# Avec "python cycle_server.py", le reader demarre deja automatiquement.
+# A utiliser seulement pour un lancement monoprocess historique.
+# Le setup recommande utilise plutot cycle-recorder.service.
 # APP_START_READER=1
+# En mode services separes, l'interface lit l'etat ecrit par le recorder.
+APP_LIVE_STATE_FROM_FILES=1
 
 # GPS USB NMEA. Les dongles VK-162 apparaissent souvent en /dev/ttyACM0.
 APP_GPS_PORT=/dev/ttyACM0
@@ -358,9 +364,9 @@ APP_BATTERY_DISCHARGE_CURVE_FILE=var/battery_curve_lg_mh1_from_trip.json
 # APP_SOLAR_INVERT_SIGN=true
 
 # Camera USB pour capture photo pendant les sessions.
-# -S 60 saute les premieres images pour laisser l'exposition se stabiliser.
+# Sur Pi3, garder une capture courte pour eviter les timeouts.
 # --palette YUYV evite les images grises observees avec le flux MJPEG de cette camera.
-APP_CAMERA_COMMAND=fswebcam -d /dev/video0 -q -S 60 --palette YUYV -r 640x480 --jpeg 85 --no-banner {output}
+APP_CAMERA_COMMAND=fswebcam -d /dev/video0 -q -S 10 --palette YUYV -r 640x480 --jpeg 70 --no-banner {output}
 
 # Synchronisation vers monitor_server. Laisser MONITOR_URL vide seulement pour desactiver.
 MONITOR_DEVICE_ID=sc-vehicule-1
@@ -385,7 +391,11 @@ sudo chmod 0640 /etc/cycle-analyst/cycle-analyst.env
 | Variable | Defaut dans le code | Usage |
 | --- | --- | --- |
 | `APP_VAR_DIR` | `var` | Dossier des DB, sessions, profils, photos locales et etat runtime. |
-| `APP_START_READER` | `0` | Force le reader au moment de l'import `cycle_server`. Utile avec WSGI, inutile avec `python cycle_server.py`. |
+| `APP_START_READER` | `0` | Force le reader au moment de l'import `cycle_server`. Preferer `cycle-recorder.service` sur Raspberry Pi. |
+| `APP_LIVE_STATE_FROM_FILES` | `1` | L'interface web relit les metriques live ecrites par le recorder. |
+| `APP_SCHEDULE_PHOTOS` | `1` | Active les captures photo dans le process courant. Le setup split met `0` dans `cycle-recorder.service` et `1` dans `cycle-photo.service`. |
+| `APP_PHOTO_WORKER_INTERVAL_SECONDS` | `1` | Frequence de lecture des metriques live par le worker photo. |
+| `APP_PHOTO_UPLOAD_RETRY_SECONDS` | `15` | Delai entre deux tentatives d'envoi des photos en attente. |
 | `APP_GPS_PORT` | `/dev/ttyACM0` | Port serie du GPS NMEA. |
 | `APP_GPS_BAUDRATE` | `9600` | Baudrate du GPS. |
 | `APP_PMTILES_PATH` | `/home/jeandard/Documents/tiles.pmtiles` | Fichier `.pmtiles` offline. |
@@ -675,7 +685,7 @@ ls -l /dev/video*
 Tester la capture avec la meme commande que l'app :
 
 ```bash
-fswebcam -d /dev/video0 -q -S 60 --palette YUYV -r 640x480 --jpeg 85 --no-banner /tmp/cycle-test.jpg
+fswebcam -d /dev/video0 -q -S 10 --palette YUYV -r 640x480 --jpeg 70 --no-banner /tmp/cycle-test.jpg
 ls -lh /tmp/cycle-test.jpg
 ```
 
@@ -687,61 +697,59 @@ Si la camera apparait sur un autre device, par exemple `/dev/video1`, adapter
 `APP_CAMERA_COMMAND` dans `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env`
 ou depuis `/settings`.
 
-## 13. Creer le service systemd de l'app
+## 13. Installer les services systemd separes
 
-Creer le service :
+L'installation recommandee separe l'enregistrement, les photos et l'interface :
 
-```bash
-sudo nano /etc/systemd/system/cycle-analyst.service
-```
+- `cycle-recorder.service` lit le Cycle Analyst, le GPS et l'I2C, puis ecrit les donnees SQLite.
+- `cycle-photo.service` lit les metriques live du recorder, declenche la camera aux checkpoints de distance, garde les photos en attente dans `var/pending_photos`, puis retente l'upload.
+- `cycle-analyst.service` sert uniquement l'interface web sur le port `5050`.
+- `nginx` expose l'interface sur le port `80`.
 
-Contenu recommande :
+Cette separation permet a l'enregistrement de continuer meme si le dashboard,
+nginx, le navigateur, la camera ou l'upload photo/reseau se bloquent.
 
-```ini
-[Unit]
-Description=Cycle Analyst App
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=jeandard
-Group=jeandard
-SupplementaryGroups=dialout i2c video
-WorkingDirectory=/home/jeandard/Cycle-Analyst-App
-EnvironmentFile=-/home/jeandard/Cycle-Analyst-App/cycle-analyst.env
-Environment=PYTHONUNBUFFERED=1
-Environment=PATH=/home/jeandard/Cycle-Analyst-App/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/home/jeandard/Cycle-Analyst-App/.venv/bin/python /home/jeandard/Cycle-Analyst-App/cycle_server.py
-Restart=always
-RestartSec=5
-KillSignal=SIGINT
-TimeoutStopSec=20
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Activer et demarrer :
+Depuis le repo :
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now cycle-analyst.service
-sudo systemctl status cycle-analyst.service --no-pager
+cd /home/jeandard/Cycle-Analyst-App
+python3 scripts/setup_pi_services.py
+```
+
+Le premier lancement est un apercu. Pour installer ou mettre a jour les
+services :
+
+```bash
+python3 scripts/setup_pi_services.py --apply
+```
+
+Specifier le nom local du vehicule si besoin :
+
+```bash
+python3 scripts/setup_pi_services.py --apply --server-name "sc-vehicule-2.local sc-vehicule-2"
+```
+
+Verifier :
+
+```bash
+systemctl status cycle-recorder.service cycle-photo.service cycle-analyst.service --no-pager
+curl http://127.0.0.1:5050/metrics
+curl http://127.0.0.1/
 ```
 
 Voir les logs :
 
 ```bash
+journalctl -u cycle-recorder.service -f
+journalctl -u cycle-photo.service -f
 journalctl -u cycle-analyst.service -f
+sudo tail -f /var/log/nginx/error.log
 ```
 
-Tester :
-
-```bash
-curl http://127.0.0.1:5050
-curl http://127.0.0.1:5050/metrics
-```
+Par defaut, le service recorder installe par ce setup desactive la capture photo
+dans le process d'enregistrement (`APP_SCHEDULE_PHOTOS=0`). C'est volontaire :
+sur Pi3, la camera et l'upload ne doivent pas pouvoir bloquer l'ecriture des
+donnees. Le service `cycle-photo.service` prend le relais pour les photos.
 
 ## 14. Autoriser le bouton de redemarrage de l'UI
 
@@ -751,7 +759,10 @@ L'endpoint `/restart_service` execute :
 sudo systemctl restart cycle-analyst.service
 ```
 
-Sans regle sudoers, le bouton de l'interface ne peut pas redemarrer le service.
+En installation separee, ce bouton redemarre seulement l'interface web. Il ne
+redemarre pas `cycle-recorder.service`, pour eviter d'interrompre
+l'enregistrement. Sans regle sudoers, le bouton de l'interface ne peut pas
+redemarrer le service web.
 
 Creer une regle dediee :
 
@@ -773,6 +784,9 @@ sudo -l -U jeandard
 ```
 
 ## 15. Configurer nginx pour l'URL locale
+
+Le script `scripts/setup_pi_services.py --apply` configure deja nginx. Cette
+section sert seulement si tu veux le faire a la main.
 
 Creer le site :
 
@@ -1171,6 +1185,8 @@ La sync tourne toutes les 60 secondes quand `MONITOR_URL` est defini.
 - `APP_VAR_DIR` pointe vers le `var/` du repo
 - `/home/jeandard/Documents/tiles.pmtiles` existe si la basemap offline est utilisee
 - `MONITOR_DEVICE_ID` unique
+- `cycle-recorder.service` actif
+- `cycle-photo.service` actif
 - `cycle-analyst.service` actif
 - `nginx` actif
 - `curl http://127.0.0.1:5050/metrics` repond sur le Pi
@@ -1187,6 +1203,10 @@ La sync tourne toutes les 60 secondes quand `MONITOR_URL` est defini.
 ```bash
 sudo systemctl status cycle-analyst.service --no-pager
 journalctl -u cycle-analyst.service -n 100 --no-pager
+sudo systemctl status cycle-recorder.service --no-pager
+journalctl -u cycle-recorder.service -n 100 --no-pager
+sudo systemctl status cycle-photo.service --no-pager
+journalctl -u cycle-photo.service -n 100 --no-pager
 ```
 
 Verifier :
@@ -1296,6 +1316,9 @@ mkdir -p /home/jeandard/Documents
 Puis ajuster/creer :
 
 - `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env` cree automatiquement par l'app ou copie depuis `cycle-analyst.env.example`
+- services et nginx via `python3 scripts/setup_pi_services.py --apply`
+- `/etc/systemd/system/cycle-recorder.service`
+- `/etc/systemd/system/cycle-photo.service`
 - `/etc/systemd/system/cycle-analyst.service`
 - `/etc/nginx/sites-available/cycle-analyst`
 - `/etc/sudoers.d/cycle-analyst` si tu veux le bouton restart
@@ -1303,8 +1326,6 @@ Puis ajuster/creer :
 Et activer :
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now cycle-analyst.service
+python3 scripts/setup_pi_services.py --apply
 sudo nginx -t
-sudo systemctl enable --now nginx
 ```

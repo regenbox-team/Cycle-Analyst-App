@@ -15,6 +15,9 @@
 - var/ (runtime data; created on first run)
   - ride_data.db, session_metrics/, current_session.txt, session_state.txt, current_user.txt, vehicle_mode.txt, test_mode.txt
 - cycle_server.py (entrypoint with create_app factory)
+- cycle_recorder.py (data recorder entrypoint for split-service Pi installs)
+- cycle_photo_worker.py (camera capture/upload worker for split-service Pi installs)
+- cycle_web.py (web dashboard entrypoint for split-service Pi installs)
 - wsgi.py (WSGI entrypoint)
 
 ## Runtime Data Directory
@@ -30,6 +33,11 @@
 - Development: `python cycle_server.py`
   - Starts the background reader thread and Flask dev server on port 5050.
 
+- Raspberry Pi split services:
+  - Recommended for road use: recorder, photo worker, and web run as separate systemd services.
+  - Install/update with `python3 scripts/setup_pi_services.py --apply`.
+  - See `docs/services_setup.md`.
+
 - WSGI (gunicorn/uwsgi): use `wsgi:application`
   - Example: `gunicorn -w 2 wsgi:application`
   - The factory does not start the background reader by default. Run the reader as a separate process if needed or adapt your deployment to start it.
@@ -40,6 +48,7 @@
 - `scripts/db_viewer.py` (viewer)
 - `scripts/export_sessions.py` (export)
 - `scripts/merge_sessions.py` (merge session logs)
+- `scripts/setup_pi_services.py` (install/update Raspberry Pi systemd/nginx services)
 - `scripts/user_change.py` (user timeline tool)
 
 Run via: `python scripts/<tool>.py ...`

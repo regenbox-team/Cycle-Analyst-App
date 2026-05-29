@@ -34,7 +34,7 @@ flowchart LR
         GPSDongle["GPS NMEA dongle<br/>/dev/ttyACM0"]
         Solar["INA228 solar sensor<br/>I2C / smbus2"]
         Camera["Pi camera / USB cam<br/>libcamera-still, fswebcam, or APP_CAMERA_COMMAND"]
-        Systemd["systemd service<br/>cycle-analyst.service"]
+        Systemd["systemd services<br/>cycle-recorder.service + cycle-photo.service + cycle-analyst.service"]
         PMTiles["Offline PMTiles file"]
     end
 
@@ -63,10 +63,11 @@ flowchart LR
     GPSDongle -->|"NMEA GGA/RMC"| GPS
     Solar -->|"current, bus V, shunt V, power, temp"| Reader
     Camera -->|"JPEG image bytes"| PhotoCapture
-    Systemd <-->|"POST /restart_service calls sudo systemctl restart"| LocalApp
+    Systemd <-->|"POST /restart_service restarts web service"| LocalApp
     PMTiles -->|"range reads"| LocalApp
 
-    Reader -->|"latest_raw_values + session_metrics"| LocalApp
+    Reader -->|"latest_raw_values + session_metrics"| MetricsJSON
+    MetricsJSON -->|"live state refresh"| LocalApp
     GPS -->|"gps_state"| LocalApp
     Reader -->|"1 Hz telemetry samples"| RideDB
     Reader -->|"metrics snapshots"| MetricsJSON
