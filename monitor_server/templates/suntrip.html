@@ -227,6 +227,44 @@
         text-transform: uppercase;
       }
 
+      .panel-title-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .map-fit-button {
+        appearance: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 28px;
+        padding: 6px 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .map-fit-button:hover,
+      .map-fit-button:focus-visible {
+        border-color: var(--ink);
+        outline: none;
+      }
+
+      .map-fit-button:disabled {
+        color: var(--muted);
+        cursor: default;
+        opacity: 0.52;
+      }
+
       .session {
         color: var(--ink);
         font-size: 12px;
@@ -315,6 +353,15 @@
         font-weight: 700;
         opacity: 0.68;
         white-space: nowrap;
+      }
+
+      .metrics-note {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.2;
+        opacity: 0.72;
+        text-align: right;
       }
 
       .metrics {
@@ -801,7 +848,10 @@
           </article>
           <section class="map-panel">
             <div class="panel-head">
-              <div class="panel-title">Position des photos</div>
+              <div class="panel-title-row">
+                <div class="panel-title">Position des photos</div>
+                <button class="map-fit-button" id="map-fit-button" type="button" disabled>Recentrer</button>
+              </div>
               <div class="session" id="session-label">--</div>
             </div>
             <div id="suntrip-map"></div>
@@ -834,6 +884,7 @@
         <div class="metrics-box">
           <div class="metrics-box-head">
             <h2>Données journalières</h2>
+            <span class="metrics-note">Capteur solaire hors service depuis l'arrivée en Espagne.</span>
           </div>
 
           <div class="metrics">
@@ -1040,6 +1091,7 @@
     <script>
       let map;
       let markers = [];
+      let photoBounds = [];
       let latestImageUrl = "";
       let selectedPhotoId = null;
       let currentSuntripData = null;
@@ -1272,6 +1324,21 @@
         }).addTo(map);
       }
 
+      function fitMapToPhotos() {
+        initMap();
+        if (photoBounds.length === 1) {
+          map.setView(photoBounds[0], 13);
+        } else if (photoBounds.length > 1) {
+          map.fitBounds(photoBounds, { padding: [28, 28], maxZoom: 13 });
+        }
+      }
+
+      function initMapFitButton() {
+        const button = document.getElementById("map-fit-button");
+        if (!button) return;
+        button.addEventListener("click", fitMapToPhotos);
+      }
+
       function renderMarkers(points) {
         initMap();
         markers.forEach(marker => marker.remove());
@@ -1294,11 +1361,9 @@
           bounds.push([point.lat, point.lon]);
         });
 
-        if (bounds.length === 1) {
-          map.setView(bounds[0], 13);
-        } else if (bounds.length > 1) {
-          map.fitBounds(bounds, { padding: [28, 28], maxZoom: 13 });
-        }
+        photoBounds = bounds;
+        const button = document.getElementById("map-fit-button");
+        if (button) button.disabled = bounds.length === 0;
       }
 
       async function loadSuntrip() {
@@ -1345,6 +1410,7 @@
       initFrameCanvas();
       initEfficiencyUnitToggle();
       initProjectInfoToggle();
+      initMapFitButton();
       loadSuntrip();
       setInterval(loadSuntrip, 30000);
     </script>

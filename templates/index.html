@@ -445,9 +445,9 @@
 
   </div> <!-- /#page-scale-root -->
 
-  <script src="{{ url_for('static', filename='js/script.js') }}?v=solar-meter-600w"></script>
-  <script src="{{ url_for('static', filename='js/gps_status.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/sys_metrics.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/script.js') }}?v=dashboard-poll-250"></script>
+  <script src="{{ url_for('static', filename='js/gps_status.js') }}?v=dashboard-poll-250"></script>
+  <script src="{{ url_for('static', filename='js/sys_metrics.js') }}?v=dashboard-poll-250"></script>
   <!-- Prefer local vendor copies for offline usage; fallback to CDN if not present -->
   <link id="ml-style" rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre-gl.css') }}" onerror="this.href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css'">
   <script src="{{ url_for('static', filename='vendor/maplibre-gl.js') }}" onerror="this.onerror=null;this.src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'"></script>

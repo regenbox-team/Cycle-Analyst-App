@@ -1,4 +1,8 @@
+let gpsStatusRequestInFlight = false;
+
 async function updateGpsStatus() {
+  if (gpsStatusRequestInFlight) return;
+  gpsStatusRequestInFlight = true;
   try {
     const res = await fetch('/gps_status', { cache: 'no-store' });
     const s = await res.json();
@@ -39,10 +43,12 @@ async function updateGpsStatus() {
     }
   } catch (e) {
     // swallow errors
+  } finally {
+    gpsStatusRequestInFlight = false;
   }
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   updateGpsStatus();
-  setInterval(updateGpsStatus, 1000);
+  setInterval(updateGpsStatus, 2000);
 });

@@ -19,6 +19,12 @@ const photoPreviewState = {
 };
 const POWER_HISTORY_WINDOWS = [180, 360, 720, 1800];
 const POWER_HISTORY_SAMPLE_COUNT = 180;
+const METRICS_POLL_MS = 250;
+const METRICS_POLL_HIDDEN_MS = 1500;
+const POWER_HISTORY_POLL_MS = 3000;
+const POWER_HISTORY_POLL_HIDDEN_MS = 10000;
+let metricsRequestInFlight = false;
+let powerHistoryRequestInFlight = false;
 const powerHistoryState = {
   motor: true,
   human: true,
@@ -707,6 +713,8 @@ function setSolarUiEnabled(enabled) {
 
 async function fetchPowerHistory() {
   if (document.body.classList.contains('edit-mode')) return;
+  if (powerHistoryRequestInFlight) return;
+  powerHistoryRequestInFlight = true;
   try {
     const params = new URLSearchParams({
       window_seconds: String(powerHistoryState.windowSeconds || POWER_HISTORY_WINDOWS[0]),
@@ -722,7 +730,17 @@ async function fetchPowerHistory() {
     renderPowerHistoryChart();
   } catch (err) {
     console.error('Error fetching power history:', err);
+  } finally {
+    powerHistoryRequestInFlight = false;
   }
+}
+
+function startPowerHistoryLoop() {
+  const tick = async () => {
+    await fetchPowerHistory();
+    setTimeout(tick, document.hidden ? POWER_HISTORY_POLL_HIDDEN_MS : POWER_HISTORY_POLL_MS);
+  };
+  tick();
 }
 
 function setSvgAttrs(el, attrs) {
@@ -1433,8 +1451,10 @@ async function fetchMetrics() {
     metricsPaused = true;
     return;
   }
+  if (metricsRequestInFlight) return;
+  metricsRequestInFlight = true;
   try {
-    const res = await fetch('/metrics');
+    const res = await fetch('/metrics', { cache: 'no-store' });
     const json = await res.json();
     const solarEnabled = json.solar_enabled !== false && json.calculated_CA_values?.solar_enabled !== false;
     setSolarUiEnabled(solarEnabled);
@@ -1632,7 +1652,17 @@ async function fetchMetrics() {
 
   } catch (err) {
     console.error('Error fetching metrics:', err);
+  } finally {
+    metricsRequestInFlight = false;
   }
+}
+
+function startMetricsLoop() {
+  const tick = async () => {
+    await fetchMetrics();
+    setTimeout(tick, document.hidden ? METRICS_POLL_HIDDEN_MS : METRICS_POLL_MS);
+  };
+  tick();
 }
 
 /* ====== EVENT LISTENERS ====== */
@@ -2074,8 +2104,6 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   // Start metrics loop
-  fetchMetrics();
-  setInterval(fetchMetrics, 100);
-  fetchPowerHistory();
-  setInterval(fetchPowerHistory, 1000);
+  startMetricsLoop();
+  startPowerHistoryLoop();
 });

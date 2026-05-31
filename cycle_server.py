@@ -147,8 +147,17 @@ def create_app(
         "off",
     }
     if not start_reader and live_state_from_files and hasattr(app, "before_request"):
+        try:
+            refresh_min_seconds = max(0.0, float(os.getenv("APP_LIVE_STATE_REFRESH_MIN_SECONDS", "0.1")))
+        except ValueError:
+            refresh_min_seconds = 0.1
+        last_live_state_refresh = {"at": 0.0}
+
         @app.before_request
         def _refresh_state_from_recorder_files():
+            now = time.monotonic()
+            if now - last_live_state_refresh["at"] < refresh_min_seconds:
+                return
             try:
                 state.session_id = state.load_session_id()
                 state.session_active = state.load_session_active()
@@ -156,6 +165,7 @@ def create_app(
                 state.current_user_id = state.load_current_user_id()
                 state.solar_roof_enabled = state.load_solar_roof_enabled()
                 state.load_session_metrics_from_file(state.session_id)
+                last_live_state_refresh["at"] = now
             except Exception:
                 pass
 

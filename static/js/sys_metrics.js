@@ -12,6 +12,8 @@ function formatUptime(seconds) {
   return parts.join(' ');
 }
 
+let sysMetricsRequestInFlight = false;
+
 async function updateSysMetrics() {
   const elLoad = document.getElementById('sys-load');
   const elTemp = document.getElementById('sys-temp');
@@ -20,6 +22,8 @@ async function updateSysMetrics() {
   const elUp   = document.getElementById('sys-uptime');
   const elThr  = document.getElementById('sys-throttled');
   if (!elLoad || !elTemp || !elCpu || !elMem || !elUp || !elThr) return;
+  if (sysMetricsRequestInFlight) return;
+  sysMetricsRequestInFlight = true;
   try {
     const res = await fetch('/sys_metrics', { cache: 'no-store' });
     const m = await res.json();
@@ -40,10 +44,12 @@ async function updateSysMetrics() {
     elThr.textContent = `Throttled: ${m.throttled ?? '–'}`;
   } catch (e) {
     // leave previous values
+  } finally {
+    sysMetricsRequestInFlight = false;
   }
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   updateSysMetrics();
-  setInterval(updateSysMetrics, 2000);
+  setInterval(updateSysMetrics, 5000);
 });
