@@ -133,6 +133,39 @@ done
 - Connection inactive:
   - Check serial port and mode.
   - Check `cycle-recorder.service`, not only the web service.
+  - The recorder must publish fresh live snapshots even before a session starts.
+
+```bash
+cd /home/jeandard/Cycle-Analyst-App
+grep -n "last_live_state_write_time" app/reader.py
+SID=$(cat var/current_session.txt 2>/dev/null)
+ls -lh "var/session_metrics/${SID}_session_metrics.json" 2>/dev/null
+curl -s http://127.0.0.1:5050/metrics | head -c 300
+```
+
+If the grep prints nothing, pull the latest code and restart the split services:
+
+```bash
+git pull
+sudo systemctl restart cycle-recorder.service cycle-photo.service cycle-analyst.service
+```
+
+- Recorder unstable but web/photo OK:
+  - Check whether the optional INA228 I2C sensor is leaking file descriptors after repeated failed detection.
+  - If this happens during a ride, disable solar temporarily so CA/GPS recording keeps running.
+
+```bash
+PID=$(systemctl show -p MainPID --value cycle-recorder.service)
+ls -l /proc/$PID/fd 2>/dev/null | grep -c '/dev/i2c-1'
+
+cd /home/jeandard/Cycle-Analyst-App
+cp cycle-analyst.env cycle-analyst.env.no-solar.$(date +%H%M%S)
+grep -q '^APP_SOLAR_SENSOR=' cycle-analyst.env \
+  && sed -i 's/^APP_SOLAR_SENSOR=.*/APP_SOLAR_SENSOR=/' cycle-analyst.env \
+  || echo 'APP_SOLAR_SENSOR=' >> cycle-analyst.env
+sudo systemctl restart cycle-recorder.service
+```
+
 - 502 from nginx:
   - The web backend is not accepting connections yet or has restarted.
 - 504 from nginx:

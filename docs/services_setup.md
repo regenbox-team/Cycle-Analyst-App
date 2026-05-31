@@ -47,6 +47,25 @@ curl http://127.0.0.1:5050/metrics
 curl http://127.0.0.1/
 ```
 
+If `/start` says `Connection: Inactive`, check that the recorder is publishing
+fresh live snapshots:
+
+```bash
+cd /home/jeandard/Cycle-Analyst-App
+grep -n "last_live_state_write_time" app/reader.py
+SID=$(cat var/current_session.txt 2>/dev/null)
+ls -lh "var/session_metrics/${SID}_session_metrics.json" 2>/dev/null
+curl -s http://127.0.0.1:5050/metrics | head -c 300
+```
+
+The `grep` must print a line, and the metrics file timestamp should be current
+when the Cycle Analyst is plugged in. If not, pull the latest code and restart:
+
+```bash
+git pull
+sudo systemctl restart cycle-recorder.service cycle-photo.service cycle-analyst.service
+```
+
 Watch that database rows keep increasing:
 
 ```bash
@@ -59,6 +78,29 @@ while true; do
   done
   sleep 10
 done
+```
+
+If only `cycle-recorder.service` becomes unstable while the web and photo
+services stay alive, check for an I2C file descriptor leak:
+
+```bash
+PID=$(systemctl show -p MainPID --value cycle-recorder.service)
+ls -l /proc/$PID/fd 2>/dev/null | grep -c '/dev/i2c-1'
+ls -l /proc/$PID/fd 2>/dev/null | grep -E '/dev/ttyUSB|/dev/ttyACM|/dev/i2c'
+```
+
+The I2C count should stay very small. If it grows into the hundreds, the INA228
+sensor is failing detection and the recorder is repeatedly reopening the bus.
+For a data-first ride, temporarily disable the solar sensor and restart only
+the recorder:
+
+```bash
+cd /home/jeandard/Cycle-Analyst-App
+cp cycle-analyst.env cycle-analyst.env.no-solar.$(date +%H%M%S)
+grep -q '^APP_SOLAR_SENSOR=' cycle-analyst.env \
+  && sed -i 's/^APP_SOLAR_SENSOR=.*/APP_SOLAR_SENSOR=/' cycle-analyst.env \
+  || echo 'APP_SOLAR_SENSOR=' >> cycle-analyst.env
+sudo systemctl restart cycle-recorder.service
 ```
 
 ## Logs

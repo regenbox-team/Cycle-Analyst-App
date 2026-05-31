@@ -94,6 +94,7 @@ def _update_live_gps_climb() -> None:
 
 def read_serial():
     last_db_write_time = time.time()
+    last_live_state_write_time = 0.0
     last_data_time = time.time()
     last_control_sync_time = 0.0
     last_session_active = state.session_active
@@ -250,6 +251,15 @@ def read_serial():
 
         if data is not None:
             state.latest_raw_values = data
+
+        live_gps_update = float(state.gps_state.get("last_update") or 0.0)
+        if (
+            data is not None
+            or solar_sample is not None
+            or live_gps_update > last_live_state_write_time
+        ) and now_ts - last_live_state_write_time >= 1:
+            last_live_state_write_time = now_ts
+            state.save_session_metrics_to_file()
 
         if not state.session_active:
             continue

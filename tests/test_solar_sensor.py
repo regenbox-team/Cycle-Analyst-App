@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.solar_sensor import (
     DEVICE_ID_REGISTER,
@@ -69,6 +71,48 @@ class INA228DetectionTest(unittest.TestCase):
             r"0x44: manufacturer=0x5449, device=0x2260",
         ):
             sensor._detect_address(0)
+
+
+class INA228LifecycleTest(unittest.TestCase):
+    def test_constructor_closes_bus_when_initialization_fails(self):
+        class FakeBus:
+            instances = []
+
+            def __init__(self, bus_id):
+                self.bus_id = bus_id
+                self.closed = False
+                FakeBus.instances.append(self)
+
+            def close(self):
+                self.closed = True
+
+        fake_smbus2 = SimpleNamespace(SMBus=FakeBus, i2c_msg=SimpleNamespace())
+
+        with patch.dict("sys.modules", {"smbus2": fake_smbus2}):
+            with patch.object(INA228Sensor, "_detect_address", side_effect=RuntimeError("no sensor")):
+                with self.assertRaisesRegex(RuntimeError, "no sensor"):
+                    INA228Sensor()
+
+        self.assertEqual(len(FakeBus.instances), 1)
+        self.assertTrue(FakeBus.instances[0].closed)
+
+    def test_close_is_idempotent(self):
+        class FakeBus:
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+
+        sensor = INA228Sensor.__new__(INA228Sensor)
+        bus = FakeBus()
+        sensor._bus = bus
+
+        sensor.close()
+        sensor.close()
+
+        self.assertEqual(bus.close_count, 1)
+        self.assertIsNone(sensor._bus)
 
 
 if __name__ == "__main__":

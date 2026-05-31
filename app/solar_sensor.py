@@ -80,6 +80,7 @@ class INA228Sensor:
 
         self._SMBus = SMBus
         self._i2c_msg = i2c_msg
+        self._bus = None
         self.bus_id = int(os.getenv("APP_SOLAR_I2C_BUS", "1"))
         self.address = int(os.getenv("APP_SOLAR_I2C_ADDR", "0x45"), 0)
         self.shunt_ohms = float(os.getenv("APP_SOLAR_SHUNT_OHMS", "0.0002"))
@@ -92,16 +93,24 @@ class INA228Sensor:
         self._last_sample_ts = None
         self.current_lsb = self.max_amps / INA228_CURRENT_LSB_DIVISOR
         self.expected_shunt_cal = int(INA228_CALIBRATION_FACTOR * self.current_lsb * self.shunt_ohms) & 0x7FFF
-        self._bus = self._SMBus(self.bus_id)
 
-        self.address = self._detect_address(self.address)
-        self.manufacturer_id = self._read_u16(MANUFACTURER_ID_REGISTER)
-        self.device_id = self._read_u16(DEVICE_ID_REGISTER)
-        self._configure_like_ardupilot()
+        try:
+            self._bus = self._SMBus(self.bus_id)
+            self.address = self._detect_address(self.address)
+            self.manufacturer_id = self._read_u16(MANUFACTURER_ID_REGISTER)
+            self.device_id = self._read_u16(DEVICE_ID_REGISTER)
+            self._configure_like_ardupilot()
+        except Exception:
+            self.close()
+            raise
 
     def close(self) -> None:
+        bus = self._bus
+        self._bus = None
+        if bus is None:
+            return
         try:
-            self._bus.close()
+            bus.close()
         except Exception:
             pass
 
@@ -218,6 +227,8 @@ class INA228Sensor:
         ) from last_error
 
     def _write_u16(self, register: int, value: int) -> None:
+        if self._bus is None:
+            raise RuntimeError("INA228 bus is closed")
         payload = [register & 0xFF, (value >> 8) & 0xFF, value & 0xFF]
         write = self._i2c_msg.write(self.address, payload)
         self._bus.i2c_rdwr(write)
@@ -239,6 +250,8 @@ class INA228Sensor:
         return _sign_extend(value, 20)
 
     def _read_bytes(self, register: int, count: int, address: int | None = None) -> bytes:
+        if self._bus is None:
+            raise RuntimeError("INA228 bus is closed")
         target = self.address if address is None else address
         write = self._i2c_msg.write(target, [register & 0xFF])
         read = self._i2c_msg.read(target, count)

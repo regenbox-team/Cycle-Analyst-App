@@ -1232,12 +1232,33 @@ Si l'IP marche mais pas `.local`, le reseau bloque probablement le mDNS.
 ```bash
 ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
 groups
-sudo systemctl restart cycle-analyst.service
-journalctl -u cycle-analyst.service -f
+sudo systemctl status cycle-recorder.service --no-pager
+journalctl -u cycle-recorder.service -n 100 --no-pager
+sudo fuser -v /dev/ttyUSB0 /dev/ttyACM0 2>/dev/null || true
 ```
 
 Verifier que l'utilisateur est dans `dialout` et que le port live du code est
 bien `/dev/ttyUSB0`.
+
+Si la page `/start` affiche `Connection: Inactive` alors que
+`cycle-recorder.service` tourne, verifier que le repo contient bien le correctif
+qui publie les snapshots live meme avant le debut d'une session :
+
+```bash
+cd /home/jeandard/Cycle-Analyst-App
+grep -n "last_live_state_write_time" app/reader.py
+SID=$(cat var/current_session.txt 2>/dev/null)
+ls -lh "var/session_metrics/${SID}_session_metrics.json" 2>/dev/null
+curl -s http://127.0.0.1:5050/metrics | head -c 300
+```
+
+Le `grep` doit afficher une ligne et le fichier de metriques doit avoir une
+date recente quand le Cycle Analyst est branche. Sinon :
+
+```bash
+git pull
+sudo systemctl restart cycle-recorder.service cycle-photo.service cycle-analyst.service
+```
 
 ### Le GPS ne donne pas de fix
 
@@ -1260,6 +1281,29 @@ python scripts/ina228_debug.py --addr 0 --once
 
 Si aucune adresse `0x41`, `0x44` ou `0x45` n'apparait, verifier le cablage et
 l'alimentation du capteur.
+
+Si seul `cycle-recorder.service` devient instable alors que les services web et
+photo restent actifs, verifier que le recorder n'accumule pas les ouvertures du
+bus I2C :
+
+```bash
+PID=$(systemctl show -p MainPID --value cycle-recorder.service)
+ls -l /proc/$PID/fd 2>/dev/null | grep -c '/dev/i2c-1'
+ls -l /proc/$PID/fd 2>/dev/null | grep -E '/dev/ttyUSB|/dev/ttyACM|/dev/i2c'
+```
+
+Le nombre de `/dev/i2c-1` doit rester tres bas. Si le capteur INA228 ne repond
+plus pendant un trajet, desactiver temporairement le solaire pour proteger
+l'enregistrement CA/GPS :
+
+```bash
+cd /home/jeandard/Cycle-Analyst-App
+cp cycle-analyst.env cycle-analyst.env.no-solar.$(date +%H%M%S)
+grep -q '^APP_SOLAR_SENSOR=' cycle-analyst.env \
+  && sed -i 's/^APP_SOLAR_SENSOR=.*/APP_SOLAR_SENSOR=/' cycle-analyst.env \
+  || echo 'APP_SOLAR_SENSOR=' >> cycle-analyst.env
+sudo systemctl restart cycle-recorder.service
+```
 
 ### Le bouton restart de l'interface echoue
 
