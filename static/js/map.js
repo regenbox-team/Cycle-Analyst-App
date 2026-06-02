@@ -1568,21 +1568,10 @@
 
   function updateRouteCurrentOnMap(progress) {
     if (!map) return;
-    const src = ensureRouteCurrentSource();
-    if (!src) return;
-    if (!progress) {
+    const src = map.getSource('route-current');
+    if (src) {
       src.setData({ type: 'FeatureCollection', features: [] });
-      return;
     }
-    ensureRouteCurrentLayer();
-    src.setData({
-      type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: [progress.lon, progress.lat] },
-        properties: {}
-      }]
-    });
   }
 
   function updateRouteProfileCursorOnMap() {
