@@ -17,9 +17,11 @@
   let lastLon = null, lastLat = null;
   let lastGpsMoving = false;
   let lastGpsBearing = 0;
+  let positionArrowImageLoading = false;
   const MIN_SPEED_KPH = 3; // do not update heading below this speed
   const NAVIGATION_ZOOM = 17;
   const NAVIGATION_PITCH = 45;
+  const NAVIGATION_BUTTON_PITCH = 55;
   const HEADING_MODES = { NORTH: 'north', FREE: 'free', TRAJECTORY: 'trajectory' };
   let headingMode = HEADING_MODES.NORTH;
   let filteredBearing = 0; // smoothed map bearing
@@ -67,6 +69,11 @@
     const btn = document.getElementById('map-follow-toggle');
     if (!btn) return;
     btn.textContent = `Follow: ${follow ? 'On' : 'Off'}`;
+  }
+
+  function setFollow(enabled) {
+    follow = Boolean(enabled);
+    setFollowButton();
   }
 
   function formatAltitudeMeters(value) {
@@ -188,8 +195,7 @@
   }
 
   function toggleFollow() {
-    follow = !follow;
-    setFollowButton();
+    setFollow(!follow);
   }
 
   function setHeadingButton() {
@@ -292,8 +298,18 @@
     }
   }
 
-  function createPositionArrowImage() {
-    const size = 48;
+  function loadImageElement(src) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = src;
+    });
+  }
+
+  async function createPositionArrowImage() {
+    const size = 96;
+    const source = await loadImageElement('/static/img/arrow.png');
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
@@ -301,29 +317,26 @@
     if (!ctx) return null;
 
     ctx.clearRect(0, 0, size, size);
+    ctx.drawImage(source, 0, 0, size, size);
+    ctx.globalCompositeOperation = 'source-in';
     ctx.fillStyle = '#1e90ff';
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 4;
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(24, 4);
-    ctx.lineTo(40, 40);
-    ctx.lineTo(24, 31);
-    ctx.lineTo(8, 40);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
+    ctx.fillRect(0, 0, size, size);
+    ctx.globalCompositeOperation = 'source-over';
     return ctx.getImageData(0, 0, size, size);
   }
 
-  function ensurePositionArrowImage() {
+  async function ensurePositionArrowImage() {
     if (!map || (map.hasImage && map.hasImage('position-arrow'))) return;
-    const image = createPositionArrowImage();
-    if (!image) return;
+    if (positionArrowImageLoading) return;
+    positionArrowImageLoading = true;
     try {
+      const image = await createPositionArrowImage();
+      if (!image || !map || (map.hasImage && map.hasImage('position-arrow'))) return;
       map.addImage('position-arrow', image, { pixelRatio: 2 });
     } catch (e) {
       // Style reloads can briefly race image registration.
+    } finally {
+      positionArrowImageLoading = false;
     }
   }
 
@@ -343,7 +356,7 @@
         filter: ['==', ['get', 'moving'], true],
         layout: {
           'icon-image': 'position-arrow',
-          'icon-size': 0.55,
+          'icon-size': 0.9,
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,
           'icon-rotate': ['get', 'bearing'],
@@ -355,6 +368,7 @@
 
   function applyNavigationView(lon, lat, options = {}) {
     if (!map || !isFinite(lon) || !isFinite(lat)) return;
+    setFollow(true);
     setHeadingMode(HEADING_MODES.TRAJECTORY);
     const bearing = options.bearing == null ? null : normalizeBearing(options.bearing);
     if (bearing != null) {
@@ -366,7 +380,7 @@
     const easeOptions = {
       center: [lon, lat],
       zoom: targetZoom,
-      pitch: NAVIGATION_PITCH,
+      pitch: options.pitch == null ? NAVIGATION_PITCH : options.pitch,
       duration: options.duration == null ? 600 : options.duration
     };
     if (bearing != null) easeOptions.bearing = bearing;
@@ -988,6 +1002,8 @@
   }
 
   async function focusNavigationFromGps() {
+    setFollow(true);
+    setHeadingMode(HEADING_MODES.TRAJECTORY);
     try {
       const res = await fetch('/gps_status', { cache: 'no-store' });
       const s = await res.json();
@@ -1002,6 +1018,7 @@
       updatePositionSource(lon, lat, motion.moving, motion.bearing);
       applyNavigationView(lon, lat, {
         duration: 500,
+        pitch: NAVIGATION_BUTTON_PITCH,
         bearing: motion.moving ? motion.bearing : null
       });
     } catch (e) {
