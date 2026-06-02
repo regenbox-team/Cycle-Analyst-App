@@ -15,7 +15,11 @@
   let routeProfilePanStart = null;
   let routeProfileTouchDistance = null;
   let lastLon = null, lastLat = null;
+  let lastGpsMoving = false;
+  let lastGpsBearing = 0;
   const MIN_SPEED_KPH = 3; // do not update heading below this speed
+  const NAVIGATION_ZOOM = 17;
+  const NAVIGATION_PITCH = 45;
   const HEADING_MODES = { NORTH: 'north', FREE: 'free', TRAJECTORY: 'trajectory' };
   let headingMode = HEADING_MODES.NORTH;
   let filteredBearing = 0; // smoothed map bearing
@@ -206,23 +210,27 @@
     }
   }
 
-  function cycleHeadingMode() {
-    if (headingMode === HEADING_MODES.NORTH) headingMode = HEADING_MODES.FREE;
-    else if (headingMode === HEADING_MODES.FREE) headingMode = HEADING_MODES.TRAJECTORY;
-    else headingMode = HEADING_MODES.NORTH;
-    localStorage.setItem('heading_mode', headingMode);
+  function setHeadingMode(mode, persist = true) {
+    if (!Object.values(HEADING_MODES).includes(mode)) return;
+    headingMode = mode;
+    if (persist) localStorage.setItem('heading_mode', headingMode);
     setHeadingButton();
-    // On entering North mode, animate back to 0 bearing
-    if (map && headingMode === HEADING_MODES.NORTH) {
+
+    if (!map) return;
+    if (headingMode === HEADING_MODES.NORTH) {
       filteredBearing = 0;
       bearingInitialized = true;
       map.easeTo({ bearing: 0, duration: 300 });
-    }
-    // On entering Trajectory mode, start smoothing from current bearing
-    if (map && headingMode === HEADING_MODES.TRAJECTORY) {
+    } else if (headingMode === HEADING_MODES.TRAJECTORY) {
       filteredBearing = normalizeBearing(map.getBearing());
       bearingInitialized = true;
     }
+  }
+
+  function cycleHeadingMode() {
+    if (headingMode === HEADING_MODES.NORTH) setHeadingMode(HEADING_MODES.FREE);
+    else if (headingMode === HEADING_MODES.FREE) setHeadingMode(HEADING_MODES.TRAJECTORY);
+    else setHeadingMode(HEADING_MODES.NORTH);
   }
 
   function normalizeBearing(b) {
@@ -247,6 +255,122 @@
     const y = Math.sin(Δλ) * Math.cos(φ2);
     const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
     return normalizeBearing(toDeg(Math.atan2(y, x)));
+  }
+
+  function finiteNumberOrNull(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    return isFinite(n) ? n : null;
+  }
+
+  function gpsMotionFromStatus(status) {
+    const speedKph = finiteNumberOrNull(status && status.speed_kph);
+    const moving = speedKph !== null && speedKph >= MIN_SPEED_KPH;
+    const gpsTrack = finiteNumberOrNull(status && status.track_deg);
+    if (moving && gpsTrack !== null) {
+      return { moving: true, bearing: normalizeBearing(gpsTrack) };
+    }
+    return { moving: false, bearing: lastGpsBearing };
+  }
+
+  function positionFeature(lon, lat, moving = lastGpsMoving, bearing = lastGpsBearing) {
+    return {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [lon, lat] },
+      properties: {
+        moving: Boolean(moving),
+        bearing: normalizeBearing(Number(bearing) || 0)
+      }
+    };
+  }
+
+  function updatePositionSource(lon, lat, moving = lastGpsMoving, bearing = lastGpsBearing) {
+    lastGpsMoving = Boolean(moving);
+    lastGpsBearing = normalizeBearing(Number(bearing) || 0);
+    if (posSource) {
+      posSource.setData(positionFeature(lon, lat, lastGpsMoving, lastGpsBearing));
+    }
+  }
+
+  function createPositionArrowImage() {
+    const size = 48;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = '#1e90ff';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 4;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(24, 4);
+    ctx.lineTo(40, 40);
+    ctx.lineTo(24, 31);
+    ctx.lineTo(8, 40);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    return ctx.getImageData(0, 0, size, size);
+  }
+
+  function ensurePositionArrowImage() {
+    if (!map || (map.hasImage && map.hasImage('position-arrow'))) return;
+    const image = createPositionArrowImage();
+    if (!image) return;
+    try {
+      map.addImage('position-arrow', image, { pixelRatio: 2 });
+    } catch (e) {
+      // Style reloads can briefly race image registration.
+    }
+  }
+
+  function positionLayers(circleColor) {
+    return [
+      {
+        id: 'pos-dot',
+        type: 'circle',
+        source: 'pos',
+        filter: ['!=', ['get', 'moving'], true],
+        paint: { 'circle-color': circleColor, 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 }
+      },
+      {
+        id: 'pos-arrow',
+        type: 'symbol',
+        source: 'pos',
+        filter: ['==', ['get', 'moving'], true],
+        layout: {
+          'icon-image': 'position-arrow',
+          'icon-size': 0.55,
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+          'icon-rotate': ['get', 'bearing'],
+          'icon-rotation-alignment': 'map'
+        }
+      }
+    ];
+  }
+
+  function applyNavigationView(lon, lat, options = {}) {
+    if (!map || !isFinite(lon) || !isFinite(lat)) return;
+    setHeadingMode(HEADING_MODES.TRAJECTORY);
+    const bearing = options.bearing == null ? null : normalizeBearing(options.bearing);
+    if (bearing != null) {
+      filteredBearing = bearing;
+      bearingInitialized = true;
+      lastGpsBearing = bearing;
+    }
+    const targetZoom = Math.max(map.getZoom() || 0, NAVIGATION_ZOOM);
+    const easeOptions = {
+      center: [lon, lat],
+      zoom: targetZoom,
+      pitch: NAVIGATION_PITCH,
+      duration: options.duration == null ? 600 : options.duration
+    };
+    if (bearing != null) easeOptions.bearing = bearing;
+    map.easeTo(easeOptions);
   }
 
   // ==== Inline Protomaps-like styles (copied from basemaps.js) ====
@@ -434,7 +558,7 @@
       // Live track & position styled per CSS highlight
       { id: 'track-casing', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#050505', 'line-width': 7, 'line-opacity': 0.8 } },
       { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'orange', 'line-width': 4, 'line-opacity': 0.95 } },
-      { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': 'orange', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+      ...positionLayers('orange')
     ];
 
     return {
@@ -443,7 +567,7 @@
       sources: {
         basemap: { type: 'vector', url: `pmtiles://${pmtilesUrl}` },
         track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
-        pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
+        pos: { type: 'geojson', data: positionFeature(0, 0, false, 0) }
       },
       layers
     };
@@ -456,7 +580,7 @@
       ...(includeLabels ? buildLabelLayers('basemap', palette) : []),
       { id: 'track-casing', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#050505', 'line-width': 7, 'line-opacity': 0.8 } },
       { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'orange', 'line-width': 4, 'line-opacity': 0.95 } },
-      { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': 'orange', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+      ...positionLayers('orange')
     ];
 
     return {
@@ -465,7 +589,7 @@
       sources: {
         basemap: { type: 'vector', url: `pmtiles://${pmtilesUrl}` },
         track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
-        pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
+        pos: { type: 'geojson', data: positionFeature(0, 0, false, 0) }
       },
       layers
     };
@@ -485,14 +609,14 @@
           attribution: '© OpenStreetMap contributors'
         },
         track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
-        pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
+        pos: { type: 'geojson', data: positionFeature(0, 0, false, 0) }
       },
       layers: [
         { id: 'bg', type: 'background', paint: { 'background-color': '#0a0b0f' } },
         { id: 'osm-raster', type: 'raster', source: 'osm' },
         { id: 'track-casing', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#050505', 'line-width': 7, 'line-opacity': 0.8 } },
         { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 4, 'line-opacity': 0.95 } },
-        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+        ...positionLayers('#1e90ff')
       ]
     };
   }
@@ -521,7 +645,7 @@
           attribution: 'Terrain © Mapzen, AWS; data from SRTM/other sources'
         },
         track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
-        pos: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } } }
+        pos: { type: 'geojson', data: positionFeature(0, 0, false, 0) }
       },
       terrain: {
         source: 'dem',
@@ -540,7 +664,7 @@
         },
         { id: 'track-casing', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#050505', 'line-width': 7, 'line-opacity': 0.8 } },
         { id: 'track-line', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 4, 'line-opacity': 0.95 } },
-        { id: 'pos-dot', type: 'circle', source: 'pos', paint: { 'circle-color': '#1e90ff', 'circle-radius': 5, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } }
+        ...positionLayers('#1e90ff')
       ]
     };
   }
@@ -600,11 +724,12 @@
   }
 
   function rebindSourcesAndRefresh() {
+    ensurePositionArrowImage();
     posSource = map.getSource('pos');
     trackSource = map.getSource('track');
     routeSource = map.getSource('route');
     if (posSource && isFinite(lastLon) && isFinite(lastLat)) {
-      posSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [lastLon, lastLat] } });
+      posSource.setData(positionFeature(lastLon, lastLat));
     }
     if (trackSource && coords.length) {
       trackSource.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords.slice() } }] });
@@ -689,9 +814,7 @@
       const last = coords[coords.length - 1];
       lastLon = last[0];
       lastLat = last[1];
-      if (posSource) {
-        posSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: last } });
-      }
+      updatePositionSource(lastLon, lastLat, false, lastGpsBearing);
       refreshTrackSource();
       updateRouteProgressFromGps(lastLon, lastLat);
     } catch (e) {
@@ -743,7 +866,12 @@
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 
+    map.on('styleimagemissing', (event) => {
+      if (event && event.id === 'position-arrow') ensurePositionArrowImage();
+    });
+
     map.on('load', () => {
+      ensurePositionArrowImage();
       posSource = map.getSource('pos');
       trackSource = map.getSource('track');
       routeSource = map.getSource('route');
@@ -770,6 +898,9 @@
     }
     if (hb) hb.addEventListener('click', cycleHeadingMode);
     setHeadingButton();
+
+    const nb = document.getElementById('map-navigation-btn');
+    if (nb) nb.addEventListener('click', focusNavigationFromGps);
 
     // Basemap selector
     const sel = document.getElementById('basemap-select');
@@ -803,9 +934,19 @@
       lastLon = lon; lastLat = lat;
       updateRouteProgressFromGps(lon, lat);
 
-      if (posSource) {
-        posSource.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] } });
+      const speedKph = finiteNumberOrNull(s.speed_kph);
+      const moving = speedKph !== null && speedKph >= MIN_SPEED_KPH;
+      const gpsTrack = finiteNumberOrNull(s.track_deg);
+      let targetBearing = null;
+      if (moving && gpsTrack !== null) {
+        targetBearing = normalizeBearing(gpsTrack);
+      } else if (moving && coords.length >= 2) {
+        const [plon, plat] = coords[coords.length - 2];
+        const [clon, clat] = coords[coords.length - 1];
+        targetBearing = computeBearing(plon, plat, clon, clat);
       }
+      updatePositionSource(lon, lat, targetBearing !== null, targetBearing === null ? lastGpsBearing : targetBearing);
+
       if (trackSource) {
         refreshTrackSource();
       }
@@ -815,16 +956,12 @@
       if (headingMode === HEADING_MODES.NORTH) {
         applyBearing = 0;
       } else if (headingMode === HEADING_MODES.TRAJECTORY) {
-        const spd = Number(s.speed_kph);
-        if (isFinite(spd) && spd >= MIN_SPEED_KPH && coords.length >= 2) {
-          const [plon, plat] = coords[coords.length - 2];
-          const [clon, clat] = coords[coords.length - 1];
-          const target = computeBearing(plon, plat, clon, clat);
+        if (targetBearing !== null) {
           if (!bearingInitialized) {
             filteredBearing = normalizeBearing(map.getBearing());
             bearingInitialized = true;
           }
-          const delta = shortestAngleDelta(filteredBearing, target);
+          const delta = shortestAngleDelta(filteredBearing, targetBearing);
           const alpha = 0.25; // smoothing factor
           filteredBearing = normalizeBearing(filteredBearing + delta * alpha);
           applyBearing = filteredBearing;
@@ -850,6 +987,28 @@
     }
   }
 
+  async function focusNavigationFromGps() {
+    try {
+      const res = await fetch('/gps_status', { cache: 'no-store' });
+      const s = await res.json();
+      setPiAltitudeFromStatus(s);
+      if (!s || !s.has_fix || s.stale) return;
+      const lon = Number(s.lon), lat = Number(s.lat);
+      if (!isFinite(lon) || !isFinite(lat)) return;
+
+      lastLon = lon;
+      lastLat = lat;
+      const motion = gpsMotionFromStatus(s);
+      updatePositionSource(lon, lat, motion.moving, motion.bearing);
+      applyNavigationView(lon, lat, {
+        duration: 500,
+        bearing: motion.moving ? motion.bearing : null
+      });
+    } catch (e) {
+      // ignore
+    }
+  }
+
   // One-time focus on current GPS position after map load
   async function initialFocusOnGps() {
     try {
@@ -859,9 +1018,14 @@
       if (!s || !s.has_fix || s.stale) return;
       const lon = Number(s.lon), lat = Number(s.lat);
       if (!isFinite(lon) || !isFinite(lat)) return;
-      // Center the map; choose a reasonable zoom if current is low
-      const targetZoom = Math.max(map.getZoom() || 0, 14);
-      map.easeTo({ center: [lon, lat], zoom: targetZoom, duration: 500 });
+      lastLon = lon;
+      lastLat = lat;
+      const motion = gpsMotionFromStatus(s);
+      updatePositionSource(lon, lat, motion.moving, motion.bearing);
+      applyNavigationView(lon, lat, {
+        duration: 500,
+        bearing: motion.moving ? motion.bearing : null
+      });
     } catch (e) {
       // ignore
     }

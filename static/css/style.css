@@ -428,6 +428,11 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   min-width: 9rem;
 }
 
+.map-navigation-button {
+  min-width: 3.2rem;
+  letter-spacing: 0;
+}
+
 /* Responsive tweaks for smaller screens */
 @media (max-width: 680px) {
   #live-map { aspect-ratio: 3 / 3; }
