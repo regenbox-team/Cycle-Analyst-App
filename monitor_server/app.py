@@ -126,6 +126,10 @@ def _response_gzip_enabled() -> bool:
     return os.getenv("MONITOR_RESPONSE_GZIP", "1").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _monitor_backfill_on_startup() -> bool:
+    return os.getenv("MONITOR_BACKFILL_ON_STARTUP", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _read_json_request(max_bytes: int | None = None) -> tuple[dict[str, Any], tuple[Any, int] | None]:
     encoding = (request.headers.get("Content-Encoding") or "identity").lower()
     if encoding not in {"identity", "gzip"}:
@@ -638,7 +642,8 @@ def _migrate_db() -> None:
             ON {TELEMETRY_TABLE}(device_id, session_id, mode, timestamp)
             """
         )
-        _backfill_session_distances(conn)
+        if _monitor_backfill_on_startup():
+            _backfill_session_distances(conn)
         conn.commit()
 
 
@@ -2046,6 +2051,7 @@ def _aggregate_session_metrics(metrics_list: list[dict[str, Any]]) -> dict[str, 
         "temp_count",
         "distance",
         "Ah",
+        "ca_Ah_raw",
         "duration",
         "ca_reset_count",
         "gps_points",

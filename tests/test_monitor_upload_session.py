@@ -687,6 +687,7 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("2026-05-07_10-05-00", html)
         self.assertIn("CA distance", html)
         self.assertIn("Battery Used", html)
+        self.assertIn("CA Ah raw", html)
 
 
 if __name__ == "__main__":

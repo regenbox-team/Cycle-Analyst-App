@@ -7,8 +7,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.session_summary import compute_session_metrics
 
 
-def raw_line(*, amps=10.0, speed=20.0, distance=0.0, human_amps=1.0):
+def raw_line(*, ah=0.0, amps=10.0, speed=20.0, distance=0.0, human_amps=1.0):
     values = [0.0] * 15
+    values[0] = ah
     values[1] = 50.0
     values[2] = amps
     values[3] = speed
@@ -102,6 +103,17 @@ class SessionSummaryTest(unittest.TestCase):
 
         self.assertEqual(metrics["positive_Wh"], 0)
         self.assertEqual(metrics["solar_Wh"], 0)
+
+    def test_uses_cycle_analyst_raw_ah_across_logging_gaps(self):
+        samples = [
+            {"timestamp": "2026-04-30T10:00:00", "raw": raw_line(ah=12.5, amps=10.0, distance=0.0)},
+            {"timestamp": "2026-04-30T10:30:00", "raw": raw_line(ah=16.75, amps=10.0, distance=12.0)},
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertEqual(metrics["Ah"], 0)
+        self.assertAlmostEqual(metrics["ca_Ah_raw"], 4.25)
 
     def test_keeps_solar_only_samples_without_cycle_analyst_raw(self):
         samples = [

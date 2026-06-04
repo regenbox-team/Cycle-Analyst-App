@@ -172,6 +172,7 @@ def _empty_metrics() -> dict[str, Any]:
         "temp_count": 0,
         "distance": 0.0,
         "Ah": 0.0,
+        "ca_Ah_raw": 0.0,
         "duration": 0.0,
         "ca_reset_count": 0,
         "gps_points": 0,
@@ -206,6 +207,26 @@ def _finalize_metrics(m: dict[str, Any]) -> dict[str, Any]:
     m.pop(_ELEVATION_ANCHOR_KEY, None)
     m.pop(_RAW_GPS_ELEVATION_ANCHOR_KEY, None)
     return m
+
+
+def _raw_ah_value(values: list[float] | None) -> float | None:
+    if not values:
+        return None
+    return _safe_float(values[0])
+
+
+def _add_ca_raw_ah_delta(
+    m: dict[str, Any],
+    values: list[float] | None,
+    previous_values: list[float] | None,
+) -> None:
+    raw_ah = _raw_ah_value(values)
+    previous_raw_ah = _raw_ah_value(previous_values)
+    if raw_ah is None or previous_raw_ah is None:
+        return
+    delta = raw_ah - previous_raw_ah
+    if delta >= 0:
+        m["ca_Ah_raw"] += delta
 
 
 def _add_elevation_sample(
@@ -353,6 +374,7 @@ def _add_interval_metrics(
     solar_power: float,
 ) -> None:
     m["duration"] += dt
+    _add_ca_raw_ah_delta(m, values, previous_values)
     if dt <= 0:
         return
 
@@ -395,6 +417,7 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
     final_ts = None
     last_gps = None
     last_gps_sample = None
+    previous_values = None
 
     for sample in chronological_samples(samples):
         values = parse_raw_values(sample.get("raw"))
@@ -435,6 +458,7 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
                 distance_key="distance",
                 reset_count_key="ca_reset_count",
             )
+            _add_ca_raw_ah_delta(m, values, previous_values)
 
             if speed >= 1:
                 m["speed_sum"] += speed
@@ -494,6 +518,8 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
             if hdop is not None:
                 m["gps_hdop_sum"] += hdop
                 m["gps_hdop_count"] += 1
+
+        previous_values = values or previous_values
 
     if first_ts is not None and final_ts is not None:
         m["duration"] = max(0.0, (final_ts - first_ts).total_seconds())
@@ -581,6 +607,7 @@ SUMMARY_GROUPS: list[tuple[str, list[MetricSpec]]] = [
         "Energy",
         [
             ("Battery Used", "Ah", lambda m: m["Ah"]),
+            ("CA Ah raw", "Ah", lambda m: m["ca_Ah_raw"]),
             ("Positive Energy", "Wh", lambda m: m["positive_Wh"]),
             ("Regen Energy", "Wh", lambda m: m["regen_Wh"]),
             ("Human Energy", "Wh", lambda m: m["human_Wh"]),

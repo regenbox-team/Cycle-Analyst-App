@@ -89,6 +89,7 @@ class MonitorDeleteSessionTest(unittest.TestCase):
             "MONITOR_PASS",
             "MONITOR_TERRAIN_ELEVATION_ENABLED",
             "MONITOR_DB_TIMEOUT_SEC",
+            "MONITOR_BACKFILL_ON_STARTUP",
         ):
             os.environ.pop(key, None)
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
@@ -185,6 +186,7 @@ class MonitorDeleteSessionTest(unittest.TestCase):
         self.assertEqual(tombstone_count, 2)
 
     def test_migration_recomputes_session_distance_from_ca_delta(self):
+        os.environ["MONITOR_BACKFILL_ON_STARTUP"] = "1"
         raw_start = "0 52 1 10 124.75 20 0 0 0 0 0 0 0 0 flags"
         raw_end = "0 52 1 10 145.77 20 0 0 0 0 0 0 0 0 flags"
         with sqlite3.connect(self.db_path) as conn:
