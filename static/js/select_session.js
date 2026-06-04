@@ -151,12 +151,12 @@ async function fetchSessions() {
   return res.json();
 }
 
-async function refreshSessions() {
+async function refreshSessions({ clearStatus = true } = {}) {
   const button = document.getElementById("refresh-sessions-button");
   if (button) button.disabled = true;
   try {
     renderSessions(await fetchSessions());
-    setStatus("", null);
+    if (clearStatus) setStatus("", null);
   } catch (err) {
     setStatus(err.message || "Failed to load sessions.", "error");
   } finally {
@@ -182,8 +182,9 @@ async function uploadSession(session, button) {
       body: JSON.stringify(payload),
     });
     const result = await response.json().catch(() => ({ status: "error", error: response.statusText, session }));
+    if (!result.session && !result.session_id) result.session = session;
     setStatus(describeResult(result), ["ok", "already_uploaded"].includes(result.status) ? "ok" : "error");
-    await refreshSessions();
+    await refreshSessions({ clearStatus: false });
   } catch (err) {
     setStatus(err.message || "Echec de l'envoi.", "error");
   } finally {
@@ -215,7 +216,7 @@ async function deleteSession(session, button) {
     if (!response.ok || result.error) throw new Error(result.error || "Delete failed.");
     button?.closest("[data-session]")?.remove();
     setStatus(result.status || `${session}: supprimee`, "ok");
-    await refreshSessions();
+    await refreshSessions({ clearStatus: false });
   } catch (err) {
     setStatus(err.message || "Echec de la suppression.", "error");
   } finally {
@@ -231,7 +232,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("refresh-sessions-button")?.addEventListener("click", refreshSessions);
   document.getElementById("sessions-body")?.addEventListener("click", (event) => {
-    const row = event.target.closest("tr[data-session]");
+    const row = event.target.closest("[data-session]");
     if (!row) return;
     if (event.target.closest(".upload-session-row")) {
       uploadSession(row.dataset.session, event.target.closest("button"));
