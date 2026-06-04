@@ -1031,7 +1031,7 @@ def _telemetry_samples_for_session(
                solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c
         FROM {TELEMETRY_TABLE}
         WHERE device_id = ? AND session_id = ? AND mode = ?
-        ORDER BY id
+        ORDER BY timestamp IS NULL, timestamp, id
         """,
         (device_id, session_id, mode),
     ).fetchall()

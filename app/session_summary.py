@@ -119,11 +119,21 @@ def gps_segment_plausible(
     return distance_km <= max(GPS_DISTANCE_JUMP_FLOOR_KM, max_distance)
 
 
+def _sample_time_sort_key(item: tuple[int, dict[str, Any]]) -> tuple[bool, datetime.datetime, int]:
+    index, sample = item
+    timestamp = parse_timestamp(sample.get("timestamp"))
+    return timestamp is None, timestamp or datetime.datetime.max, index
+
+
+def chronological_samples(samples: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [sample for _, sample in sorted(enumerate(samples), key=_sample_time_sort_key)]
+
+
 def filter_plausible_gps_samples(samples: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     filtered: list[dict[str, Any]] = []
     last_gps = None
     last_sample = None
-    for sample in samples:
+    for sample in chronological_samples(samples):
         gps = _valid_gps(sample.get("gps_lat"), sample.get("gps_lon"))
         if gps is None:
             continue
@@ -386,7 +396,7 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
     last_gps = None
     last_gps_sample = None
 
-    for sample in samples:
+    for sample in chronological_samples(samples):
         values = parse_raw_values(sample.get("raw"))
         m["sample_count"] += 1
         current_ts = parse_timestamp(sample.get("timestamp"))
@@ -491,7 +501,7 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
 
 
 def compute_timeline_metrics_by_user(samples: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    ordered = list(samples)
+    ordered = chronological_samples(samples)
     metrics_by_user: dict[str, dict[str, Any]] = {}
     previous_sample = None
     previous_values = None
