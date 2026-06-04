@@ -1,10 +1,15 @@
 from __future__ import annotations
+import json
+import os
 import sqlite3
+import threading
+import time
+import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import render_template, jsonify, request, redirect
 
-from app.config import get_db_file, SESSION_METRICS_DIR
+from app.config import BASE_DIR, get_db_file, SESSION_METRICS_DIR
 from app import state
 from app.reader import parse_line
 from app.metrics import reset_session_state, restore_session_metrics
@@ -12,6 +17,108 @@ from app.photo_capture import configure_session_photo_capture, normalize_interva
 from app.solar_range import initialize_solar_session, persist_estimate
 from app.session_summary import build_summary_sections, build_summary_table, compute_session_metrics, compute_timeline_metrics_by_user
 from app.user_profiles import active_profiles, get_profile
+
+
+_upload_jobs: dict[str, dict] = {}
+_upload_jobs_lock = threading.Lock()
+_UPLOAD_JOB_RETENTION_SECONDS = 3600
+UPLOAD_JOBS_DIR = os.path.join(BASE_DIR, "upload_jobs")
+
+
+def _upload_job_path(job_id: str) -> str:
+    safe_id = "".join(ch for ch in str(job_id) if ch.isalnum() or ch in {"-", "_"})
+    return os.path.join(UPLOAD_JOBS_DIR, f"{safe_id}.json")
+
+
+def _write_upload_job(job: dict) -> None:
+    try:
+        os.makedirs(UPLOAD_JOBS_DIR, exist_ok=True)
+        path = _upload_job_path(job["job_id"])
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(job, f, separators=(",", ":"))
+        os.replace(tmp_path, path)
+    except Exception:
+        pass
+
+
+def _read_upload_job(job_id: str) -> dict | None:
+    try:
+        with open(_upload_job_path(job_id), "r", encoding="utf-8") as f:
+            job = json.load(f)
+        return job if isinstance(job, dict) else None
+    except Exception:
+        return None
+
+
+def _upload_request_payload() -> tuple[str, str | None]:
+    data = request.get_json(silent=True) or {}
+    session_id = (data.get("session") or data.get("session_id") or request.form.get("session") or "").strip()
+    mode = data.get("mode") or request.args.get("mode")
+    return session_id, mode
+
+
+def _trim_upload_jobs_locked() -> None:
+    now = time.time()
+    stale_ids = [
+        job_id
+        for job_id, job in _upload_jobs.items()
+        if job.get("complete") and now - float(job.get("updated_at") or 0) > _UPLOAD_JOB_RETENTION_SECONDS
+    ]
+    for job_id in stale_ids:
+        _upload_jobs.pop(job_id, None)
+        try:
+            os.remove(_upload_job_path(job_id))
+        except Exception:
+            pass
+
+    try:
+        for name in os.listdir(UPLOAD_JOBS_DIR):
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(UPLOAD_JOBS_DIR, name)
+            if now - os.path.getmtime(path) > _UPLOAD_JOB_RETENTION_SECONDS:
+                os.remove(path)
+    except Exception:
+        pass
+
+
+def _set_upload_job(job_id: str, **updates) -> dict:
+    with _upload_jobs_lock:
+        job = _upload_jobs.get(job_id)
+        if not job:
+            return {}
+        job.update(updates)
+        job["updated_at"] = time.time()
+        _write_upload_job(job)
+        return dict(job)
+
+
+def _upload_job_progress(job_id: str):
+    def progress(updates: dict) -> None:
+        _set_upload_job(job_id, **updates)
+
+    return progress
+
+
+def _run_upload_job(job_id: str, session_id: str, mode: str | None) -> None:
+    try:
+        from app.monitor_client import upload_session_now as monitor_upload_session_now
+
+        _set_upload_job(job_id, status="working", phase="checking")
+        result = monitor_upload_session_now(session_id, mode=mode, progress=_upload_job_progress(job_id))
+    except Exception as exc:
+        result = {"status": "error", "error": str(exc), "session": session_id}
+
+    status = result.get("status")
+    _set_upload_job(
+        job_id,
+        status=status,
+        phase="done",
+        complete=True,
+        ok=status in ("ok", "already_uploaded"),
+        result=result,
+    )
 
 
 def start_page():
@@ -173,9 +280,7 @@ def delete_row():
 
 
 def upload_session_now():
-    data = request.get_json(silent=True) or {}
-    session_id = (data.get("session") or data.get("session_id") or request.form.get("session") or "").strip()
-    mode = data.get("mode") or request.args.get("mode")
+    session_id, mode = _upload_request_payload()
     try:
         from app.monitor_client import upload_session_now as monitor_upload_session_now
         result = monitor_upload_session_now(session_id, mode=mode)
@@ -187,6 +292,46 @@ def upload_session_now():
     if status == "error":
         http_status = 502
     return jsonify(result), http_status
+
+
+def upload_session_start():
+    session_id, mode = _upload_request_payload()
+    if not session_id:
+        return jsonify({"status": "error", "error": "missing session"}), 400
+
+    job_id = uuid.uuid4().hex
+    job = {
+        "job_id": job_id,
+        "status": "queued",
+        "phase": "queued",
+        "session": session_id,
+        "mode": mode,
+        "complete": False,
+        "ok": False,
+        "created_at": time.time(),
+        "updated_at": time.time(),
+    }
+    with _upload_jobs_lock:
+        _trim_upload_jobs_locked()
+        _upload_jobs[job_id] = job
+        _write_upload_job(job)
+
+    thread = threading.Thread(target=_run_upload_job, args=(job_id, session_id, mode), daemon=True)
+    thread.start()
+    return jsonify(job), 202
+
+
+def upload_session_status(job_id: str):
+    with _upload_jobs_lock:
+        job = _upload_jobs.get(job_id)
+        if job is None:
+            job = _read_upload_job(job_id)
+            if job is not None:
+                _upload_jobs[job_id] = job
+        payload = dict(job) if job else None
+    if payload is None:
+        return jsonify({"status": "not_found", "error": "upload job not found"}), 404
+    return jsonify(payload)
 
 
 def summary():
@@ -269,6 +414,8 @@ def create_blueprint():
     bp.add_url_rule("/api/session_rows", view_func=session_rows)
     bp.add_url_rule("/api/delete_row", methods=["POST"], view_func=delete_row)
     bp.add_url_rule("/api/upload_session_now", methods=["POST"], view_func=upload_session_now)
+    bp.add_url_rule("/api/upload_session_start", methods=["POST"], view_func=upload_session_start)
+    bp.add_url_rule("/api/upload_session_status/<job_id>", view_func=upload_session_status)
     bp.add_url_rule("/summary", view_func=summary)
     return bp
 
@@ -284,4 +431,6 @@ def register(app):
     app.add_url_rule("/api/session_rows", view_func=session_rows)
     app.add_url_rule("/api/delete_row", methods=["POST"], view_func=delete_row)
     app.add_url_rule("/api/upload_session_now", methods=["POST"], view_func=upload_session_now)
+    app.add_url_rule("/api/upload_session_start", methods=["POST"], view_func=upload_session_start)
+    app.add_url_rule("/api/upload_session_status/<job_id>", view_func=upload_session_status)
     app.add_url_rule("/summary", view_func=summary)

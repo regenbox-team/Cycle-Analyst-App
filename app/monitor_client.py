@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.request
 import urllib.error
+from collections.abc import Callable
 from typing import Any
 
 from .config import BASE_DIR, DB_FILE, SESSION_METRICS_DIR, get_db_file
@@ -21,6 +22,16 @@ from .user_profiles import load_profiles, profile_snapshot
 DEFAULT_UPLOAD_CHUNK_SIZE = 1000
 DEFAULT_UPLOAD_CHUNK_MAX_BYTES = 256 * 1024
 DEFAULT_UPLOAD_GZIP_MIN_BYTES = 1024
+ProgressCallback = Callable[[dict[str, Any]], None]
+
+
+def _notify_progress(progress: ProgressCallback | None, **updates: Any) -> None:
+    if progress is None:
+        return
+    try:
+        progress(updates)
+    except Exception:
+        pass
 
 
 def _device_id() -> str:
@@ -279,8 +290,14 @@ def _known_sessions(url: str, device_id: str, mode: str) -> set[str] | None:
         return None
 
 
-def _upload_session_whole(url: str, payload: dict[str, Any], timeout: int = 60) -> dict[str, Any]:
+def _upload_session_whole(
+    url: str,
+    payload: dict[str, Any],
+    timeout: int = 60,
+    progress: ProgressCallback | None = None,
+) -> dict[str, Any]:
     try:
+        _notify_progress(progress, phase="uploading", chunk_index=0, total_chunks=1)
         resp, _ = _request_upload_json(
             "POST",
             f"{url}/api/upload_session",
@@ -288,6 +305,7 @@ def _upload_session_whole(url: str, payload: dict[str, Any], timeout: int = 60) 
             timeout=timeout,
             gzip_payload=_upload_gzip_enabled(),
         )
+        _notify_progress(progress, phase="uploading", chunk_index=1, total_chunks=1)
         return resp if isinstance(resp, dict) else {"status": "error", "error": "invalid monitor response"}
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
@@ -298,12 +316,13 @@ def _upload_session_chunked(
     payload: dict[str, Any],
     chunk_size: int | None = None,
     max_bytes: int | None = None,
+    progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     samples = payload.get("telemetry_samples") or []
     if not isinstance(samples, list):
         return {"status": "error", "error": "invalid telemetry_samples"}
     if not samples:
-        return _upload_session_whole(url, payload)
+        return _upload_session_whole(url, payload, progress=progress)
 
     chunk_size = chunk_size or _upload_chunk_size()
     max_bytes = max_bytes or _upload_chunk_max_bytes()
@@ -312,6 +331,13 @@ def _upload_session_chunked(
     upload_id = f"{payload.get('device_id')}:{payload.get('mode')}:{payload.get('session_id')}:{int(time.time())}"
     last_resp: dict[str, Any] = {}
     gzip_payload = _upload_gzip_enabled()
+    _notify_progress(
+        progress,
+        phase="uploading",
+        chunk_index=0,
+        total_chunks=total_chunks,
+        rows_count=len(samples),
+    )
     for chunk_index, sample_chunk in enumerate(sample_chunks):
         chunk_payload = _chunk_payload(
             payload,
@@ -338,6 +364,14 @@ def _upload_session_chunked(
         if not isinstance(resp, dict):
             return {"status": "error", "error": "invalid monitor response"}
         last_resp = resp
+        _notify_progress(
+            progress,
+            phase="uploading",
+            chunk_index=chunk_index + 1,
+            total_chunks=total_chunks,
+            rows_count=len(samples),
+            rows_received=resp.get("rows_received"),
+        )
         if resp.get("status") == "exists":
             return resp
         if resp.get("status") != "ok":
@@ -349,13 +383,17 @@ def _upload_session(url: str, payload: dict[str, Any]) -> bool:
     return _upload_session_with_status(url, payload).get("status") in ("ok", "exists")
 
 
-def _upload_session_with_status(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _upload_session_with_status(
+    url: str,
+    payload: dict[str, Any],
+    progress: ProgressCallback | None = None,
+) -> dict[str, Any]:
     samples = payload.get("telemetry_samples") or []
     if isinstance(samples, list) and (len(samples) > _upload_chunk_size() or len(_encode_json_payload(payload)) > _upload_chunk_max_bytes()):
-        chunked = _upload_session_chunked(url, payload)
+        chunked = _upload_session_chunked(url, payload, progress=progress)
         if chunked.get("status") != "unsupported":
             return chunked
-    return _upload_session_whole(url, payload)
+    return _upload_session_whole(url, payload, progress=progress)
 
 
 def _build_session_payload(db_path: str, session_id: str, device_id: str | None = None) -> dict[str, Any] | None:
@@ -375,7 +413,11 @@ def _build_session_payload(db_path: str, session_id: str, device_id: str | None 
     }
 
 
-def upload_session_now(session_id: str, mode: str | None = None) -> dict[str, Any]:
+def upload_session_now(
+    session_id: str,
+    mode: str | None = None,
+    progress: ProgressCallback | None = None,
+) -> dict[str, Any]:
     url = _monitor_url()
     if not url:
         return {"status": "missing_config", "error": "MONITOR_URL is not configured"}
@@ -387,6 +429,7 @@ def upload_session_now(session_id: str, mode: str | None = None) -> dict[str, An
     db_path = get_db_file(mode)
     device_id = _device_id()
     resolved_mode = _mode_from_db_path(db_path)
+    _notify_progress(progress, phase="checking", mode=resolved_mode, device_id=device_id)
     known = _known_sessions(url, device_id, resolved_mode)
     if known is not None and session_id in known:
         return {
@@ -396,13 +439,22 @@ def upload_session_now(session_id: str, mode: str | None = None) -> dict[str, An
             "device_id": device_id,
         }
 
+    _notify_progress(progress, phase="preparing", mode=resolved_mode, device_id=device_id)
     payload = _build_session_payload(db_path, session_id, device_id)
     if payload is None:
         return {"status": "not_found", "error": "session has no rows", "session": session_id}
 
     rows_count = len(payload["telemetry_samples"])
     raw_bytes = sum(len(str(row.get("raw") or "")) for row in payload["telemetry_samples"])
-    resp = _upload_session_with_status(url, payload)
+    _notify_progress(
+        progress,
+        phase="uploading",
+        mode=resolved_mode,
+        device_id=device_id,
+        rows_count=rows_count,
+        size_kb=round(raw_bytes / 1024, 2),
+    )
+    resp = _upload_session_with_status(url, payload, progress=progress)
     status = resp.get("status")
     if status == "exists":
         status = "already_uploaded"

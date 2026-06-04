@@ -29,10 +29,31 @@
     return `${session}: ${result.error || result.status || "upload failed"}`;
   }
 
+  function describeUploadJob(job) {
+    const result = job.result || {};
+    const session = job.session || result.session || result.session_id || "session";
+    if (job.complete) return describeResult(result.status ? result : job);
+    if (job.phase === "checking") return `${session}: checking monitor...`;
+    if (job.phase === "preparing") return `${session}: preparing data...`;
+    if (job.phase === "uploading") {
+      const total = Number(job.total_chunks);
+      const index = Number(job.chunk_index);
+      if (Number.isFinite(total) && total > 1 && Number.isFinite(index)) {
+        return `${session}: uploading ${Math.min(index, total)}/${total}...`;
+      }
+      return `${session}: uploading...`;
+    }
+    return `${session}: queued...`;
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async function uploadOne(session, mode) {
     const payload = { session };
     if (mode) payload.mode = mode;
-    const response = await fetch("/api/upload_session_now", {
+    const response = await fetch("/api/upload_session_start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -46,7 +67,30 @@
     if (!response.ok && !result.status) {
       result.status = "error";
     }
-    return result;
+    if (!response.ok || !result.job_id) {
+      if (!result.session && !result.session_id) result.session = session;
+      return result;
+    }
+
+    let job = result;
+    while (!job.complete) {
+      setStatus(describeUploadJob(job), "working");
+      await wait(1000);
+      const statusResponse = await fetch(`/api/upload_session_status/${encodeURIComponent(job.job_id)}`, {
+        cache: "no-store",
+      });
+      job = await statusResponse.json().catch(() => ({
+        status: "error",
+        error: statusResponse.statusText || "invalid response",
+        session,
+        complete: true,
+      }));
+      if (!statusResponse.ok) {
+        if (!job.session && !job.session_id) job.session = session;
+        return job;
+      }
+    }
+    return job.result || job;
   }
 
   async function uploadSessions(sessions, mode, button) {

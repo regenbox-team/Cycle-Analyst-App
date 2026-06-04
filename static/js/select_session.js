@@ -78,6 +78,61 @@ function describeResult(result) {
   return `${session}: ${result.error || result.status || "echec de l'envoi"}`;
 }
 
+function describeUploadJob(job) {
+  const result = job.result || {};
+  const session = job.session || result.session || result.session_id || "session";
+  if (job.complete) return describeResult(result.status ? result : job);
+  if (job.phase === "checking") return `${session}: verification monitor...`;
+  if (job.phase === "preparing") return `${session}: preparation des donnees...`;
+  if (job.phase === "uploading") {
+    const total = Number(job.total_chunks);
+    const index = Number(job.chunk_index);
+    if (Number.isFinite(total) && total > 1 && Number.isFinite(index)) {
+      return `${session}: envoi ${Math.min(index, total)}/${total}...`;
+    }
+    return `${session}: envoi en cours...`;
+  }
+  return `${session}: en attente...`;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function startUploadJob(session) {
+  const payload = { session };
+  const mode = currentMode();
+  if (mode) payload.mode = mode;
+  const response = await fetch("/api/upload_session_start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => ({ status: "error", error: response.statusText, session }));
+  if (!response.ok || !result.job_id) {
+    if (!result.session && !result.session_id) result.session = session;
+    throw new Error(describeResult(result));
+  }
+  return result;
+}
+
+async function pollUploadJob(job, session) {
+  let current = job;
+  while (!current.complete) {
+    setStatus(describeUploadJob(current), "working");
+    await wait(1000);
+    const response = await fetch(`/api/upload_session_status/${encodeURIComponent(current.job_id)}`, {
+      cache: "no-store",
+    });
+    current = await response.json().catch(() => ({ status: "error", error: response.statusText, session, complete: true }));
+    if (!response.ok) {
+      if (!current.session && !current.session_id) current.session = session;
+      return current;
+    }
+  }
+  return current.result || current;
+}
+
 function sessionSummaryUrl(session) {
   const params = new URLSearchParams({ session });
   const mode = currentMode();
@@ -173,18 +228,12 @@ async function uploadSession(session, button) {
   }
   setStatus(`Envoi de ${session}...`, "working");
   try {
-    const payload = { session };
-    const mode = currentMode();
-    if (mode) payload.mode = mode;
-    const response = await fetch("/api/upload_session_now", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json().catch(() => ({ status: "error", error: response.statusText, session }));
+    const result = await pollUploadJob(await startUploadJob(session), session);
     if (!result.session && !result.session_id) result.session = session;
     setStatus(describeResult(result), ["ok", "already_uploaded"].includes(result.status) ? "ok" : "error");
-    await refreshSessions({ clearStatus: false });
+    refreshSessions({ clearStatus: false }).catch((err) => {
+      setStatus(err.message || "Failed to load sessions.", "error");
+    });
   } catch (err) {
     setStatus(err.message || "Echec de l'envoi.", "error");
   } finally {
