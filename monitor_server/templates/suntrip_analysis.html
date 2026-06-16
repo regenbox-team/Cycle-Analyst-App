@@ -3,6 +3,12 @@
   <head>
     <meta charset="utf-8">
     <title>Suntrip Analysis</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    >
     <style>
       :root {
         color-scheme: light;
@@ -71,6 +77,15 @@
       label { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; }
       input[type="date"] {
         min-height: 31px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #fffdf9;
+        padding: 4px 8px;
+        color: var(--ink);
+      }
+      select {
+        min-height: 31px;
+        max-width: 100%;
         border: 1px solid var(--border);
         border-radius: 8px;
         background: #fffdf9;
@@ -179,6 +194,11 @@
         height: 18px;
         accent-color: var(--accent);
       }
+      .trace-select {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--accent);
+      }
       .included-row td { background: #f0fdfa; }
       .badge {
         display: inline-flex;
@@ -266,11 +286,106 @@
           transparent 10px
         ) !important;
       }
+      .trace-controls {
+        display: grid;
+        grid-template-columns: minmax(240px, 2fr) repeat(2, minmax(150px, 1fr)) auto auto;
+        gap: 10px;
+        align-items: end;
+        margin-bottom: 12px;
+      }
+      .trace-control {
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+      }
+      .trace-check {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 31px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .trace-check input {
+        width: 17px;
+        height: 17px;
+        accent-color: var(--accent);
+      }
+      .trace-layout {
+        display: grid;
+        grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+        gap: 12px;
+      }
+      .trace-map,
+      .trace-chart-wrap {
+        min-height: 390px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #f4efe5;
+        overflow: hidden;
+      }
+      .trace-map {
+        height: 430px;
+      }
+      .trace-chart-wrap {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        padding: 10px;
+        background: #fffdf9;
+      }
+      .trace-chart-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .trace-chart-head strong {
+        color: var(--ink);
+        font-size: 14px;
+      }
+      .trace-chart {
+        width: 100%;
+        height: 320px;
+        cursor: crosshair;
+      }
+      .trace-status {
+        min-height: 18px;
+        margin-top: 7px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .trace-colorbar {
+        height: 8px;
+        margin-top: 8px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #2563eb, #0d9488, #f59e0b, #dc2626);
+      }
+      .trace-scale-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 11px;
+      }
       @media (max-width: 760px) {
         main { padding: 24px 14px 40px; }
         .top-row { align-items: flex-start; }
         .analysis-table .sticky-col { min-width: 170px; }
         .value-cell { min-width: 112px; }
+        .trace-controls,
+        .trace-layout {
+          grid-template-columns: 1fr;
+        }
+        .trace-map,
+        .trace-chart-wrap {
+          min-height: 320px;
+        }
       }
     </style>
   </head>
@@ -296,6 +411,58 @@
           <button class="btn btn-primary" type="submit">Update</button>
           <span class="badge">Supercycle 1 / Supercycle 2</span>
         </form>
+      </div>
+
+      <h2>Track Explorer</h2>
+      <div class="card">
+        {% if trace_sessions %}
+        <div class="trace-controls">
+          <div class="trace-control">
+            <label for="trace-session">Session</label>
+            <select id="trace-session"></select>
+          </div>
+          <div class="trace-control">
+            <label for="trace-metric">Metric</label>
+            <select id="trace-metric">
+              {% for metric in trace_metric_options %}
+              <option value="{{ metric.key }}">{{ metric.label }}{% if metric.unit %} ({{ metric.unit }}){% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="trace-control">
+            <label for="trace-x-axis">X axis</label>
+            <select id="trace-x-axis">
+              <option value="distance">CA distance</option>
+              <option value="time">Duration</option>
+            </select>
+          </div>
+          <label class="trace-check">
+            <input id="trace-compare" type="checkbox" checked>
+            Compare
+          </label>
+          <button class="btn" id="trace-reset" type="button">Reset zoom</button>
+        </div>
+        <div class="trace-layout">
+          <div id="trace-map" class="trace-map" role="img" aria-label="Selected session track"></div>
+          <div class="trace-chart-wrap">
+            <div class="trace-chart-head">
+              <strong id="trace-chart-title">Metric profile</strong>
+              <span id="trace-chart-range">Full session</span>
+            </div>
+            <canvas id="trace-chart" class="trace-chart"></canvas>
+            <div>
+              <div class="trace-colorbar"></div>
+              <div class="trace-scale-row">
+                <span id="trace-scale-min">-</span>
+                <span id="trace-scale-max">-</span>
+              </div>
+              <div id="trace-status" class="trace-status"></div>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="empty">No Supercycle sessions available for track analysis in this period.</div>
+        {% endif %}
       </div>
 
       <h2>Graph</h2>
@@ -391,6 +558,7 @@
             <thead>
               <tr>
                 <th>Etape</th>
+                <th>View</th>
                 <th>Day</th>
                 <th>Vehicle</th>
                 <th>Device</th>
@@ -415,6 +583,17 @@
                     {% if session.suntrip_stage %}checked{% endif %}
                   >
                 </td>
+                <td>
+                  <input
+                    class="trace-select"
+                    name="trace-session-row"
+                    type="radio"
+                    aria-label="Visualize {{ session.session_id }}"
+                    data-device-id="{{ session.device_id }}"
+                    data-session-id="{{ session.session_id }}"
+                    data-mode="{{ session.mode }}"
+                  >
+                </td>
                 <td>{{ session.day_label }}</td>
                 <td>{{ session.vehicle_label }}</td>
                 <td>{{ session.device_id }}</td>
@@ -434,12 +613,32 @@
       </div>
     </main>
 
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
     <script>
       const chartMetricGroups = {{ chart_metric_groups | tojson }};
+      const traceSessions = {{ trace_sessions | tojson }};
+      const traceMetricOptions = {{ trace_metric_options | tojson }};
       const chartPanels = document.getElementById("chart-panels");
       const chartEmpty = document.getElementById("chart-empty");
       const metricChecks = document.querySelectorAll(".metric-chart-check");
       const categoryButtons = document.querySelectorAll(".category-toggle");
+      const traceSessionSelect = document.getElementById("trace-session");
+      const traceMetricSelect = document.getElementById("trace-metric");
+      const traceXAxisSelect = document.getElementById("trace-x-axis");
+      const traceCompareCheck = document.getElementById("trace-compare");
+      const traceResetButton = document.getElementById("trace-reset");
+      const traceMapEl = document.getElementById("trace-map");
+      const traceChart = document.getElementById("trace-chart");
+      const traceStatus = document.getElementById("trace-status");
+      const traceChartTitle = document.getElementById("trace-chart-title");
+      const traceChartRange = document.getElementById("trace-chart-range");
+      const traceScaleMin = document.getElementById("trace-scale-min");
+      const traceScaleMax = document.getElementById("trace-scale-max");
+      const traceRadios = document.querySelectorAll(".trace-select");
       const vehicleColors = {
         supercycle_1: "#0d9488",
         supercycle_2: "#8a6a2f"
@@ -460,6 +659,372 @@
           chartMetrics.set(metric.key, metric);
         });
       });
+      const traceMetricMap = new Map(traceMetricOptions.map((metric) => [metric.key, metric]));
+
+      const traceSessionKey = (session) => `${session.device_id}||${session.session_id}||${session.mode || "default"}`;
+      const findTraceSession = (key) => traceSessions.find((session) => traceSessionKey(session) === key);
+      let traceMap = null;
+      let traceLayer = null;
+      let traceData = null;
+      let traceRange = null;
+      let traceSyncingMap = false;
+      let traceDragStart = null;
+
+      const setTraceStatus = (message) => {
+        if (traceStatus) traceStatus.textContent = message || "";
+      };
+      const currentTraceMetric = () => traceMetricMap.get(traceMetricSelect?.value || "ca_speed_kph") || traceMetricOptions[0];
+      const currentTraceXAxis = () => traceXAxisSelect?.value === "time" ? "time" : "distance";
+      const traceXValue = (point) => currentTraceXAxis() === "time" ? Number(point.x_time) : Number(point.x_distance);
+      const formatTraceValue = (value, unit) => {
+        if (!Number.isFinite(value)) return "-";
+        const abs = Math.abs(value);
+        const formatted = abs >= 100 ? value.toFixed(0) : abs >= 10 ? value.toFixed(1) : value.toFixed(2);
+        return unit ? `${formatted} ${unit}` : formatted;
+      };
+      const traceColor = (value, min, max) => {
+        if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max) || min === max) return "#0d9488";
+        const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
+        if (t < 0.34) {
+          const k = t / 0.34;
+          return `rgb(${Math.round(37 - 24 * k)}, ${Math.round(99 + 49 * k)}, ${Math.round(235 - 99 * k)})`;
+        }
+        if (t < 0.68) {
+          const k = (t - 0.34) / 0.34;
+          return `rgb(${Math.round(13 + 232 * k)}, ${Math.round(148 + 10 * k)}, ${Math.round(136 - 125 * k)})`;
+        }
+        const k = (t - 0.68) / 0.32;
+        return `rgb(${Math.round(245 - 25 * k)}, ${Math.round(158 - 120 * k)}, ${Math.round(11 + 27 * k)})`;
+      };
+      const visibleTracePoints = (series) => {
+        const points = series.points || [];
+        if (!traceRange) return points;
+        return points.filter((point) => {
+          const x = traceXValue(point);
+          return Number.isFinite(x) && x >= traceRange[0] && x <= traceRange[1];
+        });
+      };
+      const traceMetricBounds = () => {
+        const values = (traceData?.series || [])
+          .flatMap((series) => (series.points || []).map((point) => Number(point.metrics?.[traceMetricSelect?.value])))
+          .filter(Number.isFinite);
+        if (!values.length) return { min: 0, max: 1 };
+        let min = Math.min(...values);
+        let max = Math.max(...values);
+        if (min === max) {
+          const pad = Math.max(1, Math.abs(max) * 0.1);
+          min -= pad;
+          max += pad;
+        }
+        return { min, max };
+      };
+      const traceXBounds = () => {
+        const values = (traceData?.series || [])
+          .flatMap((series) => (series.points || []).map(traceXValue))
+          .filter(Number.isFinite);
+        if (!values.length) return { min: 0, max: 1 };
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        return min === max ? { min: min - 1, max: max + 1 } : { min, max };
+      };
+      const ensureTraceMap = () => {
+        if (!traceMapEl || typeof L === "undefined") return null;
+        if (traceMap) return traceMap;
+        traceMap = L.map(traceMapEl, { zoomControl: true }).setView([20, 0], 2);
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: "© OpenStreetMap contributors"
+        }).addTo(traceMap);
+        traceMap.on("moveend", () => {
+          if (traceSyncingMap || !traceData) return;
+          const primary = traceData.series?.[0];
+          if (!primary?.points?.length) return;
+          const bounds = traceMap.getBounds();
+          const visible = primary.points.filter((point) => bounds.contains([point.lat, point.lon]));
+          if (visible.length < 2 || visible.length === primary.points.length) return;
+          const xs = visible.map(traceXValue).filter(Number.isFinite);
+          if (xs.length < 2) return;
+          traceRange = [Math.min(...xs), Math.max(...xs)];
+          renderTraceChart();
+        });
+        return traceMap;
+      };
+      const fitTraceMapToRange = () => {
+        if (!traceMap || !traceData) return;
+        const latlngs = (traceData.series || [])
+          .flatMap(visibleTracePoints)
+          .map((point) => [point.lat, point.lon]);
+        if (!latlngs.length) return;
+        traceSyncingMap = true;
+        traceMap.fitBounds(L.latLngBounds(latlngs), { padding: [22, 22] });
+        setTimeout(() => { traceSyncingMap = false; }, 250);
+      };
+      const renderTraceMap = (shouldFit = false) => {
+        const map = ensureTraceMap();
+        if (!map || !traceData) return;
+        if (traceLayer) traceLayer.remove();
+        traceLayer = L.layerGroup().addTo(map);
+        const metricKey = traceMetricSelect?.value || "ca_speed_kph";
+        const { min, max } = traceMetricBounds();
+        (traceData.series || []).forEach((series) => {
+          const points = visibleTracePoints(series);
+          if (!points.length) return;
+          for (let i = 1; i < points.length; i += 1) {
+            const previous = points[i - 1];
+            const current = points[i];
+            const value = Number(current.metrics?.[metricKey]);
+            L.polyline(
+              [[previous.lat, previous.lon], [current.lat, current.lon]],
+              {
+                color: traceColor(value, min, max),
+                weight: series.vehicle_key === "supercycle_2" ? 4 : 5,
+                opacity: series.vehicle_key === "supercycle_2" ? 0.7 : 0.9
+              }
+            ).addTo(traceLayer);
+          }
+          L.circleMarker([points[0].lat, points[0].lon], {
+            radius: 5,
+            color: vehicleColors[series.vehicle_key] || "#16a34a",
+            weight: 2,
+            fillOpacity: 0.9
+          }).addTo(traceLayer).bindTooltip(`${series.vehicle_label} start`);
+          L.circleMarker([points[points.length - 1].lat, points[points.length - 1].lon], {
+            radius: 5,
+            color: "#ef4444",
+            weight: 2,
+            fillOpacity: 0.9
+          }).addTo(traceLayer).bindTooltip(`${series.vehicle_label} end`);
+        });
+        if (shouldFit) fitTraceMapToRange();
+      };
+      const resizeTraceCanvas = () => {
+        if (!traceChart) return null;
+        const dpr = window.devicePixelRatio || 1;
+        const rect = traceChart.getBoundingClientRect();
+        const width = Math.max(320, Math.round(rect.width || 640));
+        const height = Math.max(260, Math.round(rect.height || 320));
+        if (traceChart.width !== Math.round(width * dpr) || traceChart.height !== Math.round(height * dpr)) {
+          traceChart.width = Math.round(width * dpr);
+          traceChart.height = Math.round(height * dpr);
+        }
+        const ctx = traceChart.getContext("2d");
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { ctx, width, height };
+      };
+      const renderTraceChart = () => {
+        if (!traceChart || !traceData) return;
+        const canvas = resizeTraceCanvas();
+        if (!canvas) return;
+        const { ctx, width, height } = canvas;
+        ctx.clearRect(0, 0, width, height);
+        const metric = currentTraceMetric();
+        const xAxis = currentTraceXAxis();
+        const xUnit = xAxis === "time" ? "min" : "km";
+        const metricKey = metric.key;
+        const margin = { top: 18, right: 18, bottom: 40, left: 58 };
+        const plotW = width - margin.left - margin.right;
+        const plotH = height - margin.top - margin.bottom;
+        const xBounds = traceRange ? { min: traceRange[0], max: traceRange[1] } : traceXBounds();
+        const yValues = (traceData.series || [])
+          .flatMap((series) => visibleTracePoints(series).map((point) => Number(point.metrics?.[metricKey])))
+          .filter(Number.isFinite);
+        let yMin = yValues.length ? Math.min(...yValues) : 0;
+        let yMax = yValues.length ? Math.max(...yValues) : 1;
+        if (yMin > 0) yMin = 0;
+        if (yMax < 0) yMax = 0;
+        if (yMin === yMax) {
+          const pad = Math.max(1, Math.abs(yMax) * 0.1);
+          yMin -= pad;
+          yMax += pad;
+        }
+        const xFor = (value) => margin.left + ((value - xBounds.min) / Math.max(1e-9, xBounds.max - xBounds.min)) * plotW;
+        const yFor = (value) => margin.top + plotH - ((value - yMin) / Math.max(1e-9, yMax - yMin)) * plotH;
+
+        ctx.strokeStyle = "#eee4d8";
+        ctx.lineWidth = 1;
+        ctx.fillStyle = "#5f5f5f";
+        ctx.font = "11px Arial";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        for (let i = 0; i <= 4; i += 1) {
+          const y = margin.top + (plotH * i) / 4;
+          ctx.beginPath();
+          ctx.moveTo(margin.left, y);
+          ctx.lineTo(width - margin.right, y);
+          ctx.stroke();
+          const value = yMax - ((yMax - yMin) * i) / 4;
+          ctx.fillText(formatTraceValue(value, metric.unit), margin.left - 8, y);
+        }
+        ctx.strokeStyle = "#d8cdbd";
+        ctx.beginPath();
+        ctx.moveTo(margin.left, margin.top);
+        ctx.lineTo(margin.left, height - margin.bottom);
+        ctx.lineTo(width - margin.right, height - margin.bottom);
+        ctx.stroke();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        for (let i = 0; i <= 5; i += 1) {
+          const value = xBounds.min + ((xBounds.max - xBounds.min) * i) / 5;
+          ctx.fillText(formatTraceValue(value, xUnit), xFor(value), height - margin.bottom + 10);
+        }
+
+        (traceData.series || []).forEach((series) => {
+          const points = visibleTracePoints(series)
+            .map((point) => ({
+              x: traceXValue(point),
+              y: Number(point.metrics?.[metricKey])
+            }))
+            .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+          if (points.length < 2) return;
+          ctx.strokeStyle = vehicleColors[series.vehicle_key] || "#475569";
+          ctx.lineWidth = series.vehicle_key === "supercycle_2" ? 2 : 3;
+          ctx.setLineDash(series.vehicle_key === "supercycle_2" ? [7, 5] : []);
+          ctx.beginPath();
+          points.forEach((point, index) => {
+            const px = xFor(point.x);
+            const py = yFor(point.y);
+            if (index === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          });
+          ctx.stroke();
+          ctx.setLineDash([]);
+        });
+
+        if (traceDragStart) {
+          const left = Math.min(traceDragStart.currentX, traceDragStart.startX);
+          const selectionW = Math.abs(traceDragStart.currentX - traceDragStart.startX);
+          ctx.fillStyle = "rgba(13, 148, 136, 0.14)";
+          ctx.fillRect(left, margin.top, selectionW, plotH);
+        }
+
+        const rangeText = traceRange
+          ? `${formatTraceValue(traceRange[0], xUnit)} to ${formatTraceValue(traceRange[1], xUnit)}`
+          : "Full session";
+        if (traceChartTitle) traceChartTitle.textContent = `${metric.label} by ${xAxis === "time" ? "duration" : "CA distance"}`;
+        if (traceChartRange) traceChartRange.textContent = rangeText;
+        const colorBounds = traceMetricBounds();
+        if (traceScaleMin) traceScaleMin.textContent = formatTraceValue(colorBounds.min, metric.unit);
+        if (traceScaleMax) traceScaleMax.textContent = formatTraceValue(colorBounds.max, metric.unit);
+      };
+      const loadTrace = async () => {
+        if (!traceSessionSelect || !traceMetricSelect) return;
+        const selected = findTraceSession(traceSessionSelect.value);
+        if (!selected) return;
+        traceRange = null;
+        setTraceStatus("Loading trace...");
+        const params = new URLSearchParams({
+          device_id: selected.device_id,
+          session_id: selected.session_id,
+          mode: selected.mode || "default",
+          metric: traceMetricSelect.value || "ca_speed_kph",
+          compare: traceCompareCheck?.checked ? "1" : "0",
+          max_points: "1400"
+        });
+        try {
+          const traceUrl = new URL("/api/suntrip_analysis/session_trace", window.location.origin);
+          traceUrl.search = params.toString();
+          const response = await fetch(traceUrl.toString());
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Trace loading failed");
+          traceData = result;
+          const rawCount = (result.series || []).reduce((sum, series) => sum + Number(series.raw_point_count || 0), 0);
+          const pointCount = (result.series || []).reduce((sum, series) => sum + Number(series.point_count || 0), 0);
+          setTraceStatus(`${result.series.length} series · ${pointCount}/${rawCount} GPS points rendered`);
+          renderTraceMap(true);
+          renderTraceChart();
+          traceRadios.forEach((radio) => {
+            radio.checked = (
+              radio.dataset.deviceId === selected.device_id &&
+              radio.dataset.sessionId === selected.session_id &&
+              (radio.dataset.mode || "default") === (selected.mode || "default")
+            );
+          });
+        } catch (error) {
+          traceData = null;
+          setTraceStatus(error.message || "Trace loading failed");
+        }
+      };
+      const initializeTraceControls = () => {
+        if (!traceSessionSelect || !traceSessions.length) return;
+        traceSessions.forEach((session) => {
+          const option = document.createElement("option");
+          option.value = traceSessionKey(session);
+          option.textContent = `${session.day_label} · ${session.vehicle_label} · ${session.session_id}`;
+          if (session.suntrip_stage) option.dataset.stage = "1";
+          traceSessionSelect.appendChild(option);
+        });
+        const firstStage = traceSessions.find((session) => session.suntrip_stage) || traceSessions[0];
+        traceSessionSelect.value = traceSessionKey(firstStage);
+        traceRadios.forEach((radio) => {
+          radio.addEventListener("change", () => {
+            if (!radio.checked || !traceSessionSelect) return;
+            traceSessionSelect.value = `${radio.dataset.deviceId}||${radio.dataset.sessionId}||${radio.dataset.mode || "default"}`;
+            loadTrace();
+            traceMapEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+          });
+        });
+        traceSessionSelect.addEventListener("change", loadTrace);
+        traceMetricSelect?.addEventListener("change", loadTrace);
+        traceCompareCheck?.addEventListener("change", loadTrace);
+        traceXAxisSelect?.addEventListener("change", () => {
+          traceRange = null;
+          renderTraceMap(true);
+          renderTraceChart();
+        });
+        traceResetButton?.addEventListener("click", () => {
+          traceRange = null;
+          renderTraceMap(true);
+          renderTraceChart();
+        });
+        loadTrace();
+      };
+      if (traceChart) {
+        const chartXToValue = (clientX) => {
+          const rect = traceChart.getBoundingClientRect();
+          const margin = { left: 58, right: 18 };
+          const x = Math.max(margin.left, Math.min(rect.width - margin.right, clientX - rect.left));
+          const bounds = traceRange ? { min: traceRange[0], max: traceRange[1] } : traceXBounds();
+          return bounds.min + ((x - margin.left) / Math.max(1, rect.width - margin.left - margin.right)) * (bounds.max - bounds.min);
+        };
+        traceChart.addEventListener("pointerdown", (event) => {
+          traceChart.setPointerCapture(event.pointerId);
+          const rect = traceChart.getBoundingClientRect();
+          traceDragStart = { startX: event.clientX - rect.left, currentX: event.clientX - rect.left };
+        });
+        traceChart.addEventListener("pointermove", (event) => {
+          if (!traceDragStart) return;
+          const rect = traceChart.getBoundingClientRect();
+          traceDragStart.currentX = event.clientX - rect.left;
+          renderTraceChart();
+        });
+        traceChart.addEventListener("pointerup", (event) => {
+          if (!traceDragStart) return;
+          const rect = traceChart.getBoundingClientRect();
+          const delta = Math.abs((event.clientX - rect.left) - traceDragStart.startX);
+          const startValue = chartXToValue(traceDragStart.startX + rect.left);
+          const endValue = chartXToValue(event.clientX);
+          traceDragStart = null;
+          if (delta > 8 && Number.isFinite(startValue) && Number.isFinite(endValue) && startValue !== endValue) {
+            traceRange = [Math.min(startValue, endValue), Math.max(startValue, endValue)];
+            renderTraceMap(true);
+          }
+          renderTraceChart();
+        });
+        traceChart.addEventListener("wheel", (event) => {
+          if (!traceData) return;
+          event.preventDefault();
+          const bounds = traceRange ? { min: traceRange[0], max: traceRange[1] } : traceXBounds();
+          const center = chartXToValue(event.clientX);
+          const factor = event.deltaY > 0 ? 1.25 : 0.8;
+          const full = traceXBounds();
+          const newMin = center - (center - bounds.min) * factor;
+          const newMax = center + (bounds.max - center) * factor;
+          traceRange = [Math.max(full.min, newMin), Math.min(full.max, newMax)];
+          if (traceRange[1] - traceRange[0] >= (full.max - full.min) * 0.999) traceRange = null;
+          renderTraceMap(true);
+          renderTraceChart();
+        }, { passive: false });
+      }
 
       const svgNode = (name, attrs = {}) => {
         const node = document.createElementNS("http://www.w3.org/2000/svg", name);
@@ -799,6 +1364,7 @@
         });
       });
       renderCharts();
+      initializeTraceControls();
 
       const toggles = document.querySelectorAll(".stage-toggle");
       toggles.forEach((toggle) => {

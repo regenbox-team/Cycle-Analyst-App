@@ -683,11 +683,29 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("1 included stages", html)
         self.assertIn("chartMetricGroups", html)
         self.assertIn("metric-chart-check", html)
+        self.assertIn("Track Explorer", html)
+        self.assertIn("trace-select", html)
         self.assertIn("2026-05-07_10-00-00", html)
         self.assertIn("2026-05-07_10-05-00", html)
         self.assertIn("CA distance", html)
         self.assertIn("Battery Used", html)
         self.assertIn("CA Ah raw", html)
+
+        trace = client.get(
+            "/api/suntrip_analysis/session_trace"
+            "?device_id=Supercycle-1"
+            "&session_id=2026-05-07_10-00-00"
+            "&mode=supercycle_live"
+            "&metric=ca_speed_kph"
+            "&compare=1",
+            headers={"Authorization": token},
+        )
+        self.assertEqual(trace.status_code, 200)
+        payload = trace.get_json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["metric"]["key"], "ca_speed_kph")
+        self.assertEqual(len(payload["series"]), 2)
+        self.assertGreaterEqual(payload["series"][0]["point_count"], 1)
 
 
 if __name__ == "__main__":

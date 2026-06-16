@@ -33,6 +33,9 @@ from app.session_summary import (
     compute_timeline_metrics_by_user,
     filter_plausible_gps_samples,
     format_metric_value,
+    gps_segment_plausible,
+    parse_raw_values,
+    _haversine_km,
 )
 
 
@@ -73,6 +76,8 @@ HEARTBEAT_ACTIVE_WINDOW_SEC = 120
 DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
 DEFAULT_UPLOAD_CHUNK_MAX_BYTES = 256 * 1024
 DEFAULT_RESPONSE_GZIP_MIN_BYTES = 1024
+SUNTRIP_ANALYSIS_TRACE_MAX_POINTS = 1400
+_SUNTRIP_ANALYSIS_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
 
 
 def _float_env(name: str, default: float) -> float:
@@ -2094,6 +2099,285 @@ def _aggregate_session_metrics(metrics_list: list[dict[str, Any]]) -> dict[str, 
     return aggregate
 
 
+def _db_state_key() -> tuple[str, int | None, int | None]:
+    path = _db_path()
+    try:
+        stat = os.stat(path)
+        return path, stat.st_mtime_ns, stat.st_size
+    except OSError:
+        return path, None, None
+
+
+def _limited_int(value: Any, default: int, low: int, high: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(low, min(high, number))
+
+
+def _downsample_points(points: list[dict[str, Any]], max_points: int) -> list[dict[str, Any]]:
+    if len(points) <= max_points:
+        return points
+    step = max(1, math.ceil(len(points) / max_points))
+    sampled = points[::step]
+    if sampled[-1] is not points[-1]:
+        sampled.append(points[-1])
+    return sampled
+
+
+def _metric_options_from_specs() -> list[dict[str, str]]:
+    return [
+        {"key": "ca_speed_kph", "label": "CA speed", "unit": "km/h"},
+        {"key": "gps_speed_kph", "label": "GPS speed", "unit": "km/h"},
+        {"key": "battery_power_w", "label": "Battery power", "unit": "W"},
+        {"key": "human_power_w", "label": "Human power", "unit": "W"},
+        {"key": "solar_power_w", "label": "Solar power", "unit": "W"},
+        {"key": "battery_current_a", "label": "Battery current", "unit": "A"},
+        {"key": "human_current_a", "label": "Human current", "unit": "A"},
+        {"key": "voltage_v", "label": "Battery voltage", "unit": "V"},
+        {"key": "temperature_c", "label": "CA temperature", "unit": "C"},
+        {"key": "altitude_m", "label": "Altitude", "unit": "m"},
+        {"key": "ca_distance_km", "label": "CA distance", "unit": "km"},
+        {"key": "gps_distance_km", "label": "GPS distance", "unit": "km"},
+        {"key": "elapsed_min", "label": "Elapsed time", "unit": "min"},
+        {"key": "battery_used_ah", "label": "Battery used", "unit": "Ah"},
+        {"key": "positive_wh", "label": "Positive energy", "unit": "Wh"},
+        {"key": "regen_wh", "label": "Regen energy", "unit": "Wh"},
+        {"key": "human_wh", "label": "Human energy", "unit": "Wh"},
+        {"key": "solar_wh", "label": "Solar energy", "unit": "Wh"},
+        {"key": "net_wh", "label": "Net energy", "unit": "Wh"},
+    ]
+
+
+def _trace_metric_option_map() -> dict[str, dict[str, str]]:
+    return {option["key"]: option for option in _metric_options_from_specs()}
+
+
+def _sample_metric_value(metrics: dict[str, Any], key: str) -> float | None:
+    value = metrics.get(key)
+    return _safe_float(value)
+
+
+def _session_trace_points(samples: list[dict[str, Any]], max_points: int) -> tuple[list[dict[str, Any]], int]:
+    first_ts = None
+    previous_ts = None
+    previous_values = None
+    previous_gps_sample = None
+    previous_gps = None
+    ca_distance_km = 0.0
+    gps_distance_km = 0.0
+    battery_used_ah = 0.0
+    positive_wh = 0.0
+    regen_wh = 0.0
+    human_wh = 0.0
+    solar_wh = 0.0
+    points: list[dict[str, Any]] = []
+
+    for sample in samples:
+        values = parse_raw_values(sample.get("raw"))
+        current_ts = _parse_upload_ts(sample.get("timestamp"))
+        if current_ts is not None and first_ts is None:
+            first_ts = current_ts
+        dt = 0.0
+        if previous_ts is not None and current_ts is not None:
+            candidate_dt = (current_ts - previous_ts).total_seconds()
+            if 0 <= candidate_dt <= 5.0:
+                dt = candidate_dt
+        if current_ts is not None:
+            previous_ts = current_ts
+
+        voltage = values[1] if values else None
+        battery_current = values[2] if values else None
+        ca_speed = values[3] if values else None
+        raw_distance = values[4] if values else None
+        temperature = values[5] if values else None
+        human_current = values[13] if values else None
+        battery_power = voltage * battery_current if voltage is not None and battery_current is not None else None
+        human_power = voltage * human_current if voltage is not None and human_current is not None else None
+
+        solar_power = _safe_float(sample.get("solar_power_w"))
+        if solar_power is None:
+            solar_current = _safe_float(sample.get("solar_current_a"))
+            solar_voltage = _safe_float(sample.get("solar_bus_v"))
+            if solar_current is not None and solar_voltage is not None:
+                solar_power = solar_current * solar_voltage
+        solar_power = max(0.0, solar_power or 0.0)
+
+        if values and previous_values:
+            previous_distance = previous_values[4]
+            if raw_distance is not None and raw_distance >= previous_distance - 0.1:
+                ca_distance_km += max(0.0, raw_distance - previous_distance)
+            previous_raw_ah = previous_values[0]
+            raw_ah = values[0]
+            if raw_ah >= previous_raw_ah:
+                battery_used_ah += raw_ah - previous_raw_ah
+
+        if dt > 0 and battery_power is not None:
+            if abs(battery_power) > 2:
+                if battery_current and battery_current > 0:
+                    positive_wh += battery_power * dt / 3600
+                elif battery_current and battery_current < 0:
+                    regen_wh += abs(battery_power) * dt / 3600
+            if human_power is not None:
+                human_wh += human_power * dt / 3600
+            solar_wh += solar_power * dt / 3600
+
+        gps = _valid_lat_lon(sample.get("gps_lat"), sample.get("gps_lon"))
+        if gps is None:
+            previous_values = values or previous_values
+            continue
+
+        plausible = True
+        if previous_gps is not None:
+            segment_km = _haversine_km(previous_gps, gps)
+            plausible = gps_segment_plausible(previous_gps_sample, sample, segment_km)
+            if plausible:
+                gps_distance_km += segment_km
+        if not plausible:
+            previous_values = values or previous_values
+            continue
+        previous_gps = gps
+        previous_gps_sample = sample
+
+        altitude = _safe_float(sample.get("terrain_alt_m"))
+        if altitude is None:
+            altitude = _safe_float(sample.get("gps_alt"))
+        elapsed_sec = (current_ts - first_ts).total_seconds() if current_ts is not None and first_ts is not None else 0.0
+        metrics = {
+            "ca_speed_kph": ca_speed,
+            "gps_speed_kph": _safe_float(sample.get("gps_speed_kph")),
+            "battery_power_w": battery_power,
+            "human_power_w": human_power,
+            "solar_power_w": solar_power,
+            "battery_current_a": battery_current,
+            "human_current_a": human_current,
+            "voltage_v": voltage,
+            "temperature_c": temperature,
+            "altitude_m": altitude,
+            "ca_distance_km": ca_distance_km,
+            "gps_distance_km": gps_distance_km,
+            "elapsed_min": elapsed_sec / 60.0,
+            "battery_used_ah": battery_used_ah,
+            "positive_wh": positive_wh,
+            "regen_wh": regen_wh,
+            "human_wh": human_wh,
+            "solar_wh": solar_wh,
+            "net_wh": positive_wh - regen_wh - human_wh - solar_wh,
+        }
+        points.append(
+            {
+                "lat": round(gps[0], 7),
+                "lon": round(gps[1], 7),
+                "timestamp": sample.get("timestamp"),
+                "x_distance": round(ca_distance_km, 5),
+                "x_time": round(elapsed_sec / 60.0, 5),
+                "metrics": {
+                    key: round(value, 5)
+                    for key, value in metrics.items()
+                    if isinstance(value, (int, float)) and math.isfinite(float(value))
+                },
+            }
+        )
+        previous_values = values or previous_values
+
+    return _downsample_points(points, max_points), len(points)
+
+
+def _trace_session_payload(
+    conn: sqlite3.Connection,
+    session: sqlite3.Row,
+    *,
+    metric_key: str,
+    max_points: int,
+) -> dict[str, Any]:
+    vehicle = _suntrip_vehicle_for_device(session["device_id"])
+    samples = _telemetry_samples_for_session(
+        conn,
+        session["device_id"],
+        session["session_id"],
+        session["mode"],
+    )
+    points, raw_point_count = _session_trace_points(samples, max_points)
+    return {
+        "device_id": session["device_id"],
+        "session_id": session["session_id"],
+        "mode": session["mode"],
+        "vehicle_key": vehicle["key"] if vehicle else "",
+        "vehicle_label": vehicle["label"] if vehicle else session["device_id"],
+        "day_key": (_session_day(session["start_ts"], session["session_id"]) or "").isoformat()
+        if _session_day(session["start_ts"], session["session_id"])
+        else "",
+        "start_ts": session["start_ts"],
+        "end_ts": session["end_ts"],
+        "distance_km": session["distance_km"],
+        "rows_count": session["rows_count"],
+        "raw_point_count": raw_point_count,
+        "point_count": len(points),
+        "metric_values": [
+            _sample_metric_value(point.get("metrics", {}), metric_key)
+            for point in points
+        ],
+        "points": points,
+    }
+
+
+def _comparison_sessions_for_trace(
+    conn: sqlite3.Connection,
+    selected: sqlite3.Row,
+) -> list[sqlite3.Row]:
+    selected_vehicle = _suntrip_vehicle_for_device(selected["device_id"])
+    selected_day = _session_day(selected["start_ts"], selected["session_id"])
+    if not selected_vehicle or not selected_day:
+        return [selected]
+
+    start_prefix = selected_day.isoformat()
+    rows = conn.execute(
+        """
+        SELECT device_id, session_id, mode, solar_enabled, suntrip_stage,
+               start_ts, end_ts, rows_count, distance_km, uploaded_at
+        FROM sessions
+        WHERE (date(start_ts) = ? OR substr(session_id, 1, 10) = ?)
+        ORDER BY suntrip_stage DESC, COALESCE(start_ts, session_id), device_id
+        """,
+        (start_prefix, start_prefix),
+    ).fetchall()
+    by_vehicle: dict[str, sqlite3.Row] = {selected_vehicle["key"]: selected}
+    selected_start = _parse_upload_ts(selected["start_ts"]) or datetime.min
+    for row in rows:
+        vehicle = _suntrip_vehicle_for_device(row["device_id"])
+        if not vehicle or vehicle["key"] in by_vehicle:
+            continue
+        row_day = _session_day(row["start_ts"], row["session_id"])
+        if row_day != selected_day:
+            continue
+        by_vehicle[vehicle["key"]] = row
+
+    if len(by_vehicle) < len(SUNTRIP_ANALYSIS_VEHICLES):
+        candidates = [
+            row
+            for row in rows
+            if (vehicle := _suntrip_vehicle_for_device(row["device_id"]))
+            and vehicle["key"] not in by_vehicle
+            and _session_day(row["start_ts"], row["session_id"]) == selected_day
+        ]
+        candidates.sort(
+            key=lambda row: abs(
+                ((_parse_upload_ts(row["start_ts"]) or selected_start) - selected_start).total_seconds()
+            )
+        )
+        for row in candidates:
+            vehicle = _suntrip_vehicle_for_device(row["device_id"])
+            if vehicle and vehicle["key"] not in by_vehicle:
+                by_vehicle[vehicle["key"]] = row
+
+    return [
+        row
+        for vehicle in SUNTRIP_ANALYSIS_VEHICLES
+        if (row := by_vehicle.get(vehicle["key"]))
+    ]
+
+
 def _is_deleted_session(conn: sqlite3.Connection, device_id: str, session_id: str, mode: str) -> bool:
     row = conn.execute(
         """
@@ -3373,152 +3657,227 @@ def create_app() -> Flask:
         end_date = _parse_date_param(request.args.get("end"), SUNTRIP_ANALYSIS_END_DATE)
         if end_date < start_date:
             start_date, end_date = end_date, start_date
-        vehicle_order = {vehicle["key"]: index for index, vehicle in enumerate(SUNTRIP_ANALYSIS_VEHICLES)}
+        cache_key = ("suntrip_analysis", _db_state_key(), start_date.isoformat(), end_date.isoformat())
+        payload = _SUNTRIP_ANALYSIS_CACHE.get(cache_key)
+        if payload is None:
+            vehicle_order = {vehicle["key"]: index for index, vehicle in enumerate(SUNTRIP_ANALYSIS_VEHICLES)}
 
-        with _get_db() as conn:
-            rows = conn.execute(
-                """
-                SELECT device_id, session_id, mode, solar_enabled, suntrip_stage,
-                       start_ts, end_ts, rows_count, distance_km, uploaded_at
-                FROM sessions
-                ORDER BY COALESCE(start_ts, session_id), device_id
-                """
-            ).fetchall()
+            with _get_db() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT device_id, session_id, mode, solar_enabled, suntrip_stage,
+                           start_ts, end_ts, rows_count, distance_km, uploaded_at
+                    FROM sessions
+                    ORDER BY COALESCE(start_ts, session_id), device_id
+                    """
+                ).fetchall()
 
-            candidates = []
-            for row in rows:
-                vehicle = _suntrip_vehicle_for_device(row["device_id"])
-                day = _session_day(row["start_ts"], row["session_id"])
-                if not vehicle or not day or day < start_date or day > end_date:
-                    continue
-                candidate = dict(row) | {
-                    "day": day,
-                    "day_key": day.isoformat(),
-                    "day_label": day.strftime("%d/%m/%Y"),
-                    "vehicle_key": vehicle["key"],
-                    "vehicle_label": vehicle["label"],
-                    "vehicle_order": vehicle_order.get(vehicle["key"], 99),
-                    "start_ts_fmt": _format_dt(row["start_ts"]),
-                    "end_ts_fmt": _format_dt(row["end_ts"]),
-                    "suntrip_stage": bool(row["suntrip_stage"]),
-                    "map_url": url_for(
-                        "session_map",
-                        device_id=row["device_id"],
-                        session_id=row["session_id"],
-                        mode=row["mode"],
-                    ),
-                }
-                candidates.append(candidate)
+                candidates = []
+                for row in rows:
+                    vehicle = _suntrip_vehicle_for_device(row["device_id"])
+                    day = _session_day(row["start_ts"], row["session_id"])
+                    if not vehicle or not day or day < start_date or day > end_date:
+                        continue
+                    candidate = dict(row) | {
+                        "day": day,
+                        "day_key": day.isoformat(),
+                        "day_label": day.strftime("%d/%m/%Y"),
+                        "vehicle_key": vehicle["key"],
+                        "vehicle_label": vehicle["label"],
+                        "vehicle_order": vehicle_order.get(vehicle["key"], 99),
+                        "start_ts_fmt": _format_dt(row["start_ts"]),
+                        "end_ts_fmt": _format_dt(row["end_ts"]),
+                        "suntrip_stage": bool(row["suntrip_stage"]),
+                        "map_url": url_for(
+                            "session_map",
+                            device_id=row["device_id"],
+                            session_id=row["session_id"],
+                            mode=row["mode"],
+                        ),
+                    }
+                    candidates.append(candidate)
 
-            candidates.sort(
-                key=lambda item: (
-                    item["day"],
-                    item["vehicle_order"],
-                    item["start_ts"] or "",
-                    item["session_id"] or "",
+                candidates.sort(
+                    key=lambda item: (
+                        item["day"],
+                        item["vehicle_order"],
+                        item["start_ts"] or "",
+                        item["session_id"] or "",
+                    )
                 )
-            )
 
-            columns = []
-            for candidate in candidates:
-                if not candidate["suntrip_stage"]:
+                columns = []
+                for candidate in candidates:
+                    if not candidate["suntrip_stage"]:
+                        continue
+                    samples = _telemetry_samples_for_session(
+                        conn,
+                        candidate["device_id"],
+                        candidate["session_id"],
+                        candidate["mode"],
+                    )
+                    metrics = compute_session_metrics(samples)
+                    columns.append(candidate | {"metrics": metrics, "sample_count": len(samples)})
+
+            day_groups = []
+            for column in columns:
+                if not day_groups or day_groups[-1]["day_key"] != column["day_key"]:
+                    day_groups.append({"day_key": column["day_key"], "day_label": column["day_label"], "columns": []})
+                day_groups[-1]["columns"].append(column)
+
+            total_columns = []
+            for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
+                vehicle_columns = [column for column in columns if column["vehicle_key"] == vehicle["key"]]
+                if not vehicle_columns:
                     continue
-                samples = _telemetry_samples_for_session(
-                    conn,
-                    candidate["device_id"],
-                    candidate["session_id"],
-                    candidate["mode"],
-                )
-                metrics = compute_session_metrics(samples)
-                columns.append(candidate | {"metrics": metrics, "sample_count": len(samples)})
-
-        day_groups = []
-        for column in columns:
-            if not day_groups or day_groups[-1]["day_key"] != column["day_key"]:
-                day_groups.append({"day_key": column["day_key"], "day_label": column["day_label"], "columns": []})
-            day_groups[-1]["columns"].append(column)
-
-        total_columns = []
-        for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
-            vehicle_columns = [column for column in columns if column["vehicle_key"] == vehicle["key"]]
-            if not vehicle_columns:
-                continue
-            total_columns.append(
-                {
-                    "vehicle_key": vehicle["key"],
-                    "vehicle_label": vehicle["label"],
-                    "session_count": len(vehicle_columns),
-                    "metrics": _aggregate_session_metrics([column["metrics"] for column in vehicle_columns]),
-                }
-            )
-
-        metric_groups = []
-        chart_metric_groups = []
-        for category, specs in SUMMARY_GROUPS:
-            rows = []
-            chart_rows = []
-            for label, unit, func in specs:
-                metric_key = f"metric_{len(chart_metric_groups)}_{len(chart_rows)}"
-                rows.append(
+                total_columns.append(
                     {
-                        "key": metric_key,
-                        "label": label,
-                        "unit": unit,
-                        "values": [format_metric_value(func(column["metrics"]), unit) for column in columns],
-                        "total_values": [
-                            format_metric_value(func(total_column["metrics"]), unit)
-                            for total_column in total_columns
-                        ],
+                        "vehicle_key": vehicle["key"],
+                        "vehicle_label": vehicle["label"],
+                        "session_count": len(vehicle_columns),
+                        "metrics": _aggregate_session_metrics([column["metrics"] for column in vehicle_columns]),
                     }
                 )
-                series = []
-                for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
-                    values = []
-                    for day in day_groups:
-                        day_vehicle_columns = [
-                            column
-                            for column in day["columns"]
-                            if column["vehicle_key"] == vehicle["key"]
-                        ]
-                        if not day_vehicle_columns:
-                            values.append(None)
-                            continue
-                        metrics = _aggregate_session_metrics(
-                            [column["metrics"] for column in day_vehicle_columns]
-                        )
-                        values.append(func(metrics))
-                    series.append(
+
+            metric_groups = []
+            chart_metric_groups = []
+            for category, specs in SUMMARY_GROUPS:
+                rows = []
+                chart_rows = []
+                for label, unit, func in specs:
+                    metric_key = f"metric_{len(chart_metric_groups)}_{len(chart_rows)}"
+                    rows.append(
                         {
-                            "vehicle_key": vehicle["key"],
-                            "vehicle_label": vehicle["label"],
-                            "values": values,
+                            "key": metric_key,
+                            "label": label,
+                            "unit": unit,
+                            "values": [format_metric_value(func(column["metrics"]), unit) for column in columns],
+                            "total_values": [
+                                format_metric_value(func(total_column["metrics"]), unit)
+                                for total_column in total_columns
+                            ],
                         }
                     )
-                chart_rows.append(
-                    {
-                        "key": metric_key,
-                        "category": category,
-                        "label": label,
-                        "unit": unit,
-                        "days": [day["day_label"] for day in day_groups],
-                        "series": series,
-                    }
-                )
-            metric_groups.append({"category": category, "rows": rows})
-            chart_metric_groups.append({"category": category, "rows": chart_rows})
+                    series = []
+                    for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
+                        values = []
+                        for day in day_groups:
+                            day_vehicle_columns = [
+                                column
+                                for column in day["columns"]
+                                if column["vehicle_key"] == vehicle["key"]
+                            ]
+                            if not day_vehicle_columns:
+                                values.append(None)
+                                continue
+                            metrics = _aggregate_session_metrics(
+                                [column["metrics"] for column in day_vehicle_columns]
+                            )
+                            values.append(func(metrics))
+                        series.append(
+                            {
+                                "vehicle_key": vehicle["key"],
+                                "vehicle_label": vehicle["label"],
+                                "values": values,
+                            }
+                        )
+                    chart_rows.append(
+                        {
+                            "key": metric_key,
+                            "category": category,
+                            "label": label,
+                            "unit": unit,
+                            "days": [day["day_label"] for day in day_groups],
+                            "series": series,
+                        }
+                    )
+                metric_groups.append({"category": category, "rows": rows})
+                chart_metric_groups.append({"category": category, "rows": chart_rows})
+
+            trace_sessions = [
+                {
+                    "device_id": candidate["device_id"],
+                    "session_id": candidate["session_id"],
+                    "mode": candidate["mode"],
+                    "day_key": candidate["day_key"],
+                    "day_label": candidate["day_label"],
+                    "vehicle_key": candidate["vehicle_key"],
+                    "vehicle_label": candidate["vehicle_label"],
+                    "start_ts_fmt": candidate["start_ts_fmt"],
+                    "distance_km": candidate["distance_km"],
+                    "suntrip_stage": candidate["suntrip_stage"],
+                }
+                for candidate in candidates
+            ]
+            payload = {
+                "vehicles": SUNTRIP_ANALYSIS_VEHICLES,
+                "candidates": candidates,
+                "columns": columns,
+                "total_columns": total_columns,
+                "day_groups": day_groups,
+                "metric_groups": metric_groups,
+                "chart_metric_groups": chart_metric_groups,
+                "trace_sessions": trace_sessions,
+                "trace_metric_options": _metric_options_from_specs(),
+                "stage_count": len(columns),
+            }
+            if len(_SUNTRIP_ANALYSIS_CACHE) > 8:
+                _SUNTRIP_ANALYSIS_CACHE.clear()
+            _SUNTRIP_ANALYSIS_CACHE[cache_key] = payload
 
         return render_template(
             "suntrip_analysis.html",
             start_date=start_date.isoformat(),
             end_date=end_date.isoformat(),
-            vehicles=SUNTRIP_ANALYSIS_VEHICLES,
-            candidates=candidates,
-            columns=columns,
-            total_columns=total_columns,
-            day_groups=day_groups,
-            metric_groups=metric_groups,
-            chart_metric_groups=chart_metric_groups,
-            stage_count=len(columns),
+            **payload,
+        )
+
+    @app.route("/api/suntrip_analysis/session_trace")
+    @_require_auth
+    def suntrip_analysis_session_trace():
+        device_id = request.args.get("device_id")
+        session_id = request.args.get("session_id")
+        mode = request.args.get("mode", "default")
+        metric_key = request.args.get("metric") or "ca_speed_kph"
+        compare = request.args.get("compare", "1").strip().lower() not in {"0", "false", "no", "off"}
+        max_points = _limited_int(
+            request.args.get("max_points"),
+            SUNTRIP_ANALYSIS_TRACE_MAX_POINTS,
+            100,
+            SUNTRIP_ANALYSIS_TRACE_MAX_POINTS,
+        )
+        metric_options = _trace_metric_option_map()
+        if metric_key not in metric_options:
+            return jsonify({"error": "unknown metric"}), 400
+        if not device_id or not session_id:
+            return jsonify({"error": "missing device_id or session_id"}), 400
+
+        with _get_db() as conn:
+            selected = conn.execute(
+                """
+                SELECT device_id, session_id, mode, solar_enabled, suntrip_stage,
+                       start_ts, end_ts, rows_count, distance_km, uploaded_at
+                FROM sessions
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                """,
+                (device_id, session_id, mode),
+            ).fetchone()
+            if not selected:
+                return jsonify({"error": "session not found"}), 404
+            sessions = _comparison_sessions_for_trace(conn, selected) if compare else [selected]
+            series = [
+                _trace_session_payload(conn, session, metric_key=metric_key, max_points=max_points)
+                for session in sessions
+            ]
+
+        return jsonify(
+            {
+                "status": "ok",
+                "metric": metric_options[metric_key],
+                "compare": compare,
+                "max_points": max_points,
+                "series": series,
+            }
         )
 
     @app.route("/public/suntrip.json")
