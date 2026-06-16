@@ -37,6 +37,7 @@ from app.session_summary import (
     parse_raw_values,
     _haversine_km,
 )
+from app.distance import update_ca_distance
 
 
 TELEMETRY_TABLE = "telemetry_samples"
@@ -2165,6 +2166,7 @@ def _session_trace_points(samples: list[dict[str, Any]], max_points: int) -> tup
     previous_values = None
     previous_gps_sample = None
     previous_gps = None
+    distance_store: dict[str, Any] = {}
     ca_distance_km = 0.0
     gps_distance_km = 0.0
     battery_used_ah = 0.0
@@ -2204,10 +2206,16 @@ def _session_trace_points(samples: list[dict[str, Any]], max_points: int) -> tup
                 solar_power = solar_current * solar_voltage
         solar_power = max(0.0, solar_power or 0.0)
 
+        if raw_distance is not None:
+            _, ca_distance_km, _ = update_ca_distance(
+                distance_store,
+                raw_distance,
+                now=current_ts,
+                distance_key="distance",
+                reset_count_key="ca_reset_count",
+            )
+
         if values and previous_values:
-            previous_distance = previous_values[4]
-            if raw_distance is not None and raw_distance >= previous_distance - 0.1:
-                ca_distance_km += max(0.0, raw_distance - previous_distance)
             previous_raw_ah = previous_values[0]
             raw_ah = values[0]
             if raw_ah >= previous_raw_ah:

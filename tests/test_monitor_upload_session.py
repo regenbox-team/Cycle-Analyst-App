@@ -707,6 +707,20 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertEqual(len(payload["series"]), 2)
         self.assertGreaterEqual(payload["series"][0]["point_count"], 1)
 
+    def test_suntrip_trace_rejects_ca_distance_glitch(self):
+        samples = [
+            dict(self.sample(0), timestamp="2026-05-09 12:13:20", raw="0 52 1 30 54.084 20 0 0 0 0 0 0 0 0 flags"),
+            dict(self.sample(1), timestamp="2026-05-09 12:13:21", raw="0 52 1 30 544.133 20 0 0 0 0 0 0 0 0 flags"),
+            dict(self.sample(2), timestamp="2026-05-09 12:13:22", raw="0 52 1 30 54.143 20 0 0 0 0 0 0 0 0 flags"),
+            dict(self.sample(3), timestamp="2026-05-09 12:13:23", raw="0 52 1 30 54.200 20 0 0 0 0 0 0 0 0 flags"),
+        ]
+
+        points, raw_count = self.monitor_app._session_trace_points(samples, 100)
+
+        self.assertEqual(raw_count, 4)
+        self.assertLess(points[-1]["x_distance"], 0.2)
+        self.assertGreater(points[-1]["x_distance"], 0.09)
+
 
 if __name__ == "__main__":
     unittest.main()

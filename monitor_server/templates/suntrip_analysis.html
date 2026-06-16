@@ -668,10 +668,12 @@
       const findTraceSession = (key) => traceSessions.find((session) => traceSessionKey(session) === key);
       let traceMap = null;
       let traceLayer = null;
+      let traceHoverLayer = null;
       let traceData = null;
       let traceRange = null;
       let traceSyncingMap = false;
       let traceDragStart = null;
+      let traceHoverX = null;
 
       const setTraceStatus = (message) => {
         if (traceStatus) traceStatus.textContent = message || "";
@@ -706,6 +708,22 @@
           const x = traceXValue(point);
           return Number.isFinite(x) && x >= traceRange[0] && x <= traceRange[1];
         });
+      };
+      const nearestTracePoint = (series, xValue, visibleOnly = true) => {
+        if (!Number.isFinite(xValue)) return null;
+        const points = visibleOnly ? visibleTracePoints(series) : (series.points || []);
+        let best = null;
+        let bestDistance = Infinity;
+        points.forEach((point) => {
+          const x = traceXValue(point);
+          if (!Number.isFinite(x)) return;
+          const distance = Math.abs(x - xValue);
+          if (distance < bestDistance) {
+            best = point;
+            bestDistance = distance;
+          }
+        });
+        return best;
       };
       const traceMetricBounds = () => {
         const values = (traceData?.series || [])
@@ -748,6 +766,8 @@
           const xs = visible.map(traceXValue).filter(Number.isFinite);
           if (xs.length < 2) return;
           traceRange = [Math.min(...xs), Math.max(...xs)];
+          traceHoverX = null;
+          renderTraceMap(false);
           renderTraceChart();
         });
         return traceMap;
@@ -755,7 +775,7 @@
       const fitTraceMapToRange = () => {
         if (!traceMap || !traceData) return;
         const latlngs = (traceData.series || [])
-          .flatMap(visibleTracePoints)
+          .flatMap((series) => series.points || [])
           .map((point) => [point.lat, point.lon]);
         if (!latlngs.length) return;
         traceSyncingMap = true;
@@ -770,11 +790,22 @@
         const metricKey = traceMetricSelect?.value || "ca_speed_kph";
         const { min, max } = traceMetricBounds();
         (traceData.series || []).forEach((series) => {
-          const points = visibleTracePoints(series);
-          if (!points.length) return;
-          for (let i = 1; i < points.length; i += 1) {
-            const previous = points[i - 1];
-            const current = points[i];
+          const allPoints = series.points || [];
+          if (allPoints.length < 2) return;
+          L.polyline(
+            allPoints.map((point) => [point.lat, point.lon]),
+            {
+              color: vehicleColors[series.vehicle_key] || "#64748b",
+              weight: 2,
+              opacity: 0.24
+            }
+          ).addTo(traceLayer);
+
+          const activePoints = visibleTracePoints(series);
+          if (!activePoints.length) return;
+          for (let i = 1; i < activePoints.length; i += 1) {
+            const previous = activePoints[i - 1];
+            const current = activePoints[i];
             const value = Number(current.metrics?.[metricKey]);
             L.polyline(
               [[previous.lat, previous.lon], [current.lat, current.lon]],
@@ -785,13 +816,13 @@
               }
             ).addTo(traceLayer);
           }
-          L.circleMarker([points[0].lat, points[0].lon], {
+          L.circleMarker([activePoints[0].lat, activePoints[0].lon], {
             radius: 5,
             color: vehicleColors[series.vehicle_key] || "#16a34a",
             weight: 2,
             fillOpacity: 0.9
           }).addTo(traceLayer).bindTooltip(`${series.vehicle_label} start`);
-          L.circleMarker([points[points.length - 1].lat, points[points.length - 1].lon], {
+          L.circleMarker([activePoints[activePoints.length - 1].lat, activePoints[activePoints.length - 1].lon], {
             radius: 5,
             color: "#ef4444",
             weight: 2,
@@ -799,6 +830,34 @@
           }).addTo(traceLayer).bindTooltip(`${series.vehicle_label} end`);
         });
         if (shouldFit) fitTraceMapToRange();
+        renderTraceHoverMap();
+      };
+      const renderTraceHoverMap = () => {
+        const map = ensureTraceMap();
+        if (!map || !traceData) return;
+        if (traceHoverLayer) traceHoverLayer.remove();
+        traceHoverLayer = L.layerGroup().addTo(map);
+        if (!Number.isFinite(traceHoverX)) return;
+        const metric = currentTraceMetric();
+        const metricKey = metric.key;
+        (traceData.series || []).forEach((series) => {
+          const point = nearestTracePoint(series, traceHoverX, true);
+          if (!point) return;
+          const value = Number(point.metrics?.[metricKey]);
+          const color = vehicleColors[series.vehicle_key] || "#0d9488";
+          L.circleMarker([point.lat, point.lon], {
+            radius: 8,
+            color,
+            weight: 3,
+            fillColor: "#ffffff",
+            fillOpacity: 0.95
+          })
+            .addTo(traceHoverLayer)
+            .bindTooltip(`${series.vehicle_label}: ${formatTraceValue(value, metric.unit)}`, {
+              permanent: false,
+              direction: "top"
+            });
+        });
       };
       const resizeTraceCanvas = () => {
         if (!traceChart) return null;
@@ -893,6 +952,56 @@
           ctx.setLineDash([]);
         });
 
+        if (Number.isFinite(traceHoverX)) {
+          const hoverX = Math.max(xBounds.min, Math.min(xBounds.max, traceHoverX));
+          const px = xFor(hoverX);
+          ctx.save();
+          ctx.strokeStyle = "rgba(26, 26, 26, 0.42)";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(px, margin.top);
+          ctx.lineTo(px, height - margin.bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          const labels = [];
+          (traceData.series || []).forEach((series) => {
+            const point = nearestTracePoint(series, hoverX, true);
+            if (!point) return;
+            const value = Number(point.metrics?.[metricKey]);
+            if (!Number.isFinite(value)) return;
+            const x = xFor(traceXValue(point));
+            const y = yFor(value);
+            const color = vehicleColors[series.vehicle_key] || "#475569";
+            ctx.fillStyle = "#ffffff";
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            labels.push(`${series.vehicle_label}: ${formatTraceValue(value, metric.unit)}`);
+          });
+          if (labels.length) {
+            ctx.font = "12px Arial";
+            const text = labels.join("  ");
+            const boxWidth = Math.min(width - margin.left - margin.right, ctx.measureText(text).width + 16);
+            const boxX = Math.max(margin.left, Math.min(width - margin.right - boxWidth, px + 10));
+            const boxY = margin.top + 8;
+            ctx.fillStyle = "rgba(255, 253, 249, 0.94)";
+            ctx.strokeStyle = "#d8cdbd";
+            ctx.lineWidth = 1;
+            ctx.fillRect(boxX, boxY, boxWidth, 26);
+            ctx.strokeRect(boxX, boxY, boxWidth, 26);
+            ctx.fillStyle = "#1a1a1a";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, boxX + 8, boxY + 13, boxWidth - 16);
+          }
+          ctx.restore();
+        }
+
         if (traceDragStart) {
           const left = Math.min(traceDragStart.currentX, traceDragStart.startX);
           const selectionW = Math.abs(traceDragStart.currentX - traceDragStart.startX);
@@ -971,11 +1080,13 @@
         traceCompareCheck?.addEventListener("change", loadTrace);
         traceXAxisSelect?.addEventListener("change", () => {
           traceRange = null;
+          traceHoverX = null;
           renderTraceMap(true);
           renderTraceChart();
         });
         traceResetButton?.addEventListener("click", () => {
           traceRange = null;
+          traceHoverX = null;
           renderTraceMap(true);
           renderTraceChart();
         });
@@ -995,10 +1106,21 @@
           traceDragStart = { startX: event.clientX - rect.left, currentX: event.clientX - rect.left };
         });
         traceChart.addEventListener("pointermove", (event) => {
-          if (!traceDragStart) return;
           const rect = traceChart.getBoundingClientRect();
-          traceDragStart.currentX = event.clientX - rect.left;
+          if (traceDragStart) {
+            traceDragStart.currentX = event.clientX - rect.left;
+            renderTraceChart();
+            return;
+          }
+          traceHoverX = chartXToValue(event.clientX);
           renderTraceChart();
+          renderTraceHoverMap();
+        });
+        traceChart.addEventListener("pointerleave", () => {
+          if (traceDragStart) return;
+          traceHoverX = null;
+          renderTraceChart();
+          renderTraceHoverMap();
         });
         traceChart.addEventListener("pointerup", (event) => {
           if (!traceDragStart) return;
@@ -1009,6 +1131,7 @@
           traceDragStart = null;
           if (delta > 8 && Number.isFinite(startValue) && Number.isFinite(endValue) && startValue !== endValue) {
             traceRange = [Math.min(startValue, endValue), Math.max(startValue, endValue)];
+            traceHoverX = null;
             renderTraceMap(true);
           }
           renderTraceChart();
@@ -1024,6 +1147,7 @@
           const newMax = center + (bounds.max - center) * factor;
           traceRange = [Math.max(full.min, newMin), Math.min(full.max, newMax)];
           if (traceRange[1] - traceRange[0] >= (full.max - full.min) * 0.999) traceRange = null;
+          traceHoverX = null;
           renderTraceMap(true);
           renderTraceChart();
         }, { passive: false });
