@@ -288,7 +288,7 @@
       }
       .trace-controls {
         display: grid;
-        grid-template-columns: minmax(240px, 2fr) repeat(2, minmax(150px, 1fr)) auto auto;
+        grid-template-columns: minmax(240px, 2fr) repeat(4, minmax(130px, 1fr)) auto auto;
         gap: 10px;
         align-items: end;
         margin-bottom: 12px;
@@ -328,8 +328,13 @@
         overflow: hidden;
       }
       .trace-map {
-        height: 460px;
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        min-height: 420px;
       }
+      .trace-map.map-size-wide { aspect-ratio: 16 / 9; min-height: 360px; }
+      .trace-map.map-size-tall { aspect-ratio: 4 / 3; min-height: 520px; }
+      .trace-map.map-size-compact { aspect-ratio: 21 / 9; min-height: 300px; }
       .trace-chart-wrap {
         display: grid;
         grid-template-rows: auto 1fr auto;
@@ -383,8 +388,10 @@
           grid-template-columns: 1fr;
         }
         .trace-map {
-          height: 340px;
+          min-height: 280px;
         }
+        .trace-map.map-size-tall { min-height: 340px; }
+        .trace-map.map-size-compact { min-height: 240px; }
         .trace-map,
         .trace-chart-wrap {
           min-height: 320px;
@@ -439,6 +446,24 @@
               <option value="time">Duration</option>
             </select>
           </div>
+          <div class="trace-control">
+            <label for="trace-basemap">Map style</label>
+            <select id="trace-basemap">
+              <option value="topo" selected>Terrain topo</option>
+              <option value="osm">OpenStreetMap</option>
+              <option value="cyclosm">CyclOSM</option>
+              <option value="hot">Humanitarian</option>
+            </select>
+          </div>
+          <div class="trace-control">
+            <label for="trace-map-size">Map size</label>
+            <select id="trace-map-size">
+              <option value="square" selected>Square</option>
+              <option value="tall">Tall</option>
+              <option value="wide">Wide</option>
+              <option value="compact">Compact</option>
+            </select>
+          </div>
           <label class="trace-check">
             <input id="trace-compare" type="checkbox" checked>
             Compare
@@ -446,7 +471,7 @@
           <button class="btn" id="trace-reset" type="button">Reset zoom</button>
         </div>
         <div class="trace-layout">
-          <div id="trace-map" class="trace-map" role="img" aria-label="Selected session track"></div>
+          <div id="trace-map" class="trace-map map-size-square" role="img" aria-label="Selected session track"></div>
           <div class="trace-chart-wrap">
             <div class="trace-chart-head">
               <strong id="trace-chart-title">Metric profile</strong>
@@ -632,6 +657,8 @@
       const traceSessionSelect = document.getElementById("trace-session");
       const traceMetricSelect = document.getElementById("trace-metric");
       const traceXAxisSelect = document.getElementById("trace-x-axis");
+      const traceBasemapSelect = document.getElementById("trace-basemap");
+      const traceMapSizeSelect = document.getElementById("trace-map-size");
       const traceCompareCheck = document.getElementById("trace-compare");
       const traceResetButton = document.getElementById("trace-reset");
       const traceMapEl = document.getElementById("trace-map");
@@ -666,7 +693,30 @@
 
       const traceSessionKey = (session) => `${session.device_id}||${session.session_id}||${session.mode || "default"}`;
       const findTraceSession = (key) => traceSessions.find((session) => traceSessionKey(session) === key);
+      const traceBaseMaps = {
+        topo: {
+          url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+          maxZoom: 17,
+          attribution: "© OpenTopoMap (CC-BY-SA) · © OpenStreetMap contributors"
+        },
+        osm: {
+          url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+          maxZoom: 19,
+          attribution: "© OpenStreetMap contributors"
+        },
+        cyclosm: {
+          url: "https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png",
+          maxZoom: 20,
+          attribution: "© CyclOSM · © OpenStreetMap contributors"
+        },
+        hot: {
+          url: "https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+          maxZoom: 20,
+          attribution: "© Humanitarian OpenStreetMap Team · © OpenStreetMap contributors"
+        }
+      };
       let traceMap = null;
+      let traceTileLayer = null;
       let traceLayer = null;
       let traceHoverLayer = null;
       let traceData = null;
@@ -752,10 +802,7 @@
         if (!traceMapEl || typeof L === "undefined") return null;
         if (traceMap) return traceMap;
         traceMap = L.map(traceMapEl, { zoomControl: true }).setView([20, 0], 2);
-        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 19,
-          attribution: "© OpenStreetMap contributors"
-        }).addTo(traceMap);
+        setTraceBaseMap(traceBasemapSelect?.value || "topo");
         traceMap.on("moveend", () => {
           if (traceSyncingMap || !traceData) return;
           const primary = traceData.series?.[0];
@@ -772,10 +819,30 @@
         });
         return traceMap;
       };
-      const fitTraceMapToRange = () => {
+      const setTraceBaseMap = (key) => {
+        if (!traceMap || typeof L === "undefined") return;
+        const config = traceBaseMaps[key] || traceBaseMaps.topo;
+        if (traceTileLayer) traceTileLayer.remove();
+        traceTileLayer = L.tileLayer(config.url, {
+          maxZoom: config.maxZoom,
+          attribution: config.attribution
+        }).addTo(traceMap);
+      };
+      const setTraceMapSize = (size) => {
+        if (!traceMapEl) return;
+        traceMapEl.classList.remove("map-size-square", "map-size-wide", "map-size-tall", "map-size-compact");
+        traceMapEl.classList.add(`map-size-${size || "square"}`);
+        if (traceMap) {
+          setTimeout(() => {
+            traceMap.invalidateSize();
+            if (traceData) fitTraceMapToRange(traceRange ? "active" : "full");
+          }, 60);
+        }
+      };
+      const fitTraceMapToRange = (mode = "full") => {
         if (!traceMap || !traceData) return;
         const latlngs = (traceData.series || [])
-          .flatMap((series) => series.points || [])
+          .flatMap((series) => mode === "active" ? visibleTracePoints(series) : (series.points || []))
           .map((point) => [point.lat, point.lon]);
         if (!latlngs.length) return;
         traceSyncingMap = true;
@@ -829,7 +896,7 @@
             fillOpacity: 0.9
           }).addTo(traceLayer).bindTooltip(`${series.vehicle_label} end`);
         });
-        if (shouldFit) fitTraceMapToRange();
+        if (shouldFit) fitTraceMapToRange(traceRange ? "active" : "full");
         renderTraceHoverMap();
       };
       const renderTraceHoverMap = () => {
@@ -1078,6 +1145,13 @@
         traceSessionSelect.addEventListener("change", loadTrace);
         traceMetricSelect?.addEventListener("change", loadTrace);
         traceCompareCheck?.addEventListener("change", loadTrace);
+        traceBasemapSelect?.addEventListener("change", () => {
+          ensureTraceMap();
+          setTraceBaseMap(traceBasemapSelect.value);
+        });
+        traceMapSizeSelect?.addEventListener("change", () => {
+          setTraceMapSize(traceMapSizeSelect.value);
+        });
         traceXAxisSelect?.addEventListener("change", () => {
           traceRange = null;
           traceHoverX = null;
@@ -1090,6 +1164,7 @@
           renderTraceMap(true);
           renderTraceChart();
         });
+        setTraceMapSize(traceMapSizeSelect?.value || "square");
         loadTrace();
       };
       if (traceChart) {
