@@ -316,7 +316,7 @@
       }
       .trace-layout {
         display: grid;
-        grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+        grid-template-columns: 1fr;
         gap: 12px;
       }
       .trace-map,
@@ -328,7 +328,7 @@
         overflow: hidden;
       }
       .trace-map {
-        height: 430px;
+        height: 460px;
       }
       .trace-chart-wrap {
         display: grid;
@@ -381,6 +381,9 @@
         .trace-controls,
         .trace-layout {
           grid-template-columns: 1fr;
+        }
+        .trace-map {
+          height: 340px;
         }
         .trace-map,
         .trace-chart-wrap {
