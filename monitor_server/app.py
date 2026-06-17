@@ -79,6 +79,12 @@ DEFAULT_UPLOAD_CHUNK_MAX_BYTES = 256 * 1024
 DEFAULT_RESPONSE_GZIP_MIN_BYTES = 1024
 SUNTRIP_ANALYSIS_TRACE_MAX_POINTS = 1400
 _SUNTRIP_ANALYSIS_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
+SUNTRIP_CORRECTION_MIN_DISTANCE_KM = 10.0
+SUNTRIP_CORRECTION_MIN_GPS_POINTS = 100
+SUNTRIP_CORRECTION_MAX_GPS_REJECTED_RATIO = 0.02
+SUNTRIP_CORRECTION_MIN_RATIO = 0.75
+SUNTRIP_CORRECTION_MAX_RATIO = 1.25
+SUNTRIP_CORRECTION_INLIER_REL_TOLERANCE = 0.03
 
 
 def _float_env(name: str, default: float) -> float:
@@ -2100,6 +2106,108 @@ def _aggregate_session_metrics(metrics_list: list[dict[str, Any]]) -> dict[str, 
     return aggregate
 
 
+def _ca_gps_correction_sample(metrics: dict[str, Any]) -> dict[str, Any] | None:
+    ca_distance = _safe_float(metrics.get("distance"))
+    gps_distance = _safe_float(metrics.get("gps_distance_km"))
+    gps_points = int(_safe_float(metrics.get("gps_points")) or 0)
+    rejected = int(_safe_float(metrics.get("gps_distance_rejected_count")) or 0)
+    ca_resets = int(_safe_float(metrics.get("ca_reset_count")) or 0)
+    if ca_distance is None or gps_distance is None:
+        return None
+    if ca_distance < SUNTRIP_CORRECTION_MIN_DISTANCE_KM or gps_distance < SUNTRIP_CORRECTION_MIN_DISTANCE_KM:
+        return None
+    if gps_points < SUNTRIP_CORRECTION_MIN_GPS_POINTS:
+        return None
+    rejected_ratio = rejected / max(1, gps_points + rejected)
+    if rejected_ratio > SUNTRIP_CORRECTION_MAX_GPS_REJECTED_RATIO:
+        return None
+    if ca_resets:
+        return None
+    ratio = gps_distance / ca_distance
+    if ratio < SUNTRIP_CORRECTION_MIN_RATIO or ratio > SUNTRIP_CORRECTION_MAX_RATIO:
+        return None
+    return {
+        "ratio": ratio,
+        "ca_distance_km": ca_distance,
+        "gps_distance_km": gps_distance,
+        "gps_points": gps_points,
+        "gps_rejected_ratio": rejected_ratio,
+    }
+
+
+def _weighted_mean_ratio(samples: list[dict[str, Any]]) -> float | None:
+    total_weight = sum(float(sample["ca_distance_km"]) for sample in samples)
+    if total_weight <= 0:
+        return None
+    return sum(float(sample["ratio"]) * float(sample["ca_distance_km"]) for sample in samples) / total_weight
+
+
+def _suntrip_vehicle_corrections(columns: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    by_vehicle: dict[str, list[dict[str, Any]]] = {}
+    for column in columns:
+        sample = _ca_gps_correction_sample(column["metrics"])
+        if not sample:
+            continue
+        sample["session_id"] = column.get("session_id")
+        sample["vehicle_key"] = column.get("vehicle_key")
+        by_vehicle.setdefault(column["vehicle_key"], []).append(sample)
+
+    corrections: dict[str, dict[str, Any]] = {}
+    for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
+        vehicle_key = vehicle["key"]
+        samples = by_vehicle.get(vehicle_key, [])
+        if not samples:
+            corrections[vehicle_key] = {
+                "vehicle_key": vehicle_key,
+                "vehicle_label": vehicle["label"],
+                "factor": 1.0,
+                "available": False,
+                "session_count": 0,
+                "inlier_count": 0,
+                "note": "No reliable CA/GPS calibration sessions",
+            }
+            continue
+        ratios = sorted(float(sample["ratio"]) for sample in samples)
+        median = ratios[len(ratios) // 2] if len(ratios) % 2 else (ratios[len(ratios) // 2 - 1] + ratios[len(ratios) // 2]) / 2
+        inliers = [
+            sample
+            for sample in samples
+            if abs(float(sample["ratio"]) - median) / max(1e-9, median) <= SUNTRIP_CORRECTION_INLIER_REL_TOLERANCE
+        ]
+        if not inliers:
+            inliers = samples
+        factor = _weighted_mean_ratio(inliers) or median
+        max_rel_spread = max(
+            (abs(float(sample["ratio"]) - factor) / max(1e-9, factor) for sample in inliers),
+            default=0.0,
+        )
+        corrections[vehicle_key] = {
+            "vehicle_key": vehicle_key,
+            "vehicle_label": vehicle["label"],
+            "factor": factor,
+            "available": True,
+            "session_count": len(samples),
+            "inlier_count": len(inliers),
+            "max_rel_spread": max_rel_spread,
+            "mean_ca_distance_km": sum(float(sample["ca_distance_km"]) for sample in inliers) / len(inliers),
+            "note": "Reliable" if len(inliers) >= 2 and max_rel_spread <= 0.01 else "Limited calibration sample",
+        }
+    return corrections
+
+
+def _apply_ca_gps_correction(metrics: dict[str, Any], factor: float | None) -> dict[str, Any]:
+    corrected = dict(metrics)
+    factor = _safe_float(factor)
+    if factor is None or factor <= 0:
+        return corrected
+    for key in ("distance", "speed_sum", "speed_max"):
+        value = _safe_float(corrected.get(key))
+        if value is not None:
+            corrected[key] = value * factor
+    corrected["ca_gps_correction_factor"] = factor
+    return corrected
+
+
 def _db_state_key() -> tuple[str, int | None, int | None]:
     path = _db_path()
     try:
@@ -3727,6 +3835,13 @@ def create_app() -> Flask:
                     metrics = compute_session_metrics(samples)
                     columns.append(candidate | {"metrics": metrics, "sample_count": len(samples)})
 
+            ca_gps_corrections = _suntrip_vehicle_corrections(columns)
+            for column in columns:
+                correction = ca_gps_corrections.get(column["vehicle_key"], {})
+                factor = correction.get("factor") if correction.get("available") else 1.0
+                column["ca_gps_correction"] = correction
+                column["corrected_metrics"] = _apply_ca_gps_correction(column["metrics"], factor)
+
             day_groups = []
             for column in columns:
                 if not day_groups or day_groups[-1]["day_key"] != column["day_key"]:
@@ -3744,6 +3859,10 @@ def create_app() -> Flask:
                         "vehicle_label": vehicle["label"],
                         "session_count": len(vehicle_columns),
                         "metrics": _aggregate_session_metrics([column["metrics"] for column in vehicle_columns]),
+                        "corrected_metrics": _aggregate_session_metrics(
+                            [column["corrected_metrics"] for column in vehicle_columns]
+                        ),
+                        "ca_gps_correction": ca_gps_corrections.get(vehicle["key"]),
                     }
                 )
 
@@ -3760,8 +3879,16 @@ def create_app() -> Flask:
                             "label": label,
                             "unit": unit,
                             "values": [format_metric_value(func(column["metrics"]), unit) for column in columns],
+                            "corrected_values": [
+                                format_metric_value(func(column["corrected_metrics"]), unit)
+                                for column in columns
+                            ],
                             "total_values": [
                                 format_metric_value(func(total_column["metrics"]), unit)
+                                for total_column in total_columns
+                            ],
+                            "corrected_total_values": [
+                                format_metric_value(func(total_column["corrected_metrics"]), unit)
                                 for total_column in total_columns
                             ],
                         }
@@ -3827,6 +3954,7 @@ def create_app() -> Flask:
                 "chart_metric_groups": chart_metric_groups,
                 "trace_sessions": trace_sessions,
                 "trace_metric_options": _metric_options_from_specs(),
+                "ca_gps_corrections": list(ca_gps_corrections.values()),
                 "stage_count": len(columns),
             }
             if len(_SUNTRIP_ANALYSIS_CACHE) > 8:

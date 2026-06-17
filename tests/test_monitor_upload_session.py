@@ -685,9 +685,13 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("metric-chart-check", html)
         self.assertIn("Track Explorer", html)
         self.assertIn("trace-select", html)
+        self.assertIn("ca-correction-toggle", html)
+        self.assertIn("Corrected CA/GPS", html)
+        self.assertIn("data-corrected-value", html)
         self.assertIn("2026-05-07_10-00-00", html)
         self.assertIn("2026-05-07_10-05-00", html)
         self.assertIn("CA distance", html)
+        self.assertIn("Avg GPS/CA speed delta", html)
         self.assertIn("Battery Used", html)
         self.assertIn("CA Ah raw", html)
 
@@ -706,6 +710,75 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertEqual(payload["metric"]["key"], "ca_speed_kph")
         self.assertEqual(len(payload["series"]), 2)
         self.assertGreaterEqual(payload["series"][0]["point_count"], 1)
+
+    def test_suntrip_ca_gps_correction_uses_reliable_vehicle_ratio(self):
+        columns = [
+            {
+                "vehicle_key": "supercycle_1",
+                "session_id": "stage-1",
+                "metrics": {
+                    "distance": 100.0,
+                    "gps_distance_km": 104.0,
+                    "gps_points": 1000,
+                    "gps_distance_rejected_count": 0,
+                    "ca_reset_count": 0,
+                    "speed_sum": 2000.0,
+                    "speed_max": 42.0,
+                },
+            },
+            {
+                "vehicle_key": "supercycle_1",
+                "session_id": "stage-2",
+                "metrics": {
+                    "distance": 200.0,
+                    "gps_distance_km": 208.0,
+                    "gps_points": 1500,
+                    "gps_distance_rejected_count": 2,
+                    "ca_reset_count": 0,
+                    "speed_sum": 4000.0,
+                    "speed_max": 44.0,
+                },
+            },
+            {
+                "vehicle_key": "supercycle_1",
+                "session_id": "bad-ratio",
+                "metrics": {
+                    "distance": 100.0,
+                    "gps_distance_km": 114.0,
+                    "gps_points": 1200,
+                    "gps_distance_rejected_count": 0,
+                    "ca_reset_count": 0,
+                    "speed_sum": 2100.0,
+                    "speed_max": 45.0,
+                },
+            },
+            {
+                "vehicle_key": "supercycle_2",
+                "session_id": "too-short",
+                "metrics": {
+                    "distance": 4.0,
+                    "gps_distance_km": 4.2,
+                    "gps_points": 1000,
+                    "gps_distance_rejected_count": 0,
+                    "ca_reset_count": 0,
+                },
+            },
+        ]
+
+        corrections = self.monitor_app._suntrip_vehicle_corrections(columns)
+
+        sc1 = corrections["supercycle_1"]
+        self.assertTrue(sc1["available"])
+        self.assertEqual(sc1["session_count"], 3)
+        self.assertEqual(sc1["inlier_count"], 2)
+        self.assertAlmostEqual(sc1["factor"], 1.04, places=6)
+        self.assertFalse(corrections["supercycle_2"]["available"])
+
+        corrected = self.monitor_app._apply_ca_gps_correction(columns[0]["metrics"], sc1["factor"])
+        self.assertAlmostEqual(corrected["distance"], 104.0, places=6)
+        self.assertAlmostEqual(corrected["speed_sum"], 2080.0, places=6)
+        self.assertAlmostEqual(corrected["speed_max"], 43.68, places=6)
+        self.assertEqual(corrected["gps_distance_km"], 104.0)
 
     def test_suntrip_trace_rejects_ca_distance_glitch(self):
         samples = [

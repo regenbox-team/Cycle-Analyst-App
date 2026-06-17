@@ -286,6 +286,92 @@
           transparent 10px
         ) !important;
       }
+      .comparison-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .comparison-head h2 {
+        margin: 0;
+      }
+      .correction-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .switch-track {
+        position: relative;
+        width: 44px;
+        height: 24px;
+        flex: 0 0 auto;
+      }
+      .switch-track input {
+        position: absolute;
+        inset: 0;
+        margin: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+      .switch-track span {
+        position: absolute;
+        inset: 0;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #d8cdbd;
+        transition: background 0.16s ease, border-color 0.16s ease;
+      }
+      .switch-track span::after {
+        content: "";
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fffdf9;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+        transition: transform 0.16s ease;
+      }
+      .switch-track input:checked + span {
+        border-color: var(--accent);
+        background: var(--accent);
+      }
+      .switch-track input:checked + span::after {
+        transform: translateX(20px);
+      }
+      .correction-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .correction-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 9px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #fffdf9;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .correction-pill strong {
+        color: var(--ink);
+      }
+      .correction-pill.is-active {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        color: #0f766e;
+      }
       .trace-controls {
         display: grid;
         grid-template-columns: minmax(240px, 2fr) repeat(4, minmax(130px, 1fr)) auto auto;
@@ -499,9 +585,31 @@
         <div id="chart-panels" class="chart-panels"></div>
       </div>
 
-      <h2>Comparison Table</h2>
+      <div class="comparison-head">
+        <h2>Comparison Table</h2>
+        <label class="correction-switch">
+          Raw
+          <span class="switch-track">
+            <input id="ca-correction-toggle" type="checkbox" aria-label="Show CA/GPS corrected metrics">
+            <span aria-hidden="true"></span>
+          </span>
+          Corrected CA/GPS
+        </label>
+      </div>
       <div class="card">
         {% if columns %}
+        <div class="correction-summary" aria-label="CA/GPS correction status">
+          {% for correction in ca_gps_corrections %}
+          <div class="correction-pill{{ ' is-active' if correction.available else '' }}">
+            <strong>{{ correction.vehicle_label }}</strong>
+            {% if correction.available %}
+            x{{ "%.5f"|format(correction.factor) }} · {{ correction.inlier_count }}/{{ correction.session_count }} sessions · {{ correction.note }}
+            {% else %}
+            no reliable correction
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
         <div class="table-scroll">
           <table class="analysis-table">
             <thead>
@@ -561,11 +669,21 @@
                 </td>
                 {% for value in row["values"] %}
                 {% set column = columns[loop.index0] %}
-                <td class="value-cell{{ ' sc2-col' if column.vehicle_key == 'supercycle_2' else '' }}">{{ value }}</td>
+                {% set corrected = row["corrected_values"][loop.index0] %}
+                <td
+                  class="value-cell{{ ' sc2-col' if column.vehicle_key == 'supercycle_2' else '' }}"
+                  data-raw-value="{{ value }}"
+                  data-corrected-value="{{ corrected }}"
+                >{{ value }}</td>
                 {% endfor %}
                 {% for value in row["total_values"] %}
                 {% set total = total_columns[loop.index0] %}
-                <td class="value-cell total-col{{ ' sc2-col' if total.vehicle_key == 'supercycle_2' else '' }}">{{ value }}</td>
+                {% set corrected = row["corrected_total_values"][loop.index0] %}
+                <td
+                  class="value-cell total-col{{ ' sc2-col' if total.vehicle_key == 'supercycle_2' else '' }}"
+                  data-raw-value="{{ value }}"
+                  data-corrected-value="{{ corrected }}"
+                >{{ value }}</td>
                 {% endfor %}
               </tr>
               {% endfor %}
@@ -669,6 +787,8 @@
       const traceScaleMin = document.getElementById("trace-scale-min");
       const traceScaleMax = document.getElementById("trace-scale-max");
       const traceRadios = document.querySelectorAll(".trace-select");
+      const caCorrectionToggle = document.getElementById("ca-correction-toggle");
+      const correctionValueCells = document.querySelectorAll("[data-raw-value][data-corrected-value]");
       const vehicleColors = {
         supercycle_1: "#0d9488",
         supercycle_2: "#8a6a2f"
@@ -693,6 +813,14 @@
 
       const traceSessionKey = (session) => `${session.device_id}||${session.session_id}||${session.mode || "default"}`;
       const findTraceSession = (key) => traceSessions.find((session) => traceSessionKey(session) === key);
+      const renderCorrectionMode = () => {
+        const corrected = Boolean(caCorrectionToggle?.checked);
+        correctionValueCells.forEach((cell) => {
+          cell.textContent = corrected ? cell.dataset.correctedValue : cell.dataset.rawValue;
+        });
+      };
+      caCorrectionToggle?.addEventListener("change", renderCorrectionMode);
+      renderCorrectionMode();
       const traceBaseMaps = {
         topo: {
           url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",

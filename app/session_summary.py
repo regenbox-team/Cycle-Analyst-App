@@ -589,6 +589,13 @@ SUMMARY_GROUPS: list[tuple[str, list[MetricSpec]]] = [
             ("Max CA speed", "km/h", lambda m: m["speed_max"]),
             ("Avg GPS speed", "km/h", lambda m: safe_div(m["gps_speed_sum"], m["gps_speed_count"])),
             ("Max GPS speed", "km/h", lambda m: m["gps_speed_max"]),
+            (
+                "Avg GPS/CA speed delta",
+                "km/h",
+                lambda m: safe_div(m["gps_speed_sum"], m["gps_speed_count"])
+                - safe_div(m["speed_sum"], m["speed_count"]),
+            ),
+            ("Max GPS/CA speed delta", "km/h", lambda m: m["gps_speed_max"] - m["speed_max"]),
         ],
     ),
     (
