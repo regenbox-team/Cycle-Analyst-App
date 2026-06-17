@@ -686,6 +686,8 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("Track Explorer", html)
         self.assertIn("trace-select", html)
         self.assertIn("trace-detailed", html)
+        self.assertIn("trace-metric-extra-1", html)
+        self.assertIn("trace-metric-extra-2", html)
         self.assertIn("ca-correction-toggle", html)
         self.assertIn("Corrected CA/GPS", html)
         self.assertIn("data-corrected-value", html)
@@ -763,9 +765,9 @@ class MonitorUploadSessionTest(unittest.TestCase):
         )
         self.assertEqual(long_detailed_trace.status_code, 200)
         long_payload = long_detailed_trace.get_json()
-        self.assertFalse(long_payload["detailed"])
-        self.assertFalse(long_payload["detailed_allowed"])
-        self.assertEqual(long_payload["max_points"], 1400)
+        self.assertTrue(long_payload["detailed"])
+        self.assertTrue(long_payload["detailed_allowed"])
+        self.assertEqual(long_payload["max_points"], 5000)
 
         zoom_detailed_trace = client.get(
             "/api/suntrip_analysis/session_trace"
@@ -788,6 +790,27 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertTrue(zoom_payload["range_applied"])
         self.assertEqual(zoom_payload["max_points"], 5000)
         self.assertIn("overview_points", zoom_payload["series"][0])
+
+        duration_detailed_trace = client.get(
+            "/api/suntrip_analysis/session_trace"
+            "?device_id=Supercycle-1"
+            "&session_id=2026-05-07_10-00-00"
+            "&mode=supercycle_live"
+            "&metric=ca_speed_kph"
+            "&compare=0"
+            "&detailed=1"
+            "&range_axis=time"
+            "&range_min=0"
+            "&range_max=60"
+            "&max_points=5000",
+            headers={"Authorization": token},
+        )
+        self.assertEqual(duration_detailed_trace.status_code, 200)
+        duration_payload = duration_detailed_trace.get_json()
+        self.assertTrue(duration_payload["detailed"])
+        self.assertTrue(duration_payload["range_applied"])
+        self.assertEqual(duration_payload["range_axis"], "time")
+        self.assertEqual(duration_payload["range_max"] - duration_payload["range_min"], 30.0)
 
     def test_suntrip_ca_gps_correction_uses_reliable_vehicle_ratio(self):
         columns = [

@@ -80,6 +80,7 @@ DEFAULT_RESPONSE_GZIP_MIN_BYTES = 1024
 SUNTRIP_ANALYSIS_TRACE_MAX_POINTS = 1400
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS = 12000
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM = 15.0
+SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_MINUTES = 30.0
 _SUNTRIP_ANALYSIS_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
 SUNTRIP_CORRECTION_MIN_DISTANCE_KM = 10.0
 SUNTRIP_CORRECTION_MIN_GPS_POINTS = 100
@@ -4001,6 +4002,7 @@ def create_app() -> Flask:
                 "trace_standard_max_points": SUNTRIP_ANALYSIS_TRACE_MAX_POINTS,
                 "trace_detailed_max_points": SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS,
                 "trace_detailed_max_km": SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM,
+                "trace_detailed_max_minutes": SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_MINUTES,
                 "ca_gps_corrections": list(ca_gps_corrections.values()),
                 "stage_count": len(columns),
             }
@@ -4038,6 +4040,18 @@ def create_app() -> Flask:
             and range_max is not None
             and range_min < range_max
         )
+        range_applied = False
+        if requested_detailed and requested_range_valid:
+            max_range_span = (
+                SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_MINUTES
+                if range_axis == "time"
+                else SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM
+            )
+            if range_max - range_min > max_range_span:
+                center = (range_min + range_max) / 2
+                range_min = center - max_range_span / 2
+                range_max = center + max_range_span / 2
+            range_applied = True
         metric_options = _trace_metric_option_map()
         if metric_key not in metric_options:
             return jsonify({"error": "unknown metric"}), 400
@@ -4057,23 +4071,7 @@ def create_app() -> Flask:
             if not selected:
                 return jsonify({"error": "session not found"}), 404
             sessions = _comparison_sessions_for_trace(conn, selected) if compare else [selected]
-            distances = [
-                _safe_float(session["distance_km"])
-                for session in sessions
-                if _safe_float(session["distance_km"]) is not None
-            ]
-            full_trace_detailed_allowed = (
-                bool(distances)
-                and max(distances) <= SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM
-            )
-            range_detailed_allowed = (
-                requested_range_valid
-                and range_axis == "distance"
-                and (range_max - range_min) <= SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM
-            )
-            detailed_allowed = full_trace_detailed_allowed or range_detailed_allowed
-            detailed = requested_detailed and detailed_allowed
-            range_applied = bool(detailed and range_detailed_allowed and not full_trace_detailed_allowed)
+            detailed = requested_detailed
             max_allowed_points = (
                 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS
                 if detailed
@@ -4091,9 +4089,9 @@ def create_app() -> Flask:
                     session,
                     metric_key=metric_key,
                     max_points=max_points,
-                    range_axis=range_axis if range_applied else None,
-                    range_min=range_min if range_applied else None,
-                    range_max=range_max if range_applied else None,
+                    range_axis=range_axis if detailed and range_applied else None,
+                    range_min=range_min if detailed and range_applied else None,
+                    range_max=range_max if detailed and range_applied else None,
                     overview_max_points=SUNTRIP_ANALYSIS_TRACE_MAX_POINTS if range_applied else None,
                 )
                 for session in sessions
@@ -4105,12 +4103,13 @@ def create_app() -> Flask:
                 "metric": metric_options[metric_key],
                 "compare": compare,
                 "detailed": detailed,
-                "detailed_allowed": detailed_allowed,
-                "range_applied": range_applied,
-                "range_axis": range_axis if range_applied else None,
-                "range_min": range_min if range_applied else None,
-                "range_max": range_max if range_applied else None,
+                "detailed_allowed": True,
+                "range_applied": bool(detailed and range_applied),
+                "range_axis": range_axis if detailed and range_applied else None,
+                "range_min": range_min if detailed and range_applied else None,
+                "range_max": range_max if detailed and range_applied else None,
                 "detailed_max_km": SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM,
+                "detailed_max_minutes": SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_MINUTES,
                 "max_points": max_points,
                 "series": series,
             }
