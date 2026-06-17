@@ -374,7 +374,7 @@
       }
       .trace-controls {
         display: grid;
-        grid-template-columns: minmax(240px, 2fr) repeat(4, minmax(130px, 1fr)) auto auto;
+        grid-template-columns: minmax(240px, 2fr) repeat(4, minmax(130px, 1fr)) auto auto auto;
         gap: 10px;
         align-items: end;
         margin-bottom: 12px;
@@ -553,6 +553,10 @@
           <label class="trace-check">
             <input id="trace-compare" type="checkbox" checked>
             Compare
+          </label>
+          <label class="trace-check">
+            <input id="trace-detailed" type="checkbox">
+            Detailed
           </label>
           <button class="btn" id="trace-reset" type="button">Reset zoom</button>
         </div>
@@ -768,6 +772,9 @@
       const chartMetricGroups = {{ chart_metric_groups | tojson }};
       const traceSessions = {{ trace_sessions | tojson }};
       const traceMetricOptions = {{ trace_metric_options | tojson }};
+      const traceStandardMaxPoints = {{ trace_standard_max_points | tojson }};
+      const traceDetailedMaxPoints = {{ trace_detailed_max_points | tojson }};
+      const traceDetailedMaxKm = {{ trace_detailed_max_km | tojson }};
       const chartPanels = document.getElementById("chart-panels");
       const chartEmpty = document.getElementById("chart-empty");
       const metricChecks = document.querySelectorAll(".metric-chart-check");
@@ -778,6 +785,7 @@
       const traceBasemapSelect = document.getElementById("trace-basemap");
       const traceMapSizeSelect = document.getElementById("trace-map-size");
       const traceCompareCheck = document.getElementById("trace-compare");
+      const traceDetailedCheck = document.getElementById("trace-detailed");
       const traceResetButton = document.getElementById("trace-reset");
       const traceMapEl = document.getElementById("trace-map");
       const traceChart = document.getElementById("trace-chart");
@@ -813,6 +821,20 @@
 
       const traceSessionKey = (session) => `${session.device_id}||${session.session_id}||${session.mode || "default"}`;
       const findTraceSession = (key) => traceSessions.find((session) => traceSessionKey(session) === key);
+      const traceDetailAllowedForSession = (session) => {
+        const distance = Number(session?.distance_km);
+        return Number.isFinite(distance) && distance > 0 && distance <= traceDetailedMaxKm;
+      };
+      const updateTraceDetailAvailability = (session) => {
+        if (!traceDetailedCheck) return false;
+        const allowed = traceDetailAllowedForSession(session);
+        traceDetailedCheck.disabled = !allowed;
+        traceDetailedCheck.title = allowed
+          ? `Detailed mode loads up to ${traceDetailedMaxPoints} points.`
+          : `Detailed mode is limited to sessions up to ${traceDetailedMaxKm} km.`;
+        if (!allowed) traceDetailedCheck.checked = false;
+        return allowed;
+      };
       const renderCorrectionMode = () => {
         const corrected = Boolean(caCorrectionToggle?.checked);
         correctionValueCells.forEach((cell) => {
@@ -1218,14 +1240,18 @@
         const selected = findTraceSession(traceSessionSelect.value);
         if (!selected) return;
         traceRange = null;
-        setTraceStatus("Loading trace...");
+        const detailedAllowed = updateTraceDetailAvailability(selected);
+        const detailed = detailedAllowed && Boolean(traceDetailedCheck?.checked);
+        const requestedMaxPoints = detailed ? traceDetailedMaxPoints : traceStandardMaxPoints;
+        setTraceStatus(detailed ? "Loading detailed trace..." : "Loading trace...");
         const params = new URLSearchParams({
           device_id: selected.device_id,
           session_id: selected.session_id,
           mode: selected.mode || "default",
           metric: traceMetricSelect.value || "ca_speed_kph",
           compare: traceCompareCheck?.checked ? "1" : "0",
-          max_points: "1400"
+          detailed: detailed ? "1" : "0",
+          max_points: String(requestedMaxPoints)
         });
         try {
           const traceUrl = new URL("/api/suntrip_analysis/session_trace", window.location.origin);
@@ -1236,7 +1262,15 @@
           traceData = result;
           const rawCount = (result.series || []).reduce((sum, series) => sum + Number(series.raw_point_count || 0), 0);
           const pointCount = (result.series || []).reduce((sum, series) => sum + Number(series.point_count || 0), 0);
-          setTraceStatus(`${result.series.length} series · ${pointCount}/${rawCount} GPS points rendered`);
+          const modeLabel = result.detailed ? "detailed" : "standard";
+          if (traceDetailedCheck && !result.detailed_allowed) {
+            traceDetailedCheck.checked = false;
+            traceDetailedCheck.disabled = true;
+          }
+          const limitText = result.detailed_allowed === false
+            ? ` · detailed disabled over ${result.detailed_max_km} km`
+            : "";
+          setTraceStatus(`${result.series.length} series · ${pointCount}/${rawCount} GPS points rendered · ${modeLabel}${limitText}`);
           renderTraceMap(true);
           renderTraceChart();
           traceRadios.forEach((radio) => {
@@ -1262,17 +1296,23 @@
         });
         const firstStage = traceSessions.find((session) => session.suntrip_stage) || traceSessions[0];
         traceSessionSelect.value = traceSessionKey(firstStage);
+        updateTraceDetailAvailability(firstStage);
         traceRadios.forEach((radio) => {
           radio.addEventListener("change", () => {
             if (!radio.checked || !traceSessionSelect) return;
             traceSessionSelect.value = `${radio.dataset.deviceId}||${radio.dataset.sessionId}||${radio.dataset.mode || "default"}`;
+            updateTraceDetailAvailability(findTraceSession(traceSessionSelect.value));
             loadTrace();
             traceMapEl?.scrollIntoView({ behavior: "smooth", block: "center" });
           });
         });
-        traceSessionSelect.addEventListener("change", loadTrace);
+        traceSessionSelect.addEventListener("change", () => {
+          updateTraceDetailAvailability(findTraceSession(traceSessionSelect.value));
+          loadTrace();
+        });
         traceMetricSelect?.addEventListener("change", loadTrace);
         traceCompareCheck?.addEventListener("change", loadTrace);
+        traceDetailedCheck?.addEventListener("change", loadTrace);
         traceBasemapSelect?.addEventListener("change", () => {
           ensureTraceMap();
           setTraceBaseMap(traceBasemapSelect.value);

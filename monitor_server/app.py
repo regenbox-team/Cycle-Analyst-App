@@ -78,6 +78,8 @@ DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
 DEFAULT_UPLOAD_CHUNK_MAX_BYTES = 256 * 1024
 DEFAULT_RESPONSE_GZIP_MIN_BYTES = 1024
 SUNTRIP_ANALYSIS_TRACE_MAX_POINTS = 1400
+SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS = 12000
+SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM = 15.0
 _SUNTRIP_ANALYSIS_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
 SUNTRIP_CORRECTION_MIN_DISTANCE_KM = 10.0
 SUNTRIP_CORRECTION_MIN_GPS_POINTS = 100
@@ -3954,6 +3956,9 @@ def create_app() -> Flask:
                 "chart_metric_groups": chart_metric_groups,
                 "trace_sessions": trace_sessions,
                 "trace_metric_options": _metric_options_from_specs(),
+                "trace_standard_max_points": SUNTRIP_ANALYSIS_TRACE_MAX_POINTS,
+                "trace_detailed_max_points": SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS,
+                "trace_detailed_max_km": SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM,
                 "ca_gps_corrections": list(ca_gps_corrections.values()),
                 "stage_count": len(columns),
             }
@@ -3976,12 +3981,8 @@ def create_app() -> Flask:
         mode = request.args.get("mode", "default")
         metric_key = request.args.get("metric") or "ca_speed_kph"
         compare = request.args.get("compare", "1").strip().lower() not in {"0", "false", "no", "off"}
-        max_points = _limited_int(
-            request.args.get("max_points"),
-            SUNTRIP_ANALYSIS_TRACE_MAX_POINTS,
-            100,
-            SUNTRIP_ANALYSIS_TRACE_MAX_POINTS,
-        )
+        requested_detailed = request.args.get("detailed", "0").strip().lower() in {"1", "true", "yes", "on"}
+        requested_max_points = request.args.get("max_points")
         metric_options = _trace_metric_option_map()
         if metric_key not in metric_options:
             return jsonify({"error": "unknown metric"}), 400
@@ -4001,6 +4002,24 @@ def create_app() -> Flask:
             if not selected:
                 return jsonify({"error": "session not found"}), 404
             sessions = _comparison_sessions_for_trace(conn, selected) if compare else [selected]
+            distances = [
+                _safe_float(session["distance_km"])
+                for session in sessions
+                if _safe_float(session["distance_km"]) is not None
+            ]
+            detailed_allowed = bool(distances) and max(distances) <= SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM
+            detailed = requested_detailed and detailed_allowed
+            max_allowed_points = (
+                SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS
+                if detailed
+                else SUNTRIP_ANALYSIS_TRACE_MAX_POINTS
+            )
+            max_points = _limited_int(
+                requested_max_points,
+                max_allowed_points,
+                100,
+                max_allowed_points,
+            )
             series = [
                 _trace_session_payload(conn, session, metric_key=metric_key, max_points=max_points)
                 for session in sessions
@@ -4011,6 +4030,9 @@ def create_app() -> Flask:
                 "status": "ok",
                 "metric": metric_options[metric_key],
                 "compare": compare,
+                "detailed": detailed,
+                "detailed_allowed": detailed_allowed,
+                "detailed_max_km": SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM,
                 "max_points": max_points,
                 "series": series,
             }

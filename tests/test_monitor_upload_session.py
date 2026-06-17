@@ -685,6 +685,7 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("metric-chart-check", html)
         self.assertIn("Track Explorer", html)
         self.assertIn("trace-select", html)
+        self.assertIn("trace-detailed", html)
         self.assertIn("ca-correction-toggle", html)
         self.assertIn("Corrected CA/GPS", html)
         self.assertIn("data-corrected-value", html)
@@ -710,6 +711,61 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertEqual(payload["metric"]["key"], "ca_speed_kph")
         self.assertEqual(len(payload["series"]), 2)
         self.assertGreaterEqual(payload["series"][0]["point_count"], 1)
+
+        standard_trace = client.get(
+            "/api/suntrip_analysis/session_trace"
+            "?device_id=Supercycle-1"
+            "&session_id=2026-05-07_10-00-00"
+            "&mode=supercycle_live"
+            "&metric=ca_speed_kph"
+            "&max_points=5000",
+            headers={"Authorization": token},
+        )
+        self.assertEqual(standard_trace.status_code, 200)
+        self.assertEqual(standard_trace.get_json()["max_points"], 1400)
+
+        detailed_trace = client.get(
+            "/api/suntrip_analysis/session_trace"
+            "?device_id=Supercycle-1"
+            "&session_id=2026-05-07_10-00-00"
+            "&mode=supercycle_live"
+            "&metric=ca_speed_kph"
+            "&detailed=1"
+            "&max_points=5000",
+            headers={"Authorization": token},
+        )
+        self.assertEqual(detailed_trace.status_code, 200)
+        detailed_payload = detailed_trace.get_json()
+        self.assertTrue(detailed_payload["detailed"])
+        self.assertEqual(detailed_payload["max_points"], 5000)
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE sessions
+                SET distance_km = 16
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                """,
+                ("Supercycle-1", "2026-05-07_10-00-00", "supercycle_live"),
+            )
+            conn.commit()
+
+        long_detailed_trace = client.get(
+            "/api/suntrip_analysis/session_trace"
+            "?device_id=Supercycle-1"
+            "&session_id=2026-05-07_10-00-00"
+            "&mode=supercycle_live"
+            "&metric=ca_speed_kph"
+            "&compare=0"
+            "&detailed=1"
+            "&max_points=5000",
+            headers={"Authorization": token},
+        )
+        self.assertEqual(long_detailed_trace.status_code, 200)
+        long_payload = long_detailed_trace.get_json()
+        self.assertFalse(long_payload["detailed"])
+        self.assertFalse(long_payload["detailed_allowed"])
+        self.assertEqual(long_payload["max_points"], 1400)
 
     def test_suntrip_ca_gps_correction_uses_reliable_vehicle_ratio(self):
         columns = [
