@@ -969,6 +969,7 @@
           if (xs.length < 2) return;
           traceRange = [Math.min(...xs), Math.max(...xs)];
           traceHoverX = null;
+          updateTraceDetailAvailability(findTraceSession(traceSessionSelect?.value));
           renderTraceMap(false);
           renderTraceChart();
         });
@@ -1239,6 +1240,7 @@
         const colorBounds = traceMetricBounds();
         if (traceScaleMin) traceScaleMin.textContent = formatTraceValue(colorBounds.min, metric.unit);
         if (traceScaleMax) traceScaleMax.textContent = formatTraceValue(colorBounds.max, metric.unit);
+        updateTraceDetailAvailability(findTraceSession(traceSessionSelect?.value));
       };
       const loadTrace = async ({ keepRange = false } = {}) => {
         if (!traceSessionSelect || !traceMetricSelect) return;
@@ -1341,12 +1343,14 @@
         traceXAxisSelect?.addEventListener("change", () => {
           traceRange = null;
           traceHoverX = null;
+          updateTraceDetailAvailability(findTraceSession(traceSessionSelect?.value));
           renderTraceMap(true);
           renderTraceChart();
         });
         traceResetButton?.addEventListener("click", () => {
           traceRange = null;
           traceHoverX = null;
+          updateTraceDetailAvailability(findTraceSession(traceSessionSelect?.value));
           renderTraceMap(true);
           renderTraceChart();
         });
