@@ -825,13 +825,18 @@
         const distance = Number(session?.distance_km);
         return Number.isFinite(distance) && distance > 0 && distance <= traceDetailedMaxKm;
       };
+      const traceDetailAllowedForView = (session) => {
+        if (traceDetailAllowedForSession(session)) return true;
+        if (currentTraceXAxis() !== "distance" || !traceRange) return false;
+        return Math.abs(traceRange[1] - traceRange[0]) <= traceDetailedMaxKm;
+      };
       const updateTraceDetailAvailability = (session) => {
         if (!traceDetailedCheck) return false;
-        const allowed = traceDetailAllowedForSession(session);
+        const allowed = traceDetailAllowedForView(session);
         traceDetailedCheck.disabled = !allowed;
         traceDetailedCheck.title = allowed
           ? `Detailed mode loads up to ${traceDetailedMaxPoints} points.`
-          : `Detailed mode is limited to sessions up to ${traceDetailedMaxKm} km.`;
+          : `Detailed mode is limited to sessions or CA-distance zoom windows up to ${traceDetailedMaxKm} km.`;
         if (!allowed) traceDetailedCheck.checked = false;
         return allowed;
       };
@@ -1007,7 +1012,7 @@
         const metricKey = traceMetricSelect?.value || "ca_speed_kph";
         const { min, max } = traceMetricBounds();
         (traceData.series || []).forEach((series) => {
-          const allPoints = series.points || [];
+          const allPoints = series.overview_points || series.points || [];
           if (allPoints.length < 2) return;
           L.polyline(
             allPoints.map((point) => [point.lat, point.lon]),
@@ -1235,11 +1240,12 @@
         if (traceScaleMin) traceScaleMin.textContent = formatTraceValue(colorBounds.min, metric.unit);
         if (traceScaleMax) traceScaleMax.textContent = formatTraceValue(colorBounds.max, metric.unit);
       };
-      const loadTrace = async () => {
+      const loadTrace = async ({ keepRange = false } = {}) => {
         if (!traceSessionSelect || !traceMetricSelect) return;
         const selected = findTraceSession(traceSessionSelect.value);
         if (!selected) return;
-        traceRange = null;
+        const requestedRange = keepRange && traceRange ? [...traceRange] : null;
+        if (!keepRange) traceRange = null;
         const detailedAllowed = updateTraceDetailAvailability(selected);
         const detailed = detailedAllowed && Boolean(traceDetailedCheck?.checked);
         const requestedMaxPoints = detailed ? traceDetailedMaxPoints : traceStandardMaxPoints;
@@ -1253,6 +1259,11 @@
           detailed: detailed ? "1" : "0",
           max_points: String(requestedMaxPoints)
         });
+        if (detailed && requestedRange && currentTraceXAxis() === "distance") {
+          params.set("range_axis", "distance");
+          params.set("range_min", String(requestedRange[0]));
+          params.set("range_max", String(requestedRange[1]));
+        }
         try {
           const traceUrl = new URL("/api/suntrip_analysis/session_trace", window.location.origin);
           traceUrl.search = params.toString();
@@ -1260,6 +1271,13 @@
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || "Trace loading failed");
           traceData = result;
+          if (result.range_applied && Number.isFinite(Number(result.range_min)) && Number.isFinite(Number(result.range_max))) {
+            traceRange = [Number(result.range_min), Number(result.range_max)];
+          } else if (!keepRange) {
+            traceRange = null;
+          } else if (requestedRange) {
+            traceRange = requestedRange;
+          }
           const rawCount = (result.series || []).reduce((sum, series) => sum + Number(series.raw_point_count || 0), 0);
           const pointCount = (result.series || []).reduce((sum, series) => sum + Number(series.point_count || 0), 0);
           const modeLabel = result.detailed ? "detailed" : "standard";
@@ -1312,7 +1330,7 @@
         });
         traceMetricSelect?.addEventListener("change", loadTrace);
         traceCompareCheck?.addEventListener("change", loadTrace);
-        traceDetailedCheck?.addEventListener("change", loadTrace);
+        traceDetailedCheck?.addEventListener("change", () => loadTrace({ keepRange: true }));
         traceBasemapSelect?.addEventListener("change", () => {
           ensureTraceMap();
           setTraceBaseMap(traceBasemapSelect.value);
@@ -1375,6 +1393,7 @@
           if (delta > 8 && Number.isFinite(startValue) && Number.isFinite(endValue) && startValue !== endValue) {
             traceRange = [Math.min(startValue, endValue), Math.max(startValue, endValue)];
             traceHoverX = null;
+            updateTraceDetailAvailability(findTraceSession(traceSessionSelect?.value));
             renderTraceMap(true);
           }
           renderTraceChart();
@@ -1391,6 +1410,7 @@
           traceRange = [Math.max(full.min, newMin), Math.min(full.max, newMax)];
           if (traceRange[1] - traceRange[0] >= (full.max - full.min) * 0.999) traceRange = null;
           traceHoverX = null;
+          updateTraceDetailAvailability(findTraceSession(traceSessionSelect?.value));
           renderTraceMap(true);
           renderTraceChart();
         }, { passive: false });

@@ -2270,7 +2270,15 @@ def _sample_metric_value(metrics: dict[str, Any], key: str) -> float | None:
     return _safe_float(value)
 
 
-def _session_trace_points(samples: list[dict[str, Any]], max_points: int) -> tuple[list[dict[str, Any]], int]:
+def _session_trace_points(
+    samples: list[dict[str, Any]],
+    max_points: int,
+    *,
+    range_axis: str | None = None,
+    range_min: float | None = None,
+    range_max: float | None = None,
+    overview_max_points: int | None = None,
+) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]] | None]:
     first_ts = None
     previous_ts = None
     previous_values = None
@@ -2399,7 +2407,26 @@ def _session_trace_points(samples: list[dict[str, Any]], max_points: int) -> tup
         )
         previous_values = values or previous_values
 
-    return _downsample_points(points, max_points), len(points)
+    selected_points = points
+    overview_points = None
+    if (
+        range_axis in {"distance", "time"}
+        and range_min is not None
+        and range_max is not None
+        and math.isfinite(range_min)
+        and math.isfinite(range_max)
+        and range_min < range_max
+    ):
+        x_key = "x_distance" if range_axis == "distance" else "x_time"
+        selected_points = [
+            point
+            for point in points
+            if range_min <= float(point.get(x_key, 0.0)) <= range_max
+        ]
+        if overview_max_points:
+            overview_points = _downsample_points(points, overview_max_points)
+
+    return _downsample_points(selected_points, max_points), len(points), overview_points
 
 
 def _trace_session_payload(
@@ -2408,6 +2435,10 @@ def _trace_session_payload(
     *,
     metric_key: str,
     max_points: int,
+    range_axis: str | None = None,
+    range_min: float | None = None,
+    range_max: float | None = None,
+    overview_max_points: int | None = None,
 ) -> dict[str, Any]:
     vehicle = _suntrip_vehicle_for_device(session["device_id"])
     samples = _telemetry_samples_for_session(
@@ -2416,8 +2447,15 @@ def _trace_session_payload(
         session["session_id"],
         session["mode"],
     )
-    points, raw_point_count = _session_trace_points(samples, max_points)
-    return {
+    points, raw_point_count, overview_points = _session_trace_points(
+        samples,
+        max_points,
+        range_axis=range_axis,
+        range_min=range_min,
+        range_max=range_max,
+        overview_max_points=overview_max_points,
+    )
+    payload = {
         "device_id": session["device_id"],
         "session_id": session["session_id"],
         "mode": session["mode"],
@@ -2438,6 +2476,10 @@ def _trace_session_payload(
         ],
         "points": points,
     }
+    if overview_points is not None:
+        payload["overview_points"] = overview_points
+        payload["overview_point_count"] = len(overview_points)
+    return payload
 
 
 def _comparison_sessions_for_trace(
@@ -3983,6 +4025,19 @@ def create_app() -> Flask:
         compare = request.args.get("compare", "1").strip().lower() not in {"0", "false", "no", "off"}
         requested_detailed = request.args.get("detailed", "0").strip().lower() in {"1", "true", "yes", "on"}
         requested_max_points = request.args.get("max_points")
+        range_axis = request.args.get("range_axis")
+        if range_axis not in {"distance", "time"}:
+            range_axis = None
+        range_min = _safe_float(request.args.get("range_min"))
+        range_max = _safe_float(request.args.get("range_max"))
+        if range_min is not None and range_max is not None and range_min > range_max:
+            range_min, range_max = range_max, range_min
+        requested_range_valid = (
+            range_axis is not None
+            and range_min is not None
+            and range_max is not None
+            and range_min < range_max
+        )
         metric_options = _trace_metric_option_map()
         if metric_key not in metric_options:
             return jsonify({"error": "unknown metric"}), 400
@@ -4007,8 +4062,18 @@ def create_app() -> Flask:
                 for session in sessions
                 if _safe_float(session["distance_km"]) is not None
             ]
-            detailed_allowed = bool(distances) and max(distances) <= SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM
+            full_trace_detailed_allowed = (
+                bool(distances)
+                and max(distances) <= SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM
+            )
+            range_detailed_allowed = (
+                requested_range_valid
+                and range_axis == "distance"
+                and (range_max - range_min) <= SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM
+            )
+            detailed_allowed = full_trace_detailed_allowed or range_detailed_allowed
             detailed = requested_detailed and detailed_allowed
+            range_applied = bool(detailed and range_detailed_allowed and not full_trace_detailed_allowed)
             max_allowed_points = (
                 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS
                 if detailed
@@ -4021,7 +4086,16 @@ def create_app() -> Flask:
                 max_allowed_points,
             )
             series = [
-                _trace_session_payload(conn, session, metric_key=metric_key, max_points=max_points)
+                _trace_session_payload(
+                    conn,
+                    session,
+                    metric_key=metric_key,
+                    max_points=max_points,
+                    range_axis=range_axis if range_applied else None,
+                    range_min=range_min if range_applied else None,
+                    range_max=range_max if range_applied else None,
+                    overview_max_points=SUNTRIP_ANALYSIS_TRACE_MAX_POINTS if range_applied else None,
+                )
                 for session in sessions
             ]
 
@@ -4032,6 +4106,10 @@ def create_app() -> Flask:
                 "compare": compare,
                 "detailed": detailed,
                 "detailed_allowed": detailed_allowed,
+                "range_applied": range_applied,
+                "range_axis": range_axis if range_applied else None,
+                "range_min": range_min if range_applied else None,
+                "range_max": range_max if range_applied else None,
                 "detailed_max_km": SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM,
                 "max_points": max_points,
                 "series": series,

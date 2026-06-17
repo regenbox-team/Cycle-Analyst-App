@@ -767,6 +767,28 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertFalse(long_payload["detailed_allowed"])
         self.assertEqual(long_payload["max_points"], 1400)
 
+        zoom_detailed_trace = client.get(
+            "/api/suntrip_analysis/session_trace"
+            "?device_id=Supercycle-1"
+            "&session_id=2026-05-07_10-00-00"
+            "&mode=supercycle_live"
+            "&metric=ca_speed_kph"
+            "&compare=0"
+            "&detailed=1"
+            "&range_axis=distance"
+            "&range_min=0"
+            "&range_max=1"
+            "&max_points=5000",
+            headers={"Authorization": token},
+        )
+        self.assertEqual(zoom_detailed_trace.status_code, 200)
+        zoom_payload = zoom_detailed_trace.get_json()
+        self.assertTrue(zoom_payload["detailed"])
+        self.assertTrue(zoom_payload["detailed_allowed"])
+        self.assertTrue(zoom_payload["range_applied"])
+        self.assertEqual(zoom_payload["max_points"], 5000)
+        self.assertIn("overview_points", zoom_payload["series"][0])
+
     def test_suntrip_ca_gps_correction_uses_reliable_vehicle_ratio(self):
         columns = [
             {
@@ -844,9 +866,10 @@ class MonitorUploadSessionTest(unittest.TestCase):
             dict(self.sample(3), timestamp="2026-05-09 12:13:23", raw="0 52 1 30 54.200 20 0 0 0 0 0 0 0 0 flags"),
         ]
 
-        points, raw_count = self.monitor_app._session_trace_points(samples, 100)
+        points, raw_count, overview_points = self.monitor_app._session_trace_points(samples, 100)
 
         self.assertEqual(raw_count, 4)
+        self.assertIsNone(overview_points)
         self.assertLess(points[-1]["x_distance"], 0.2)
         self.assertGreater(points[-1]["x_distance"], 0.09)
 
