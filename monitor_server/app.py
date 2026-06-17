@@ -2250,6 +2250,7 @@ def _metric_options_from_specs() -> list[dict[str, str]]:
         {"key": "voltage_v", "label": "Battery voltage", "unit": "V"},
         {"key": "temperature_c", "label": "CA temperature", "unit": "C"},
         {"key": "altitude_m", "label": "Altitude", "unit": "m"},
+        {"key": "gradient_percent", "label": "Gradient", "unit": "%"},
         {"key": "ca_distance_km", "label": "CA distance", "unit": "km"},
         {"key": "gps_distance_km", "label": "GPS distance", "unit": "km"},
         {"key": "elapsed_min", "label": "Elapsed time", "unit": "min"},
@@ -2269,6 +2270,38 @@ def _trace_metric_option_map() -> dict[str, dict[str, str]]:
 def _sample_metric_value(metrics: dict[str, Any], key: str) -> float | None:
     value = metrics.get(key)
     return _safe_float(value)
+
+
+def _add_trace_gradient_metrics(points: list[dict[str, Any]]) -> None:
+    window_km = 0.25
+    min_km = 0.05
+    for index, point in enumerate(points):
+        metrics = point.get("metrics") or {}
+        distance = _safe_float(metrics.get("gps_distance_km"))
+        altitude = _safe_float(metrics.get("altitude_m"))
+        if distance is None or altitude is None:
+            continue
+        reference: tuple[float, float] | None = None
+        for previous in reversed(points[:index]):
+            previous_metrics = previous.get("metrics") or {}
+            previous_distance = _safe_float(previous_metrics.get("gps_distance_km"))
+            previous_altitude = _safe_float(previous_metrics.get("altitude_m"))
+            if previous_distance is None or previous_altitude is None:
+                continue
+            delta_km = distance - previous_distance
+            if delta_km < min_km:
+                continue
+            reference = (previous_distance, previous_altitude)
+            if delta_km >= window_km:
+                break
+        if reference is None:
+            continue
+        delta_km = distance - reference[0]
+        if delta_km <= 0:
+            continue
+        gradient = ((altitude - reference[1]) / (delta_km * 1000.0)) * 100.0
+        if math.isfinite(gradient):
+            metrics["gradient_percent"] = round(max(-35.0, min(35.0, gradient)), 3)
 
 
 def _session_trace_points(
@@ -2407,6 +2440,8 @@ def _session_trace_points(
             }
         )
         previous_values = values or previous_values
+
+    _add_trace_gradient_metrics(points)
 
     selected_points = points
     overview_points = None

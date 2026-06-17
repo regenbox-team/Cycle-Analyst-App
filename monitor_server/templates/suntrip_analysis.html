@@ -444,6 +444,12 @@
         height: 320px;
         cursor: crosshair;
       }
+      .trace-chart.is-panning {
+        cursor: grab;
+      }
+      .trace-chart.is-panning:active {
+        cursor: grabbing;
+      }
       .trace-chart-legend {
         display: flex;
         flex-wrap: wrap;
@@ -584,6 +590,10 @@
           <label class="trace-check">
             <input id="trace-detailed" type="checkbox">
             Detailed
+          </label>
+          <label class="trace-check">
+            <input id="trace-pan" type="checkbox">
+            Move
           </label>
           <button class="btn" id="trace-reset" type="button">Reset zoom</button>
         </div>
@@ -817,6 +827,7 @@
       const traceMapSizeSelect = document.getElementById("trace-map-size");
       const traceCompareCheck = document.getElementById("trace-compare");
       const traceDetailedCheck = document.getElementById("trace-detailed");
+      const tracePanCheck = document.getElementById("trace-pan");
       const traceResetButton = document.getElementById("trace-reset");
       const traceMapEl = document.getElementById("trace-map");
       const traceChart = document.getElementById("trace-chart");
@@ -1469,6 +1480,9 @@
         traceMetricExtra2Select?.addEventListener("change", renderTraceChart);
         traceCompareCheck?.addEventListener("change", loadTrace);
         traceDetailedCheck?.addEventListener("change", () => loadTrace({ keepRange: true }));
+        tracePanCheck?.addEventListener("change", () => {
+          traceChart?.classList.toggle("is-panning", Boolean(tracePanCheck.checked));
+        });
         traceBasemapSelect?.addEventListener("change", () => {
           ensureTraceMap();
           setTraceBaseMap(traceBasemapSelect.value);
@@ -1512,7 +1526,7 @@
         traceChart.addEventListener("pointerdown", (event) => {
           traceChart.setPointerCapture(event.pointerId);
           const rect = traceChart.getBoundingClientRect();
-          const canPan = event.shiftKey && traceRange && traceRange[1] > traceRange[0];
+          const canPan = (event.shiftKey || tracePanCheck?.checked) && traceRange && traceRange[1] > traceRange[0];
           const startBounds = traceRange
             ? { min: traceRange[0], max: traceRange[1] }
             : traceXBounds();

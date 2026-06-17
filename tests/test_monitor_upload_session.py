@@ -686,6 +686,7 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("Track Explorer", html)
         self.assertIn("trace-select", html)
         self.assertIn("trace-detailed", html)
+        self.assertIn("trace-pan", html)
         self.assertIn("trace-metric-extra-1", html)
         self.assertIn("trace-metric-extra-2", html)
         self.assertIn("ca-correction-toggle", html)
@@ -694,6 +695,7 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("2026-05-07_10-00-00", html)
         self.assertIn("2026-05-07_10-05-00", html)
         self.assertIn("CA distance", html)
+        self.assertIn("Gradient", html)
         self.assertIn("Avg GPS/CA speed delta", html)
         self.assertIn("Battery Used", html)
         self.assertIn("CA Ah raw", html)
@@ -895,6 +897,31 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIsNone(overview_points)
         self.assertLess(points[-1]["x_distance"], 0.2)
         self.assertGreater(points[-1]["x_distance"], 0.09)
+
+    def test_suntrip_trace_exposes_smoothed_gradient_metric(self):
+        samples = []
+        for index in range(8):
+            sample = dict(
+                self.sample(index),
+                timestamp=f"2026-05-09 12:13:{20 + index:02d}",
+                raw=f"0 52 1 30 {index * 0.1:.3f} 20 0 0 0 0 0 0 0 0 flags",
+            )
+            sample["gps_lat"] = 48.0 + index * 0.001
+            sample["gps_lon"] = 2.0
+            sample["gps_alt"] = 100 + index * 2
+            samples.append(sample)
+
+        points, raw_count, overview_points = self.monitor_app._session_trace_points(samples, 100)
+        gradients = [
+            point["metrics"].get("gradient_percent")
+            for point in points
+            if point["metrics"].get("gradient_percent") is not None
+        ]
+
+        self.assertEqual(raw_count, 8)
+        self.assertIsNone(overview_points)
+        self.assertTrue(gradients)
+        self.assertGreater(gradients[-1], 0)
 
 
 if __name__ == "__main__":
