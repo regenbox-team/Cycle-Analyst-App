@@ -459,6 +459,42 @@
         color: var(--muted);
         font-size: 12px;
       }
+      .trace-segment-panel {
+        margin-top: 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #fffdf9;
+        overflow: hidden;
+      }
+      .trace-segment-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 10px;
+        border-bottom: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .trace-segment-table-wrap {
+        max-height: 240px;
+        overflow: auto;
+      }
+      .trace-segment-table td,
+      .trace-segment-table th {
+        white-space: nowrap;
+      }
+      .segment-swatch {
+        display: inline-block;
+        width: 18px;
+        height: 4px;
+        margin-right: 7px;
+        border-radius: 999px;
+        vertical-align: middle;
+      }
       .trace-status {
         min-height: 18px;
         margin-top: 7px;
@@ -595,6 +631,11 @@
             <input id="trace-pan" type="checkbox">
             Move
           </label>
+          <label class="trace-check">
+            <input id="trace-segment-mode" type="checkbox">
+            Segments
+          </label>
+          <button class="btn" id="trace-clear-segments" type="button">Clear segments</button>
           <button class="btn" id="trace-reset" type="button">Reset zoom</button>
         </div>
         <div class="trace-layout">
@@ -614,6 +655,16 @@
               </div>
               <div id="trace-status" class="trace-status"></div>
             </div>
+          </div>
+        </div>
+        <div class="trace-segment-panel">
+          <div class="trace-segment-head">
+            <span>Climb segments</span>
+            <span id="trace-segment-count">0 selected</span>
+          </div>
+          <div id="trace-segment-empty" class="empty">Select segments from the chart to compare climbs.</div>
+          <div class="trace-segment-table-wrap">
+            <table id="trace-segment-table" class="trace-segment-table"></table>
           </div>
         </div>
         {% else %}
@@ -828,6 +879,8 @@
       const traceCompareCheck = document.getElementById("trace-compare");
       const traceDetailedCheck = document.getElementById("trace-detailed");
       const tracePanCheck = document.getElementById("trace-pan");
+      const traceSegmentModeCheck = document.getElementById("trace-segment-mode");
+      const traceClearSegmentsButton = document.getElementById("trace-clear-segments");
       const traceResetButton = document.getElementById("trace-reset");
       const traceMapEl = document.getElementById("trace-map");
       const traceChart = document.getElementById("trace-chart");
@@ -837,6 +890,9 @@
       const traceChartLegend = document.getElementById("trace-chart-legend");
       const traceScaleMin = document.getElementById("trace-scale-min");
       const traceScaleMax = document.getElementById("trace-scale-max");
+      const traceSegmentCount = document.getElementById("trace-segment-count");
+      const traceSegmentEmpty = document.getElementById("trace-segment-empty");
+      const traceSegmentTable = document.getElementById("trace-segment-table");
       const traceRadios = document.querySelectorAll(".trace-select");
       const caCorrectionToggle = document.getElementById("ca-correction-toggle");
       const correctionValueCells = document.querySelectorAll("[data-raw-value][data-corrected-value]");
@@ -854,6 +910,7 @@
         "#c2410c",
         "#475569"
       ];
+      const segmentPalette = ["#be123c", "#2563eb", "#15803d", "#b45309", "#6d28d9", "#0f766e"];
       const chartMetrics = new Map();
       chartMetricGroups.forEach((group) => {
         (group.rows || []).forEach((metric) => {
@@ -911,6 +968,8 @@
       let traceSyncingMap = false;
       let traceDragStart = null;
       let traceHoverX = null;
+      let traceSegments = [];
+      let traceSegmentNextId = 1;
 
       const setTraceStatus = (message) => {
         if (traceStatus) traceStatus.textContent = message || "";
@@ -985,6 +1044,116 @@
         traceRange = [Math.max(full.min, min), Math.min(full.max, max)];
         return true;
       };
+      const tracePointsInRange = (series, range) => {
+        const min = Math.min(range[0], range[1]);
+        const max = Math.max(range[0], range[1]);
+        return (series.points || []).filter((point) => {
+          const x = traceXValue(point);
+          return Number.isFinite(x) && x >= min && x <= max;
+        });
+      };
+      const metricDelta = (start, end, key) => {
+        const a = Number(start.metrics?.[key]);
+        const b = Number(end.metrics?.[key]);
+        return Number.isFinite(a) && Number.isFinite(b) ? b - a : null;
+      };
+      const computeTraceSegmentStats = (series, segment) => {
+        const points = tracePointsInRange(series, segment.range);
+        if (points.length < 2) return null;
+        const start = points[0];
+        const end = points[points.length - 1];
+        const gpsDistance = metricDelta(start, end, "gps_distance_km");
+        const caDistance = metricDelta(start, end, "ca_distance_km");
+        const distance = gpsDistance && gpsDistance > 0 ? gpsDistance : caDistance;
+        let elevationGain = 0;
+        for (let index = 1; index < points.length; index += 1) {
+          const previousAlt = Number(points[index - 1].metrics?.altitude_m);
+          const currentAlt = Number(points[index].metrics?.altitude_m);
+          if (Number.isFinite(previousAlt) && Number.isFinite(currentAlt) && currentAlt > previousAlt) {
+            elevationGain += currentAlt - previousAlt;
+          }
+        }
+        const gradient = distance && distance > 0 ? (elevationGain / (distance * 1000)) * 100 : null;
+        const wh = metricDelta(start, end, "positive_wh");
+        const temperature = metricDelta(start, end, "temperature_c");
+        const duration = metricDelta(start, end, "elapsed_min");
+        const speeds = points
+          .map((point) => Number(point.metrics?.ca_speed_kph ?? point.metrics?.gps_speed_kph))
+          .filter(Number.isFinite);
+        const avgSpeed = speeds.length ? speeds.reduce((sum, value) => sum + value, 0) / speeds.length : null;
+        return { points, distance, elevationGain, gradient, wh, temperature, duration, avgSpeed };
+      };
+      const formatSegmentMetric = (value, unit, digits = 1) => {
+        if (!Number.isFinite(value)) return "-";
+        return `${value.toFixed(digits)}${unit ? ` ${unit}` : ""}`;
+      };
+      const renderTraceSegments = () => {
+        if (!traceSegmentTable || !traceSegmentEmpty) return;
+        if (traceSegmentCount) {
+          traceSegmentCount.textContent = `${traceSegments.length} selected`;
+        }
+        if (!traceSegments.length) {
+          traceSegmentEmpty.style.display = "";
+          traceSegmentTable.innerHTML = "";
+          return;
+        }
+        traceSegmentEmpty.style.display = "none";
+        const rows = [];
+        traceSegments.forEach((segment, segmentIndex) => {
+          (traceData?.series || []).forEach((series) => {
+            const stats = computeTraceSegmentStats(series, segment);
+            if (!stats) return;
+            rows.push(`
+              <tr>
+                <td><span class="segment-swatch" style="background:${segment.color}"></span>S${segmentIndex + 1}</td>
+                <td>${series.vehicle_label}</td>
+                <td>${formatSegmentMetric(segment.range[0], currentTraceXAxis() === "time" ? "min" : "km", 1)} to ${formatSegmentMetric(segment.range[1], currentTraceXAxis() === "time" ? "min" : "km", 1)}</td>
+                <td>${formatSegmentMetric(stats.distance, "km", 2)}</td>
+                <td>${formatSegmentMetric(stats.elevationGain, "m", 0)}</td>
+                <td>${formatSegmentMetric(stats.gradient, "%", 1)}</td>
+                <td>${formatSegmentMetric(stats.wh, "Wh", 0)}</td>
+                <td>${formatSegmentMetric(stats.temperature, "C", 1)}</td>
+                <td>${formatSegmentMetric(stats.avgSpeed, "km/h", 1)}</td>
+              </tr>
+            `);
+          });
+        });
+        traceSegmentTable.innerHTML = `
+          <thead>
+            <tr>
+              <th>Segment</th>
+              <th>Vehicle</th>
+              <th>Range</th>
+              <th>GPS dist.</th>
+              <th>Elev. gain</th>
+              <th>Gradient</th>
+              <th>Battery</th>
+              <th>Temp gain</th>
+              <th>Avg speed</th>
+            </tr>
+          </thead>
+          <tbody>${rows.join("") || `<tr><td colspan="9">No data in selected segments.</td></tr>`}</tbody>
+        `;
+      };
+      const addTraceSegment = (startValue, endValue) => {
+        if (!Number.isFinite(startValue) || !Number.isFinite(endValue) || startValue === endValue) return;
+        const range = [Math.min(startValue, endValue), Math.max(startValue, endValue)];
+        traceSegments.push({
+          id: traceSegmentNextId,
+          range,
+          color: segmentPalette[(traceSegmentNextId - 1) % segmentPalette.length]
+        });
+        traceSegmentNextId += 1;
+        renderTraceSegments();
+        renderTraceMap(false);
+        renderTraceChart();
+      };
+      const clearTraceSegments = () => {
+        traceSegments = [];
+        renderTraceSegments();
+        renderTraceMap(false);
+        renderTraceChart();
+      };
       const traceColor = (value, min, max) => {
         if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max) || min === max) return "#0d9488";
         const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
@@ -1039,7 +1208,7 @@
       };
       const traceXBounds = () => {
         const values = (traceData?.series || [])
-          .flatMap((series) => (series.points || []).map(traceXValue))
+          .flatMap((series) => (series.overview_points || series.points || []).map(traceXValue))
           .filter(Number.isFinite);
         if (!values.length) return { min: 0, max: 1 };
         const min = Math.min(...values);
@@ -1116,6 +1285,21 @@
               opacity: 0.24
             }
           ).addTo(traceLayer);
+
+          traceSegments.forEach((segment) => {
+            const segmentPoints = tracePointsInRange(series, segment.range);
+            if (segmentPoints.length < 2) return;
+            L.polyline(
+              segmentPoints.map((point) => [point.lat, point.lon]),
+              {
+                color: segment.color,
+                weight: 11,
+                opacity: 0.34,
+                lineCap: "round",
+                lineJoin: "round"
+              }
+            ).addTo(traceLayer);
+          });
 
           const activePoints = visibleTracePoints(series);
           if (!activePoints.length) return;
@@ -1256,6 +1440,19 @@
           const value = xBounds.min + ((xBounds.max - xBounds.min) * i) / 5;
           ctx.fillText(formatTraceValue(value, xUnit), xFor(value), height - margin.bottom + 10);
         }
+        traceSegments.forEach((segment, index) => {
+          const leftValue = Math.max(xBounds.min, segment.range[0]);
+          const rightValue = Math.min(xBounds.max, segment.range[1]);
+          if (rightValue <= leftValue) return;
+          const left = xFor(leftValue);
+          const right = xFor(rightValue);
+          ctx.fillStyle = `${segment.color}22`;
+          ctx.fillRect(left, margin.top, Math.max(2, right - left), plotH);
+          ctx.fillStyle = segment.color;
+          ctx.textAlign = "left";
+          ctx.textBaseline = "top";
+          ctx.fillText(`S${index + 1}`, left + 4, margin.top + 4);
+        });
         metrics.slice(1).forEach((item, offset) => {
           const metricIndex = offset + 1;
           const axisX = width - margin.right + 18 + offset * 64;
@@ -1301,7 +1498,7 @@
               .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
             if (points.length < 2) return;
             ctx.strokeStyle = metricPalette[metricIndex] || vehicleColors[series.vehicle_key] || "#475569";
-            ctx.lineWidth = metricIndex === 0 ? (series.vehicle_key === "supercycle_2" ? 2 : 3) : 2;
+            ctx.lineWidth = metricIndex === 0 ? (series.vehicle_key === "supercycle_2" ? 1.5 : 2) : 1.4;
             ctx.lineCap = "round";
             ctx.lineJoin = "round";
             ctx.globalAlpha = metricIndex === 0 ? 0.95 : 0.75;
@@ -1433,6 +1630,7 @@
             ? ` · window capped at ${currentTraceXAxis() === "time" ? result.detailed_max_minutes : result.detailed_max_km} ${currentTraceXAxis() === "time" ? "min" : "km"}`
             : "";
           setTraceStatus(`${result.series.length} series · ${pointCount}/${rawCount} GPS points rendered · ${modeLabel}${rangeLimitText}`);
+          renderTraceSegments();
           renderTraceMap(true);
           renderTraceChart();
           traceRadios.forEach((radio) => {
@@ -1464,12 +1662,14 @@
             if (!radio.checked || !traceSessionSelect) return;
             traceSessionSelect.value = `${radio.dataset.deviceId}||${radio.dataset.sessionId}||${radio.dataset.mode || "default"}`;
             updateTraceDetailAvailability(findTraceSession(traceSessionSelect.value));
+            traceSegments = [];
             loadTrace();
             traceMapEl?.scrollIntoView({ behavior: "smooth", block: "center" });
           });
         });
         traceSessionSelect.addEventListener("change", () => {
           updateTraceDetailAvailability(findTraceSession(traceSessionSelect.value));
+          traceSegments = [];
           loadTrace();
         });
         traceMetricSelect?.addEventListener("change", () => {
@@ -1483,6 +1683,7 @@
         tracePanCheck?.addEventListener("change", () => {
           traceChart?.classList.toggle("is-panning", Boolean(tracePanCheck.checked));
         });
+        traceClearSegmentsButton?.addEventListener("click", clearTraceSegments);
         traceBasemapSelect?.addEventListener("change", () => {
           ensureTraceMap();
           setTraceBaseMap(traceBasemapSelect.value);
@@ -1493,8 +1694,10 @@
         traceXAxisSelect?.addEventListener("change", () => {
           traceRange = null;
           traceHoverX = null;
+          traceSegments = [];
           if (traceDetailedCheck?.checked) clampTraceRangeToDetailedSpan();
           updateTraceDetailAvailability(findTraceSession(traceSessionSelect?.value));
+          renderTraceSegments();
           renderTraceMap(true);
           renderTraceChart();
         });
@@ -1574,13 +1777,21 @@
           if (mode === "pan") {
             traceHoverX = null;
             updateTraceDetailAvailability(findTraceSession(traceSessionSelect?.value));
+            if (traceDetailedCheck?.checked) {
+              loadTrace({ keepRange: true });
+              return;
+            }
             renderTraceMap(true);
           } else if (delta > 8 && Number.isFinite(startValue) && Number.isFinite(endValue) && startValue !== endValue) {
-            traceRange = [Math.min(startValue, endValue), Math.max(startValue, endValue)];
-            traceHoverX = null;
-            if (traceDetailedCheck?.checked) clampTraceRangeToDetailedSpan();
-            updateTraceDetailAvailability(findTraceSession(traceSessionSelect?.value));
-            renderTraceMap(true);
+            if (traceSegmentModeCheck?.checked) {
+              addTraceSegment(startValue, endValue);
+            } else {
+              traceRange = [Math.min(startValue, endValue), Math.max(startValue, endValue)];
+              traceHoverX = null;
+              if (traceDetailedCheck?.checked) clampTraceRangeToDetailedSpan();
+              updateTraceDetailAvailability(findTraceSession(traceSessionSelect?.value));
+              renderTraceMap(true);
+            }
           }
           renderTraceChart();
         });
