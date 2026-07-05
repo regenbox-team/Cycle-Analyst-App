@@ -32,7 +32,8 @@
   let warningStart = null; // ms timestamp
   let distance = 0; // meters
   let lastTick = performance.now();
-  let power = 0; // W
+  let power = 50; // W, neutral until the first live metric arrives
+  let hasPowerSample = false;
   let flapPhase = 0; // 0..1
 
   // Zones
@@ -137,6 +138,7 @@
       const c = data && data.calculated_CA_values;
       const p = c ? Number((c.human_power_live ?? c.solar_power_live) || 0) : 0;
       power = isFinite(p) ? Math.max(0, Math.min(200, p)) : 0;
+      hasPowerSample = true;
       hudPower.textContent = Math.round(power);
     } catch (e) {
       // keep previous power
@@ -165,14 +167,20 @@
     drawHUDPower(w, h);
 
     const z = zones(h);
-    const inCloud = y < z.top || y > z.bottom;
+    const inCloud = hasPowerSample && (y < z.top || y > z.bottom);
 
-    if (!warningStart && inCloud) {
+    if (warningStart === null && inCloud) {
       warningStart = now;
       warningEl.style.display = 'block';
     }
 
-    if (warningStart) {
+    if (!inCloud && warningStart !== null) {
+      warningStart = null;
+      warningEl.style.display = 'none';
+      warningEl.textContent = '';
+    }
+
+    if (warningStart !== null) {
       const elapsed = (now - warningStart) / 1000;
       const remain = Math.max(0, 3 - Math.floor(elapsed));
       warningEl.textContent = remain > 0 ? `CLOUD ZONE! ${remain}…` : 'CLOUD ZONE!';
@@ -180,7 +188,7 @@
         endGame();
         return;
       }
-    } else {
+    } else if (hasPowerSample) {
       // Only count distance while safe
       const speed_mps = 6; // fake 6 m/s (~21.6 km/h)
       distance += speed_mps * dt;
