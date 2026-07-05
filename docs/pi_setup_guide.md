@@ -359,8 +359,30 @@ mkdir -p var var/session_metrics var/live_photo var/pending_photos
 mkdir -p "$HOME/Documents"
 ```
 
-Puis passe a la section 8 pour verifier `cycle-analyst.env`, puis a la section
-13 pour installer les services.
+### 6.4 Suite directe pour une installation standard
+
+Les sections 7 a 12 detaillent les dossiers, le fichier env, la carte offline,
+le GPS, le capteur solaire et la camera. Si tu fais une installation standard
+et que tu veux simplement demarrer les services, tu peux enchainer directement
+avec ces commandes depuis le repo :
+
+```bash
+mkdir -p var var/session_metrics var/live_photo var/pending_photos
+mkdir -p "$HOME/Documents"
+python3 scripts/setup_pi_services.py
+python3 scripts/setup_pi_services.py --apply
+```
+
+Ces deux commandes `setup_pi_services.py` sont detaillees en section 13. La
+premiere affiche un apercu; la seconde installe les services et cree
+`cycle-analyst.env` s'il n'existe pas encore.
+
+Apres `--apply`, verifie les valeurs locales :
+
+```bash
+grep -nE '^(MONITOR_DEVICE_ID|APP_PMTILES_PATH)=' cycle-analyst.env
+systemctl status cycle-recorder.service cycle-photo.service cycle-analyst.service --no-pager
+```
 
 ## 7. Creer le dossier runtime
 
