@@ -1,6 +1,6 @@
 # Guide complet d'installation Raspberry Pi - Cycle Analyst App
 
-Derniere mise a jour : 2026-05-04.
+Derniere mise a jour : 2026-07-05.
 
 Ce guide decrit une installation propre d'un nouveau Raspberry Pi avec le repo
 `Cycle-Analyst-App`, les variables d'environnement utiles et les services
@@ -14,36 +14,68 @@ Le setup recommande installe :
 - un nom local stable en `.local` via mDNS
 - un proxy `nginx` sur le port `80`
 - trois services `systemd` : `cycle-recorder.service`, `cycle-photo.service` et `cycle-analyst.service`
-- un fichier de variables local dedie : `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env`
+- un fichier de variables local dedie : `$HOME/Cycle-Analyst-App/cycle-analyst.env`
 - optionnellement le `monitor_server` sur le port `8080`
 
 ## 1. Hypotheses et conventions
 
-Adapte ces valeurs si besoin, mais garde une convention identique sur tous les
-Pi.
+Adapte ces valeurs a chaque Pi, puis remplace-les dans les commandes quand un
+exemple en dur apparait. Les deux valeurs qui changent le plus souvent sont
+l'utilisateur Linux et le hostname.
 
 - utilisateur Linux : `jeandard`
-- dossier du repo : `/home/jeandard/Cycle-Analyst-App`
-- environnement Python : `/home/jeandard/Cycle-Analyst-App/.venv`
-- dossier runtime : `/home/jeandard/Cycle-Analyst-App/var`
+- hostname : `sc-vehicule-1`
+- dossier du repo : `/home/<utilisateur>/Cycle-Analyst-App`
+- environnement Python : `/home/<utilisateur>/Cycle-Analyst-App/.venv`
+- dossier runtime : `/home/<utilisateur>/Cycle-Analyst-App/var`
 - app locale : `http://127.0.0.1:5050`
-- app exposee via nginx : `http://sc-vehicule-1.local`
+- app exposee via nginx : `http://<hostname>.local`
 - service enregistrement : `cycle-recorder.service`
 - service photo : `cycle-photo.service`
 - service interface : `cycle-analyst.service`
-- fichier env app : `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env`
+- fichier env app : `/home/<utilisateur>/Cycle-Analyst-App/cycle-analyst.env`
+
+Exemple pour le Pi client `sc-vehicule-5` :
+
+- utilisateur Linux : `danieldilg`
+- hostname : `sc-vehicule-5`
+- dossier du repo : `/home/danieldilg/Cycle-Analyst-App`
+- environnement Python : `/home/danieldilg/Cycle-Analyst-App/.venv`
+- app exposee via nginx : `http://sc-vehicule-5.local`
+- fichier env app : `/home/danieldilg/Cycle-Analyst-App/cycle-analyst.env`
+
+Sur le Pi, tu peux verifier les valeurs actives avec :
+
+```bash
+whoami
+hostname
+pwd
+```
+
+Important :
+
+- dans les commandes shell, tu peux utiliser `$HOME`, `$USER` et `$(hostname)`
+- dans `cycle-analyst.env`, les fichiers `.service`, nginx et sudoers, mets les
+  valeurs reelles, par exemple `/home/danieldilg/...` et `danieldilg`
 
 Exemple de noms par vehicule :
 
 - Pi 1 : `sc-vehicule-1`
 - Pi 2 : `sc-vehicule-2`
 - Pi 3 : `sc-vehicule-3`
+- Pi 5 : `sc-vehicule-5`
 
 Le nom complet sur le reseau sera ensuite :
 
 - `sc-vehicule-1.local`
 - `sc-vehicule-2.local`
 - `sc-vehicule-3.local`
+- `sc-vehicule-5.local`
+
+Les services systemd gardent les memes noms sur tous les Pi. Ce qui change,
+c'est leur contenu : le script `scripts/setup_pi_services.py --apply` ecrit
+automatiquement `User=...`, `Group=...`, `WorkingDirectory=...` et le
+`server_name` nginx avec les valeurs du Pi courant.
 
 ## 2. Preparer la carte SD
 
@@ -53,9 +85,9 @@ Avec Raspberry Pi Imager :
 2. Choisir `Raspberry Pi OS Lite (64-bit)` pour un Pi sans ecran local.
 3. Choisir la carte SD.
 4. Ouvrir les options avancees avant l'ecriture.
-5. Definir le hostname, par exemple `sc-vehicule-1`.
+5. Definir le hostname, par exemple `sc-vehicule-1` ou `sc-vehicule-5`.
 6. Activer SSH.
-7. Definir l'utilisateur `jeandard`.
+7. Definir l'utilisateur Linux, par exemple `jeandard` ou `danieldilg`.
 8. Definir un mot de passe ou ajouter ta cle SSH publique.
 9. Regler le pays Wi-Fi, la locale et le fuseau horaire.
 10. Ajouter le Wi-Fi du hotspot telephone si tu veux que le Pi s'y connecte au premier boot.
@@ -67,13 +99,19 @@ Ecrire la carte SD, l'inserer dans le Pi puis demarrer.
 Depuis ton Mac ou ton PC :
 
 ```bash
-ssh jeandard@sc-vehicule-1.local
+ssh <utilisateur>@<hostname>.local
+```
+
+Exemple pour le Pi client :
+
+```bash
+ssh danieldilg@sc-vehicule-5.local
 ```
 
 Si le `.local` ne repond pas encore, connecte-toi avec l'IP du Pi :
 
 ```bash
-ssh jeandard@IP_DU_PI
+ssh <utilisateur>@IP_DU_PI
 ```
 
 Pour afficher l'IP depuis le Pi :
@@ -101,10 +139,12 @@ Resultat attendu pour le Pi 1 :
 Si le nom est incorrect :
 
 ```bash
-sudo hostnamectl set-hostname sc-vehicule-1
+sudo hostnamectl set-hostname sc-vehicule-5
 echo 'preserve_hostname: true' | sudo tee /etc/cloud/cloud.cfg.d/99-preserve-hostname.cfg
 sudo reboot
 ```
+
+Remplace `sc-vehicule-5` par le hostname voulu pour le Pi courant.
 
 Apres reboot :
 
@@ -145,7 +185,7 @@ systemctl status avahi-daemon --no-pager
 Ajouter l'utilisateur aux groupes utiles pour les ports serie, I2C et camera :
 
 ```bash
-sudo usermod -aG dialout,i2c,video jeandard
+sudo usermod -aG dialout,i2c,video "$USER"
 ```
 
 Activer I2C si le capteur solaire INA228 est utilise :
@@ -164,11 +204,37 @@ Reconnecte-toi ensuite en SSH.
 
 ## 6. Installer le repo
 
-### 6.1 Connecter le Pi a GitHub en SSH
+### 6.1 Donner acces au repo GitHub
 
-Si le repo est heberge sur GitHub, le plus pratique est de donner au Raspberry
-Pi sa propre cle SSH. Comme ca, le Pi peut cloner et faire les futurs `git pull`
-sans mot de passe.
+Le repo est :
+
+```text
+https://github.com/regenbox-team/Cycle-Analyst-App.git
+```
+
+Pour un Pi client ou un Pi qui ne doit pas avoir de cle SSH GitHub, utilise
+HTTPS avec le compte GitHub du client et un Personal Access Token.
+
+Le compte GitHub doit avoir un acces `Read` au repo
+`regenbox-team/Cycle-Analyst-App`. Au moment du clone :
+
+- `Username` : le username GitHub qui a acces au repo, par exemple `dna2087`
+- `Password` : un token GitHub, pas le mot de passe du compte
+
+Le token doit avoir acces au repo et au minimum la permission `Contents:
+Read-only`. GitHub l'affiche une seule fois au moment de sa creation.
+
+Configurer la memorisation locale du token sur le Pi :
+
+```bash
+git config --global credential.helper store
+```
+
+Note : `credential.helper store` stocke le token en clair dans
+`~/.git-credentials`. Pour un Pi client, utilise un compte/token client limite
+au repo.
+
+### 6.2 Option SSH avec cle dediee
 
 Sur le Pi, generer une cle dediee :
 
@@ -260,30 +326,48 @@ Avec l'alias `Host github`, tu peux aussi utiliser :
 github:regenbox-team/Cycle-Analyst-App.git
 ```
 
-### 6.2 Cloner et installer les dependances
+### 6.3 Cloner et installer les dependances
 
 ```bash
-cd /home/jeandard
-git clone github:regenbox-team/Cycle-Analyst-App.git Cycle-Analyst-App
-cd /home/jeandard/Cycle-Analyst-App
+cd "$HOME"
+git clone https://github.com/regenbox-team/Cycle-Analyst-App.git Cycle-Analyst-App
+cd "$HOME/Cycle-Analyst-App"
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Si tu ne veux pas configurer d'alias SSH, utilise directement l'URL GitHub :
+Si tu as configure l'option SSH, tu peux remplacer la commande `git clone` par :
 
 ```bash
-git clone git@github.com:regenbox-team/Cycle-Analyst-App.git Cycle-Analyst-App
+git clone github:regenbox-team/Cycle-Analyst-App.git Cycle-Analyst-App
 ```
+
+Si le repo est deja clone et que tu es deja dans le venv, par exemple :
+
+```text
+(.venv) danieldilg@sc-vehicule-5:~/Cycle-Analyst-App
+```
+
+continue directement avec :
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+mkdir -p var var/session_metrics var/live_photo var/pending_photos
+mkdir -p "$HOME/Documents"
+```
+
+Puis passe a la section 8 pour verifier `cycle-analyst.env`, puis a la section
+13 pour installer les services.
 
 ## 7. Creer le dossier runtime
 
 Le code cree `var/` automatiquement, mais c'est plus clair de le preparer :
 
 ```bash
-cd /home/jeandard/Cycle-Analyst-App
+cd "$HOME/Cycle-Analyst-App"
 mkdir -p var var/session_metrics var/live_photo var/pending_photos
 ```
 
@@ -307,21 +391,60 @@ Les fichiers runtime principaux sont :
 
 ## 8. Ajuster le fichier de variables d'environnement
 
-Le repo contient deja le fichier :
+Le repo fournit le modele versionne :
 
 ```text
-/home/jeandard/Cycle-Analyst-App/cycle-analyst.env
+$HOME/Cycle-Analyst-App/cycle-analyst.env.example
 ```
 
-Il est charge automatiquement au demarrage de l'app et par le service systemd.
-Ce fichier est local au Pi et ignore par Git; le repo fournit `cycle-analyst.env.example`.
+Le fichier reel utilise par l'app est local au Pi :
+
+```text
+$HOME/Cycle-Analyst-App/cycle-analyst.env
+```
+
+Il est cree automatiquement si absent, en copiant `cycle-analyst.env.example`.
+Il est charge au demarrage de l'app et par le service systemd. Ce fichier est
+ignore par Git, donc chaque Pi garde ses propres valeurs.
+
+Important pour un Pi client : si `cycle-analyst.env` existe deja, verifie qu'il
+ne contient pas un ancien identifiant de vehicule. `MONITOR_DEVICE_ID` doit etre
+vide ou correspondre au hostname du Pi courant.
+
+```bash
+grep -n '^MONITOR_DEVICE_ID=' "$HOME/Cycle-Analyst-App/cycle-analyst.env"
+hostname
+```
+
+Sur `sc-vehicule-5`, ces deux valeurs doivent etre coherentes :
+
+```ini
+MONITOR_DEVICE_ID=sc-vehicule-5
+```
+
+ou bien :
+
+```ini
+MONITOR_DEVICE_ID=
+```
+
+Si la valeur est vide, l'app utilise automatiquement le hostname du Pi.
+
 Tu peux l'ajuster depuis l'interface :
 
 ```text
-http://sc-vehicule-1.local/settings
+http://<hostname>.local/settings
 ```
 
-Exemple de contenu pour le Pi 1 :
+Exemple :
+
+```text
+http://sc-vehicule-5.local/settings
+```
+
+Exemple de contenu pour le Pi client `sc-vehicule-5`. Pour un autre Pi,
+adapter au minimum `APP_PMTILES_PATH`. `MONITOR_DEVICE_ID` peut rester vide si
+le hostname du Pi est correct.
 
 ```ini
 # Cycle Analyst App - editable app configuration
@@ -340,7 +463,7 @@ APP_GPS_PORT=/dev/ttyACM0
 APP_GPS_BAUDRATE=9600
 
 # Carte offline PMTiles servie par /tiles/basemap.pmtiles.
-APP_PMTILES_PATH=/home/jeandard/Documents/tiles.pmtiles
+APP_PMTILES_PATH=/home/danieldilg/Documents/tiles.pmtiles
 
 # Estimation solaire / batterie.
 # Si la position exacte n'est pas encore connue, laisse les valeurs par defaut
@@ -369,7 +492,8 @@ APP_BATTERY_DISCHARGE_CURVE_FILE=var/battery_curve_lg_mh1_from_trip.json
 APP_CAMERA_COMMAND=fswebcam -d /dev/video0 -q -S 10 --palette YUYV -r 640x480 --jpeg 70 --no-banner {output}
 
 # Synchronisation vers monitor_server. Laisser MONITOR_URL vide seulement pour desactiver.
-MONITOR_DEVICE_ID=sc-vehicule-1
+# Vide = utilise automatiquement le hostname du Pi.
+MONITOR_DEVICE_ID=
 MONITOR_URL=http://91.134.243.157:8080
 MONITOR_USER=
 MONITOR_PASS=
@@ -381,7 +505,7 @@ fichier du repo puis lancer le service avec `APP_ENV_FILE` :
 
 ```bash
 sudo install -d -m 0755 /etc/cycle-analyst
-sudo cp /home/jeandard/Cycle-Analyst-App/cycle-analyst.env /etc/cycle-analyst/cycle-analyst.env
+sudo cp "$HOME/Cycle-Analyst-App/cycle-analyst.env" /etc/cycle-analyst/cycle-analyst.env
 sudo chown root:root /etc/cycle-analyst/cycle-analyst.env
 sudo chmod 0640 /etc/cycle-analyst/cycle-analyst.env
 ```
@@ -398,7 +522,7 @@ sudo chmod 0640 /etc/cycle-analyst/cycle-analyst.env
 | `APP_PHOTO_UPLOAD_RETRY_SECONDS` | `15` | Delai entre deux tentatives d'envoi des photos en attente. |
 | `APP_GPS_PORT` | `/dev/ttyACM0` | Port serie du GPS NMEA. |
 | `APP_GPS_BAUDRATE` | `9600` | Baudrate du GPS. |
-| `APP_PMTILES_PATH` | `/home/jeandard/Documents/tiles.pmtiles` | Fichier `.pmtiles` offline. |
+| `APP_PMTILES_PATH` | vide | Fichier `.pmtiles` offline, par exemple `/home/danieldilg/Documents/tiles.pmtiles`. |
 | `APP_SOLAR_PANEL_MAX_W` | `590` | Puissance max panneaux pour estimation solaire. |
 | `APP_SOLAR_LAT` | `48.8566` | Latitude par defaut pour estimation solaire. |
 | `APP_SOLAR_LON` | `2.3522` | Longitude par defaut pour estimation solaire. |
@@ -712,7 +836,7 @@ nginx, le navigateur, la camera ou l'upload photo/reseau se bloquent.
 Depuis le repo :
 
 ```bash
-cd /home/jeandard/Cycle-Analyst-App
+cd "$HOME/Cycle-Analyst-App"
 python3 scripts/setup_pi_services.py
 ```
 
@@ -723,10 +847,24 @@ services :
 python3 scripts/setup_pi_services.py --apply
 ```
 
-Specifier le nom local du vehicule si besoin :
+Par defaut, le script utilise :
+
+- le repo courant comme `WorkingDirectory`
+- l'utilisateur courant comme `User` et `Group`
+- le hostname courant pour nginx : `<hostname>.local <hostname>`
+
+Sur le Pi client `danieldilg@sc-vehicule-5`, lance donc simplement depuis
+`/home/danieldilg/Cycle-Analyst-App` :
 
 ```bash
-python3 scripts/setup_pi_services.py --apply --server-name "sc-vehicule-2.local sc-vehicule-2"
+python3 scripts/setup_pi_services.py --apply
+```
+
+Specifier le nom local du vehicule seulement si le hostname du Pi n'est pas
+celui voulu :
+
+```bash
+python3 scripts/setup_pi_services.py --apply --server-name "sc-vehicule-5.local sc-vehicule-5"
 ```
 
 Verifier :
@@ -773,14 +911,21 @@ sudo visudo -f /etc/sudoers.d/cycle-analyst
 Contenu :
 
 ```sudoers
-jeandard ALL=NOPASSWD: /bin/systemctl restart cycle-analyst.service
-jeandard ALL=NOPASSWD: /usr/bin/systemctl restart cycle-analyst.service
+<utilisateur> ALL=NOPASSWD: /bin/systemctl restart cycle-analyst.service
+<utilisateur> ALL=NOPASSWD: /usr/bin/systemctl restart cycle-analyst.service
+```
+
+Exemple pour le Pi client :
+
+```sudoers
+danieldilg ALL=NOPASSWD: /bin/systemctl restart cycle-analyst.service
+danieldilg ALL=NOPASSWD: /usr/bin/systemctl restart cycle-analyst.service
 ```
 
 Verifier :
 
 ```bash
-sudo -l -U jeandard
+sudo -l -U "$USER"
 ```
 
 ## 15. Configurer nginx pour l'URL locale
@@ -794,12 +939,12 @@ Creer le site :
 sudo nano /etc/nginx/sites-available/cycle-analyst
 ```
 
-Contenu pour le Pi 1 :
+Contenu pour le Pi courant :
 
 ```nginx
 server {
     listen 80;
-    server_name sc-vehicule-1.local sc-vehicule-1;
+    server_name sc-vehicule-5.local sc-vehicule-5;
 
     location / {
         proxy_pass http://127.0.0.1:5050;
@@ -831,13 +976,13 @@ curl http://127.0.0.1
 Tester depuis un autre appareil du meme reseau :
 
 ```bash
-curl http://sc-vehicule-1.local
+curl http://sc-vehicule-5.local
 ```
 
 Ou ouvrir :
 
 ```text
-http://sc-vehicule-1.local
+http://sc-vehicule-5.local
 ```
 
 ## 16. Verifier le mDNS `.local`
@@ -845,15 +990,15 @@ http://sc-vehicule-1.local
 Sur le Pi :
 
 ```bash
-avahi-resolve-host-name sc-vehicule-1.local
+avahi-resolve-host-name "$(hostname).local"
 hostname -I
 ```
 
 Depuis le Mac ou PC :
 
 ```bash
-ping sc-vehicule-1.local
-ssh jeandard@sc-vehicule-1.local
+ping sc-vehicule-5.local
+ssh danieldilg@sc-vehicule-5.local
 ```
 
 Important : certains hotspots telephone bloquent le multicast ou l'isolation
@@ -1015,13 +1160,13 @@ Ensuite dans VS Code :
 ## 19. Mise a jour du repo sur un Pi deja installe
 
 ```bash
-cd /home/jeandard/Cycle-Analyst-App
+cd "$HOME/Cycle-Analyst-App"
 git status
-git pull
+git pull --ff-only
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-sudo systemctl restart cycle-analyst.service
-sudo systemctl status cycle-analyst.service --no-pager
+sudo systemctl restart cycle-recorder.service cycle-photo.service cycle-analyst.service
+sudo systemctl status cycle-recorder.service cycle-photo.service cycle-analyst.service --no-pager
 ```
 
 Si tu modifies `cycle-analyst.env` :
@@ -1046,7 +1191,7 @@ embarquee.
 Si tu veux le lancer sur le meme repo :
 
 ```bash
-cd /home/jeandard/Cycle-Analyst-App
+cd "$HOME/Cycle-Analyst-App"
 source .venv/bin/activate
 MONITOR_USER=jean MONITOR_PASS=oklm python monitor_server/app.py
 ```
@@ -1153,10 +1298,10 @@ curl http://127.0.0.1:8080
 
 ## 21. Brancher un Pi vehicule au monitor
 
-Dans `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env` sur chaque Pi vehicule :
+Dans `$HOME/Cycle-Analyst-App/cycle-analyst.env` sur chaque Pi vehicule :
 
 ```ini
-MONITOR_DEVICE_ID=sc-vehicule-1
+MONITOR_DEVICE_ID=sc-vehicule-5
 MONITOR_URL=http://91.134.243.157:8080
 MONITOR_USER=jean
 MONITOR_PASS=oklm
@@ -1177,13 +1322,13 @@ La sync tourne toutes les 60 secondes quand `MONITOR_URL` est defini.
 - SSH OK
 - `avahi-daemon` actif
 - utilisateur dans les groupes `dialout`, `i2c`, `video`
-- repo clone dans `/home/jeandard/Cycle-Analyst-App`
-- cle SSH GitHub du Pi ajoutee dans GitHub ou comme Deploy Key
+- repo clone dans `/home/<utilisateur>/Cycle-Analyst-App`
+- acces GitHub OK : token HTTPS client ou cle SSH/deploy key
 - `.venv` cree
 - dependances Python installees
 - `cycle-analyst.env` present localement sur le Pi
 - `APP_VAR_DIR` pointe vers le `var/` du repo
-- `/home/jeandard/Documents/tiles.pmtiles` existe si la basemap offline est utilisee
+- `/home/<utilisateur>/Documents/tiles.pmtiles` existe si la basemap offline est utilisee
 - `MONITOR_DEVICE_ID` unique
 - `cycle-recorder.service` actif
 - `cycle-photo.service` actif
@@ -1340,26 +1485,27 @@ ssh-keygen -R cycle.local
 sudo apt update
 sudo apt upgrade -y
 sudo apt install -y git python3 python3-venv python3-pip nginx avahi-daemon curl i2c-tools
-sudo usermod -aG dialout,i2c,video jeandard
+sudo usermod -aG dialout,i2c,video "$USER"
 sudo raspi-config nonint do_i2c 0
 sudo reboot
 ```
 
 ```bash
-cd /home/jeandard
-git clone github:regenbox-team/Cycle-Analyst-App.git Cycle-Analyst-App
+git config --global credential.helper store
+cd "$HOME"
+git clone https://github.com/regenbox-team/Cycle-Analyst-App.git Cycle-Analyst-App
 cd Cycle-Analyst-App
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 mkdir -p var var/session_metrics var/live_photo var/pending_photos
-mkdir -p /home/jeandard/Documents
+mkdir -p "$HOME/Documents"
 ```
 
 Puis ajuster/creer :
 
-- `/home/jeandard/Cycle-Analyst-App/cycle-analyst.env` cree automatiquement par l'app ou copie depuis `cycle-analyst.env.example`
+- `$HOME/Cycle-Analyst-App/cycle-analyst.env` cree automatiquement par l'app ou copie depuis `cycle-analyst.env.example`
 - services et nginx via `python3 scripts/setup_pi_services.py --apply`
 - `/etc/systemd/system/cycle-recorder.service`
 - `/etc/systemd/system/cycle-photo.service`

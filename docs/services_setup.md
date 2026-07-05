@@ -19,7 +19,7 @@ captures in the split-service install.
 From the repository on the Raspberry Pi:
 
 ```bash
-cd /home/jeandard/Cycle-Analyst-App
+cd "$HOME/Cycle-Analyst-App"
 python3 scripts/setup_pi_services.py
 ```
 
@@ -34,10 +34,14 @@ python3 scripts/setup_pi_services.py --apply
 Common options:
 
 ```bash
-python3 scripts/setup_pi_services.py --apply --server-name "sc-vehicule-2.local sc-vehicule-2"
-python3 scripts/setup_pi_services.py --apply --repo /home/jeandard/Cycle-Analyst-App --user jeandard
+python3 scripts/setup_pi_services.py --apply --server-name "sc-vehicule-5.local sc-vehicule-5"
+python3 scripts/setup_pi_services.py --apply --repo "$HOME/Cycle-Analyst-App" --user "$USER"
 python3 scripts/setup_pi_services.py --apply --no-nginx
 ```
+
+By default the script uses the current repository path, current Linux user, and
+current hostname. On `danieldilg@sc-vehicule-5`, running it from
+`/home/danieldilg/Cycle-Analyst-App` is enough.
 
 ## Check recording
 
@@ -51,7 +55,7 @@ If `/start` says `Connection: Inactive`, check that the recorder is publishing
 fresh live snapshots:
 
 ```bash
-cd /home/jeandard/Cycle-Analyst-App
+cd "$HOME/Cycle-Analyst-App"
 grep -n "last_live_state_write_time" app/reader.py
 SID=$(cat var/current_session.txt 2>/dev/null)
 ls -lh "var/session_metrics/${SID}_session_metrics.json" 2>/dev/null
@@ -62,14 +66,14 @@ The `grep` must print a line, and the metrics file timestamp should be current
 when the Cycle Analyst is plugged in. If not, pull the latest code and restart:
 
 ```bash
-git pull
+git pull --ff-only
 sudo systemctl restart cycle-recorder.service cycle-photo.service cycle-analyst.service
 ```
 
 Watch that database rows keep increasing:
 
 ```bash
-cd /home/jeandard/Cycle-Analyst-App
+cd "$HOME/Cycle-Analyst-App"
 while true; do
   echo "===== $(date '+%F %T') ====="
   for db in var/ride_data*.db; do
@@ -95,7 +99,7 @@ For a data-first ride, temporarily disable the solar sensor and restart only
 the recorder:
 
 ```bash
-cd /home/jeandard/Cycle-Analyst-App
+cd "$HOME/Cycle-Analyst-App"
 cp cycle-analyst.env cycle-analyst.env.no-solar.$(date +%H%M%S)
 grep -q '^APP_SOLAR_SENSOR=' cycle-analyst.env \
   && sed -i 's/^APP_SOLAR_SENSOR=.*/APP_SOLAR_SENSOR=/' cycle-analyst.env \
@@ -117,7 +121,7 @@ sudo tail -f /var/log/nginx/error.log
 If the Pi is under pressure during a ride, keep recording and disable network upload/camera:
 
 ```bash
-cd /home/jeandard/Cycle-Analyst-App
+cd "$HOME/Cycle-Analyst-App"
 cp cycle-analyst.env cycle-analyst.env.survie.$(date +%H%M%S)
 sed -i 's/^MONITOR_URL=.*/MONITOR_URL=/' cycle-analyst.env
 sed -i 's/^APP_CAMERA_COMMAND=.*/APP_CAMERA_COMMAND=/' cycle-analyst.env

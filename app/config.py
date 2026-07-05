@@ -1,5 +1,6 @@
 from threading import Lock
 import os
+from pathlib import Path
 
 from app.env_file import load_env_file
 
@@ -44,8 +45,8 @@ GPS_SERIAL_PORT_DEFAULT = os.getenv("APP_GPS_PORT", "/dev/ttyACM0")
 GPS_BAUDRATE = int(os.getenv("APP_GPS_BAUDRATE", "9600"))
 
 # --- PMTiles (offline basemap) ---
-# Path to a .pmtiles file on disk, e.g., western-europe.pmtiles under /home/pi/Documents
-PMTILES_PATH = os.getenv("APP_PMTILES_PATH", "/home/jeandard/Documents/western-europe.pmtiles")
+# Path to a .pmtiles file on disk.
+PMTILES_PATH = os.getenv("APP_PMTILES_PATH") or str(Path.home() / "Documents" / "tiles.pmtiles")
 
 # --- Test/Vehicle modes ---
 test_mode_lock = Lock()

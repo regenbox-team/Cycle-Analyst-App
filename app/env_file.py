@@ -108,10 +108,10 @@ SETTINGS: tuple[EnvSetting, ...] = (
     EnvSetting(
         "APP_PMTILES_PATH",
         "PMTiles path",
-        "/home/jeandard/Documents/tiles.pmtiles",
+        str(Path.home() / "Documents" / "tiles.pmtiles"),
         "Fichier .pmtiles offline servi par /tiles/basemap.pmtiles.",
         "GPS and map",
-        detail="Chemin absolu recommande sur le Pi, par exemple /home/jeandard/Documents/tiles.pmtiles. Ce champ reste libre parce que le nom et la zone de carte changent selon le vehicule.",
+        detail="Chemin absolu recommande sur le Pi, par exemple /home/danieldilg/Documents/tiles.pmtiles. Ce champ reste libre parce que le nom et la zone de carte changent selon le vehicule.",
     ),
     EnvSetting(
         "APP_SOLAR_PANEL_MAX_W",
@@ -266,10 +266,10 @@ SETTINGS: tuple[EnvSetting, ...] = (
     EnvSetting(
         "MONITOR_DEVICE_ID",
         "Vehicle name",
-        "sc-vehicule-1",
+        socket.gethostname(),
         "Nom libre et stable du vehicule envoye au monitor_server.",
         "Monitor sync",
-        detail="Champ libre: mets le nom exact que tu veux voir dans la colonne Device du monitor, par exemple sc-vehicule-1 ou solar-bike-a. Le monitor s'en sert pour separer les heartbeats, photos et uploads.",
+        detail="Champ libre: mets le nom exact que tu veux voir dans la colonne Device du monitor. Si la variable reste vide, l'app utilise automatiquement le hostname du Pi.",
     ),
     EnvSetting(
         "MONITOR_URL",
