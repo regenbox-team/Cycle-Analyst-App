@@ -127,7 +127,48 @@
         color: #6f665b;
         z-index: 400;
       }
-      .table-card { margin-top: 12px; }
+      .table-card {
+        margin-top: 12px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      .table-card table { min-width: max-content; }
+      .device-color {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        overflow: hidden;
+        cursor: pointer;
+        background: transparent;
+      }
+      .device-color::-webkit-color-swatch-wrapper { padding: 0; }
+      .device-color::-webkit-color-swatch {
+        border: 2px solid #fff;
+        border-radius: 50%;
+        box-shadow: 0 0 0 1px #cfc7bb;
+      }
+      .device-color::-moz-color-swatch {
+        border: 2px solid #fff;
+        border-radius: 50%;
+        box-shadow: 0 0 0 1px #cfc7bb;
+      }
+      .trace-popup-list {
+        display: grid;
+        gap: 8px;
+        max-height: 260px;
+        overflow-y: auto;
+        min-width: 220px;
+      }
+      .trace-popup-card {
+        padding: 8px;
+        border-left: 4px solid var(--trace-color);
+        border-radius: 6px;
+        background: #faf7f0;
+      }
+      .trace-popup-title { font-weight: 700; margin-bottom: 3px; }
+      .trace-popup-meta { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
       .link { color: #0f766e; text-decoration: none; font-weight: 600; }
       .link:hover { text-decoration: underline; }
       .table-compact th, .table-compact td { padding: 6px 8px; }
@@ -473,6 +514,7 @@
           <thead>
             <tr>
               <th>Device</th>
+              <th>Color</th>
               <th>Status</th>
               <th>Last Seen</th>
               <th>Last Session</th>
@@ -485,6 +527,16 @@
             {% for d in devices %}
             <tr>
               <td>{{ d["device_id"] }}</td>
+              <td>
+                <input
+                  class="device-color"
+                  type="color"
+                  value="{{ d['map_color'] }}"
+                  data-device-id="{{ d['device_id'] }}"
+                  aria-label="Map color for {{ d['device_id'] }}"
+                  title="Choose the trace color"
+                >
+              </td>
               <td>
                 <span class="status-dot {{ "status-online" if d["active"] else "status-offline" }}" title="{{ "online" if d["active"] else "offline" }}"></span>
               </td>
@@ -577,7 +629,7 @@
 
       <h2>Recent Sessions</h2>
       <div class="card">
-        <div class="pill">Session starts</div>
+        <div class="pill">All GPX traces</div>
         <div class="map-wrap">
           <div id="monitor-map" class="map" role="img" aria-label="Recent session locations"></div>
         </div>
@@ -764,47 +816,134 @@
         if (event.key === "Escape" && resolveDialog) closeMonitorDialog(false);
       });
 
-      const sessionPoints = {{ session_points | tojson }};
-      const deviceLocations = {{ device_locations | tojson }};
+      const sessionTraces = {{ session_traces | tojson }};
+      const traceLayersByDevice = new Map();
       const mapEl = document.getElementById("monitor-map");
       if (mapEl && typeof L !== "undefined") {
-        const map = L.map(mapEl, { zoomControl: false }).setView([20, 0], 2);
+        const map = L.map(mapEl, { zoomControl: false, preferCanvas: true }).setView([20, 0], 2);
         L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 19,
           attribution: "© OpenStreetMap contributors"
         }).addTo(map);
         const bounds = [];
-        let markerCount = 0;
-        sessionPoints.forEach((p) => {
-          const lat = Number(p.lat);
-          const lon = Number(p.lon);
-          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-          const tooltip = p.start_ts_fmt || p.start_ts || "Session date unavailable";
-          L.circleMarker([lat, lon], {
+        const traceEntries = [];
+        let selectedKeys = new Set();
+        const traceKey = (trace) => `${trace.device_id}\u0000${trace.session_id}\u0000${trace.mode}`;
+        const distanceToSegment = (point, start, end) => {
+          const dx = end.x - start.x;
+          const dy = end.y - start.y;
+          if (!dx && !dy) return point.distanceTo(start);
+          const ratio = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)));
+          return point.distanceTo(L.point(start.x + ratio * dx, start.y + ratio * dy));
+        };
+        const distanceToTrace = (latlng, trace) => {
+          const point = map.latLngToLayerPoint(latlng);
+          let closest = Infinity;
+          for (let index = 1; index < trace.points.length; index += 1) {
+            const start = map.latLngToLayerPoint(trace.points[index - 1]);
+            const end = map.latLngToLayerPoint(trace.points[index]);
+            closest = Math.min(closest, distanceToSegment(point, start, end));
+          }
+          return closest;
+        };
+        const clearTraceSelection = () => {
+          selectedKeys = new Set();
+          traceEntries.forEach(({ trace, layer }) => layer.setStyle({
+            color: trace.color,
+            weight: 3,
+            opacity: 0.72
+          }));
+          map.closePopup();
+        };
+        const showTraceSelection = (latlng) => {
+          const matches = traceEntries
+            .map((entry) => ({ ...entry, distance: distanceToTrace(latlng, entry.trace) }))
+            .filter((entry) => entry.distance <= 12)
+            .sort((a, b) => a.distance - b.distance);
+          if (!matches.length) {
+            clearTraceSelection();
+            return;
+          }
+          const nextKeys = new Set(matches.map(({ trace }) => traceKey(trace)));
+          if (nextKeys.size === selectedKeys.size && [...nextKeys].every((key) => selectedKeys.has(key))) {
+            clearTraceSelection();
+            return;
+          }
+          selectedKeys = nextKeys;
+          traceEntries.forEach(({ trace, layer }) => layer.setStyle({
+            color: trace.color,
+            weight: selectedKeys.has(traceKey(trace)) ? 6 : 3,
+            opacity: selectedKeys.has(traceKey(trace)) ? 1 : 0.3
+          }));
+
+          const list = document.createElement("div");
+          list.className = "trace-popup-list";
+          matches.forEach(({ trace }) => {
+            const card = document.createElement("div");
+            card.className = "trace-popup-card";
+            card.style.setProperty("--trace-color", trace.color);
+            const title = document.createElement("div");
+            title.className = "trace-popup-title";
+            title.textContent = trace.session_id;
+            const meta = document.createElement("div");
+            meta.className = "trace-popup-meta";
+            meta.textContent = `${trace.device_id}${trace.start_ts_fmt ? ` · ${trace.start_ts_fmt}` : ""}`;
+            const link = document.createElement("a");
+            link.className = "action-link primary";
+            link.href = trace.summary_url;
+            link.textContent = "Session summary";
+            card.append(title, meta, link);
+            list.appendChild(card);
+          });
+          L.popup({ maxWidth: 360, closeButton: true })
+            .setLatLng(latlng)
+            .setContent(list)
+            .openOn(map);
+        };
+
+        sessionTraces.forEach((trace) => {
+          if (!Array.isArray(trace.points) || trace.points.length < 2) return;
+          const points = trace.points
+            .map((point) => [Number(point[0]), Number(point[1])])
+            .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
+          if (points.length < 2) return;
+          trace.points = points;
+          const layer = L.polyline(points, {
+            color: trace.color,
+            weight: 3,
+            opacity: 0.72,
+            smoothFactor: 1.5
+          }).addTo(map);
+          layer.on("click", (event) => {
+            L.DomEvent.stopPropagation(event.originalEvent);
+            showTraceSelection(event.latlng);
+          });
+          traceEntries.push({ trace, layer });
+          const deviceLayers = traceLayersByDevice.get(trace.device_id) || [];
+          deviceLayers.push({ trace, layer });
+          traceLayersByDevice.set(trace.device_id, deviceLayers);
+
+          const endpointStyle = {
+            radius: 4,
+            color: "#fff",
+            weight: 2,
+            fillColor: trace.color,
+            fillOpacity: 1
+          };
+          L.circleMarker(points[0], endpointStyle).addTo(map).bindTooltip(`Start · ${trace.session_id}`);
+          L.circleMarker(points[points.length - 1], {
+            ...endpointStyle,
             radius: 5,
-            color: "#0d9488",
-            weight: 2,
-            fillColor: "#0d9488",
-            fillOpacity: 0.8
-          }).addTo(map).bindTooltip(tooltip, { direction: "top" });
-          bounds.push([lat, lon]);
-          markerCount += 1;
+            color: trace.color,
+            fillColor: "#fff"
+          }).addTo(map).bindTooltip(`Finish · ${trace.session_id}`);
+          points.forEach((point) => bounds.push(point));
         });
-        deviceLocations.forEach((p) => {
-          const lat = Number(p.lat);
-          const lon = Number(p.lon);
-          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-          L.circleMarker([lat, lon], {
-            radius: 7,
-            color: "#16a34a",
-            weight: 2,
-            fillColor: "#16a34a",
-            fillOpacity: 0.9
-          }).addTo(map).bindTooltip(p.device_id || "device");
-          bounds.push([lat, lon]);
-          markerCount += 1;
+        map.on("click", clearTraceSelection);
+        map.on("popupclose", () => {
+          if (selectedKeys.size) clearTraceSelection();
         });
-        if (markerCount) {
+        if (traceEntries.length) {
           map.fitBounds(bounds, { padding: [20, 20] });
         } else {
           const label = document.createElement("div");
@@ -813,6 +952,34 @@
           mapEl.appendChild(label);
         }
       }
+
+      document.querySelectorAll(".device-color").forEach((input) => {
+        input.dataset.savedColor = input.value;
+        input.addEventListener("change", async () => {
+          const deviceId = input.dataset.deviceId || "";
+          const color = input.value;
+          input.disabled = true;
+          try {
+            const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/map_color`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ color })
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || "Unable to save the color.");
+            input.dataset.savedColor = color;
+            (traceLayersByDevice.get(deviceId) || []).forEach(({ trace, layer }) => {
+              trace.color = color;
+              layer.setStyle({ color });
+            });
+          } catch (error) {
+            input.value = input.dataset.savedColor;
+            await showMonitorMessage(error.message || "Unable to save the color.", "Map color");
+          } finally {
+            input.disabled = false;
+          }
+        });
+      });
 
       const sortButtons = document.querySelectorAll(".sort-btn");
       const tbody = document.getElementById("sessions-body");

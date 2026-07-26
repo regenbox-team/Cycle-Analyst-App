@@ -416,6 +416,72 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertEqual(response.headers["Content-Encoding"], "gzip")
         self.assertIn("<title>Cycle Monitor</title>", gzip.decompress(response.data).decode("utf-8"))
 
+    def test_uploaded_session_caches_a_small_map_trace(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        samples = [
+            dict(
+                self.sample(index),
+                timestamp=f"2026-05-07 10:{index // 60:02d}:{index % 60:02d}",
+                gps_lat=48.85 + index * 0.00001,
+                gps_lon=2.30 + index * 0.00001,
+            )
+            for index in range(500)
+        ]
+        response = self.monitor_app.app.test_client().post(
+            "/api/upload_session",
+            json={
+                "device_id": "sc-vehicule-1",
+                "session_id": "trace-test",
+                "mode": "default",
+                "telemetry_samples": samples,
+            },
+            headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with sqlite3.connect(self.db_path) as conn:
+            trace = json.loads(
+                conn.execute(
+                    "SELECT trace_json FROM sessions WHERE session_id = ?",
+                    ("trace-test",),
+                ).fetchone()[0]
+            )
+        self.assertGreaterEqual(len(trace), 2)
+        self.assertLessEqual(len(trace), self.monitor_app.SESSION_TRACE_MAX_POINTS)
+        self.assertEqual(trace[0], [48.85, 2.3])
+        self.assertEqual(trace[-1], [48.85499, 2.30499])
+
+    def test_device_map_color_can_be_customized(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("INSERT INTO devices (device_id) VALUES (?)", ("sc-vehicule-1",))
+            conn.commit()
+
+        client = self.monitor_app.app.test_client()
+        response = client.patch(
+            "/api/devices/sc-vehicule-1/map_color",
+            json={"color": "#123abc"},
+            headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+        )
+        invalid = client.patch(
+            "/api/devices/sc-vehicule-1/map_color",
+            json={"color": "red"},
+            headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(invalid.status_code, 400)
+        with sqlite3.connect(self.db_path) as conn:
+            stored = conn.execute(
+                "SELECT map_color FROM devices WHERE device_id = ?",
+                ("sc-vehicule-1",),
+            ).fetchone()[0]
+        self.assertEqual(stored, "#123abc")
+
     def test_compact_db_endpoint_returns_size_stats(self):
         if not hasattr(self.monitor_app.app, "test_client"):
             self.skipTest("Flask test client is not available in this test environment.")

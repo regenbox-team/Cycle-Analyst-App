@@ -1,6 +1,7 @@
 from __future__ import annotations
 import base64
 import gzip
+import hashlib
 import json
 import math
 import os
@@ -77,6 +78,7 @@ HEARTBEAT_ACTIVE_WINDOW_SEC = 120
 DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
 DEFAULT_UPLOAD_CHUNK_MAX_BYTES = 256 * 1024
 DEFAULT_RESPONSE_GZIP_MIN_BYTES = 1024
+SESSION_TRACE_MAX_POINTS = 260
 SUNTRIP_ANALYSIS_TRACE_MAX_POINTS = 1400
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS = 12000
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM = 15.0
@@ -248,7 +250,8 @@ def _init_db() -> None:
                 last_gps_lat REAL,
                 last_gps_lon REAL,
                 last_gps_ts TEXT,
-                gps_available INTEGER
+                gps_available INTEGER,
+                map_color TEXT
             )
             """
         )
@@ -271,6 +274,7 @@ def _init_db() -> None:
                 user_ids_json TEXT,
                 metrics_json TEXT,
                 suntrip_stage INTEGER DEFAULT 0,
+                trace_json TEXT,
                 uploaded_at TEXT,
                 UNIQUE(device_id, session_id, mode)
             )
@@ -423,6 +427,8 @@ def _migrate_db() -> None:
             conn.execute("ALTER TABLE devices ADD COLUMN current_user_id TEXT")
         if "current_user_initials" not in device_columns:
             conn.execute("ALTER TABLE devices ADD COLUMN current_user_initials TEXT")
+        if "map_color" not in device_columns:
+            conn.execute("ALTER TABLE devices ADD COLUMN map_color TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -449,6 +455,7 @@ def _migrate_db() -> None:
             "solar_enabled": "INTEGER DEFAULT 1",
             "user_ids_json": "TEXT",
             "suntrip_stage": "INTEGER DEFAULT 0",
+            "trace_json": "TEXT",
         }
         for name, col_type in missing.items():
             if name not in columns:
@@ -1090,6 +1097,123 @@ def _sanitize_upload_samples(data: dict[str, Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in samples if isinstance(row, dict)]
 
 
+def _point_segment_distance_sq(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> float:
+    px, py = point
+    x1, y1 = start
+    x2, y2 = end
+    dx = x2 - x1
+    dy = y2 - y1
+    if dx == 0 and dy == 0:
+        return (px - x1) ** 2 + (py - y1) ** 2
+    ratio = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)))
+    x = x1 + ratio * dx
+    y = y1 + ratio * dy
+    return (px - x) ** 2 + (py - y) ** 2
+
+
+def _douglas_peucker(points: list[tuple[float, float]], tolerance: float) -> list[tuple[float, float]]:
+    if len(points) <= 2:
+        return points
+    keep = {0, len(points) - 1}
+    stack = [(0, len(points) - 1)]
+    tolerance_sq = tolerance * tolerance
+    while stack:
+        start_index, end_index = stack.pop()
+        farthest_index = -1
+        farthest_distance = tolerance_sq
+        for index in range(start_index + 1, end_index):
+            distance = _point_segment_distance_sq(points[index], points[start_index], points[end_index])
+            if distance > farthest_distance:
+                farthest_distance = distance
+                farthest_index = index
+        if farthest_index >= 0:
+            keep.add(farthest_index)
+            stack.append((start_index, farthest_index))
+            stack.append((farthest_index, end_index))
+    return [point for index, point in enumerate(points) if index in keep]
+
+
+def _simplified_session_trace(samples: list[dict[str, Any]]) -> list[list[float]]:
+    points: list[tuple[float, float]] = []
+    for sample in filter_plausible_gps_samples(samples):
+        gps = _valid_lat_lon(sample.get("gps_lat"), sample.get("gps_lon"))
+        if gps is not None and (not points or gps != points[-1]):
+            points.append(gps)
+    if len(points) <= 2:
+        return [[round(lat, 6), round(lon, 6)] for lat, lon in points]
+
+    # Increase the tolerance until the cached geometry is small enough for a fast
+    # overview map. Endpoints are always retained.
+    tolerance = 0.00001
+    simplified = points
+    while len(simplified) > SESSION_TRACE_MAX_POINTS and tolerance <= 0.02:
+        simplified = _douglas_peucker(points, tolerance)
+        tolerance *= 1.8
+    if len(simplified) > SESSION_TRACE_MAX_POINTS:
+        step = (len(simplified) - 1) / (SESSION_TRACE_MAX_POINTS - 1)
+        simplified = [simplified[round(index * step)] for index in range(SESSION_TRACE_MAX_POINTS)]
+    return [[round(lat, 6), round(lon, 6)] for lat, lon in simplified]
+
+
+def _store_session_trace(
+    conn: sqlite3.Connection,
+    device_id: str,
+    session_id: str,
+    mode: str,
+    samples: list[dict[str, Any]],
+) -> None:
+    trace = _simplified_session_trace(samples)
+    conn.execute(
+        """
+        UPDATE sessions SET trace_json = ?
+        WHERE device_id = ? AND session_id = ? AND mode = ?
+        """,
+        (json.dumps(trace, separators=(",", ":")), device_id, session_id, mode),
+    )
+
+
+def _backfill_session_traces(conn: sqlite3.Connection) -> int:
+    missing = conn.execute(
+        """
+        SELECT device_id, session_id, mode
+        FROM sessions
+        WHERE trace_json IS NULL
+        """
+    ).fetchall()
+    for session in missing:
+        samples = conn.execute(
+            f"""
+            SELECT gps_lat, gps_lon, timestamp, gps_speed_kph, gps_fix, gps_hdop
+            FROM {TELEMETRY_TABLE}
+            WHERE device_id = ? AND session_id = ? AND mode = ?
+              AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
+            ORDER BY id
+            """,
+            (session["device_id"], session["session_id"], session["mode"]),
+        ).fetchall()
+        _store_session_trace(
+            conn,
+            session["device_id"],
+            session["session_id"],
+            session["mode"],
+            [dict(row) for row in samples],
+        )
+    return len(missing)
+
+
+def _default_device_color(device_id: str) -> str:
+    normalized = (device_id or "").strip().lower()
+    if normalized in {"sc-vehicule-1", "sc-vehicle-1", "supercycle-1"}:
+        return "#ef4444"
+    palette = ("#2563eb", "#16a34a", "#f59e0b", "#9333ea", "#0891b2", "#db2777", "#ea580c")
+    digest = hashlib.sha256(normalized.encode("utf-8")).digest()
+    return palette[int.from_bytes(digest[:2], "big") % len(palette)]
+
+
 def _payload_solar_enabled(data: dict[str, Any]) -> int:
     payload_metrics = data.get("metrics") if isinstance(data.get("metrics"), dict) else {}
     return 1 if data.get("solar_enabled", payload_metrics.get("solar_enabled", True)) else 0
@@ -1212,6 +1336,7 @@ def _insert_uploaded_session_summary(
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         ),
     )
+    _store_session_trace(conn, device_id, session_id, mode, samples)
     return {"rows_count": rows_count, "distance_km": distance_km}
 
 
@@ -2787,7 +2912,7 @@ def create_app() -> Flask:
         with _get_db() as conn:
             device_rows = conn.execute(
                 """
-                SELECT device_id, last_seen, last_session, session_active, mode, test_mode,
+                SELECT device_id, last_seen, last_session, session_active, mode, test_mode, map_color,
                        solar_enabled, last_gps_lat, last_gps_lon, last_gps_ts, gps_available
                 FROM devices
                 ORDER BY last_seen DESC
@@ -2858,57 +2983,53 @@ def create_app() -> Flask:
                 LIMIT 1
                 """
             ).fetchone()
-            session_points = []
-            for s in sessions:
-                point = conn.execute(
-                    f"""
-                    SELECT gps_lat, gps_lon
-                    FROM {TELEMETRY_TABLE}
-                    WHERE device_id = ? AND session_id = ? AND mode = ?
-                      AND gps_lat IS NOT NULL AND gps_lon IS NOT NULL
-                      AND gps_lat != 0 AND gps_lon != 0
-                    ORDER BY id ASC
-                    LIMIT 1
-                    """,
-                    (s["device_id"], s["session_id"], s["mode"]),
-                ).fetchone()
-                if not point:
-                    continue
-                lat = float(point["gps_lat"])
-                lon = float(point["gps_lon"])
-                x, y = _project_point(lat, lon)
-                session_points.append(
-                    {
-                        "lat": lat,
-                        "lon": lon,
-                        "x": x,
-                        "y": y,
-                        "device_id": s["device_id"],
-                        "session_id": s["session_id"],
-                        "start_ts": s["start_ts"],
-                        "start_ts_fmt": _format_dt(s["start_ts"]),
-                    }
-                )
+            _backfill_session_traces(conn)
+            trace_rows = conn.execute(
+                """
+                SELECT device_id, session_id, mode, start_ts, trace_json
+                FROM sessions
+                WHERE trace_json IS NOT NULL AND trace_json != '[]'
+                ORDER BY start_ts DESC
+                """
+            ).fetchall()
+            conn.commit()
         devices = []
-        device_locations = []
+        device_colors = {}
         for d in device_rows:
             gps_available = bool(d["gps_available"])
-            lat = d["last_gps_lat"]
-            lon = d["last_gps_lon"]
-            if gps_available and lat is not None and lon is not None and lat != 0 and lon != 0:
-                device_locations.append(
-                    {
-                        "device_id": d["device_id"],
-                        "lat": float(lat),
-                        "lon": float(lon),
-                    }
-                )
+            map_color = d["map_color"] or _default_device_color(d["device_id"])
+            device_colors[d["device_id"]] = map_color
             devices.append(
                 dict(d)
                 | {
                     "active": _is_active(d["last_seen"]),
                     "last_seen_ago": _format_ago(d["last_seen"], now_local),
                     "gps_available": gps_available,
+                    "map_color": map_color,
+                }
+            )
+        session_traces = []
+        for row in trace_rows:
+            try:
+                points = json.loads(row["trace_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(points, list) or not points:
+                continue
+            session_traces.append(
+                {
+                    "device_id": row["device_id"],
+                    "session_id": row["session_id"],
+                    "mode": row["mode"],
+                    "start_ts_fmt": _format_dt(row["start_ts"]),
+                    "color": device_colors.get(row["device_id"], _default_device_color(row["device_id"])),
+                    "points": points,
+                    "summary_url": url_for(
+                        "session_map",
+                        device_id=row["device_id"],
+                        session_id=row["session_id"],
+                        mode=row["mode"],
+                    ),
                 }
             )
         def _session_view_payload(s):
@@ -2957,7 +3078,7 @@ def create_app() -> Flask:
             "index.html",
             devices=devices,
             sessions=sessions,
-            session_points=session_points,
+            session_traces=session_traces,
             daily_last_30=daily_last_30,
             daily_all=daily_all,
             total_distance_30=total_distance_30,
@@ -2967,8 +3088,24 @@ def create_app() -> Flask:
             avg_speed=avg_speed,
             latest_photo=latest_photo_payload,
             now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            device_locations=device_locations,
         )
+
+    @app.route("/api/devices/<path:device_id>/map_color", methods=["PATCH"])
+    @_require_auth
+    def update_device_map_color(device_id: str):
+        data = request.get_json(silent=True) or {}
+        color = str(data.get("color") or "").strip().lower()
+        if len(color) != 7 or color[0] != "#" or any(ch not in "0123456789abcdef" for ch in color[1:]):
+            return jsonify({"error": "invalid color; expected #rrggbb"}), 400
+        with _get_db() as conn:
+            cursor = conn.execute(
+                "UPDATE devices SET map_color = ? WHERE device_id = ?",
+                (color, device_id),
+            )
+            conn.commit()
+        if cursor.rowcount == 0:
+            return jsonify({"error": "device not found"}), 404
+        return jsonify({"status": "ok", "device_id": device_id, "color": color})
 
     @app.route("/api/health")
     @_require_auth
