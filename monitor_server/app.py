@@ -78,7 +78,8 @@ HEARTBEAT_ACTIVE_WINDOW_SEC = 120
 DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
 DEFAULT_UPLOAD_CHUNK_MAX_BYTES = 256 * 1024
 DEFAULT_RESPONSE_GZIP_MIN_BYTES = 1024
-SESSION_TRACE_MAX_POINTS = 260
+SESSION_TRACE_CACHE_VERSION = 2
+SESSION_TRACE_MAX_POINTS = 2500
 SUNTRIP_ANALYSIS_TRACE_MAX_POINTS = 1400
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS = 12000
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM = 15.0
@@ -275,6 +276,7 @@ def _init_db() -> None:
                 metrics_json TEXT,
                 suntrip_stage INTEGER DEFAULT 0,
                 trace_json TEXT,
+                trace_version INTEGER,
                 uploaded_at TEXT,
                 UNIQUE(device_id, session_id, mode)
             )
@@ -456,6 +458,7 @@ def _migrate_db() -> None:
             "user_ids_json": "TEXT",
             "suntrip_stage": "INTEGER DEFAULT 0",
             "trace_json": "TEXT",
+            "trace_version": "INTEGER",
         }
         for name, col_type in missing.items():
             if name not in columns:
@@ -1148,7 +1151,7 @@ def _simplified_session_trace(samples: list[dict[str, Any]]) -> list[list[float]
 
     # Increase the tolerance until the cached geometry is small enough for a fast
     # overview map. Endpoints are always retained.
-    tolerance = 0.00001
+    tolerance = 0.000002
     simplified = points
     while len(simplified) > SESSION_TRACE_MAX_POINTS and tolerance <= 0.02:
         simplified = _douglas_peucker(points, tolerance)
@@ -1169,10 +1172,16 @@ def _store_session_trace(
     trace = _simplified_session_trace(samples)
     conn.execute(
         """
-        UPDATE sessions SET trace_json = ?
+        UPDATE sessions SET trace_json = ?, trace_version = ?
         WHERE device_id = ? AND session_id = ? AND mode = ?
         """,
-        (json.dumps(trace, separators=(",", ":")), device_id, session_id, mode),
+        (
+            json.dumps(trace, separators=(",", ":")),
+            SESSION_TRACE_CACHE_VERSION,
+            device_id,
+            session_id,
+            mode,
+        ),
     )
 
 
@@ -1181,8 +1190,9 @@ def _backfill_session_traces(conn: sqlite3.Connection) -> int:
         """
         SELECT device_id, session_id, mode
         FROM sessions
-        WHERE trace_json IS NULL
-        """
+        WHERE trace_json IS NULL OR trace_version IS NULL OR trace_version < ?
+        """,
+        (SESSION_TRACE_CACHE_VERSION,),
     ).fetchall()
     for session in missing:
         samples = conn.execute(

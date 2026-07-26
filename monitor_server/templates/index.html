@@ -820,7 +820,12 @@
       const traceLayersByDevice = new Map();
       const mapEl = document.getElementById("monitor-map");
       if (mapEl && typeof L !== "undefined") {
-        const map = L.map(mapEl, { zoomControl: false, preferCanvas: true }).setView([20, 0], 2);
+        const traceRenderer = L.canvas({ padding: 0.5, tolerance: 8 });
+        const map = L.map(mapEl, {
+          zoomControl: false,
+          preferCanvas: true,
+          renderer: traceRenderer
+        }).setView([20, 0], 2);
         L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 19,
           attribution: "© OpenStreetMap contributors"
@@ -912,10 +917,12 @@
             color: trace.color,
             weight: 3,
             opacity: 0.72,
-            smoothFactor: 1.5
+            bubblingMouseEvents: false,
+            // The server geometry is already simplified and cached. Asking
+            // Leaflet to simplify it again hides bends at low zoom levels.
+            smoothFactor: 0
           }).addTo(map);
           layer.on("click", (event) => {
-            L.DomEvent.stopPropagation(event.originalEvent);
             showTraceSelection(event.latlng);
           });
           traceEntries.push({ trace, layer });
