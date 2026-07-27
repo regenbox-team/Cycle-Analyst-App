@@ -537,7 +537,7 @@
         <div>
           <h1>Travel Analysis{% if project %} · {{ project.name }}{% endif %}</h1>
           <div class="muted">
-            {% if project %}{{ start_date }} to {{ end_date }} · {{ stage_count }} included sessions{% else %}No travel project yet{% endif %}
+            {% if project %}{{ stage_count }} included sessions{% else %}No travel project yet{% endif %}
           </div>
         </div>
         <div class="nav-actions">
@@ -558,11 +558,7 @@
             </option>
             {% endfor %}
           </select>
-          <label for="start">Start</label>
-          <input id="start" name="start" type="date" value="{{ start_date }}">
-          <label for="end">End</label>
-          <input id="end" name="end" type="date" value="{{ end_date }}">
-          <button class="btn btn-primary" type="submit">Update</button>
+          <button class="btn btn-primary" type="submit">Open</button>
           {% if project %}<span class="badge">{{ vehicles|length }} vehicle{% if vehicles|length != 1 %}s{% endif %}</span>{% endif %}
         </form>
       </div>

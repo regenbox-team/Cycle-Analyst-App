@@ -2080,9 +2080,14 @@ def _save_persistent_travel_analysis_cache(
         conn.execute(
             """
             DELETE FROM travel_analysis_cache
-            WHERE project_id = ? AND dataset_signature != ?
+            WHERE project_id = ?
+              AND NOT (
+                  dataset_signature = ?
+                  AND start_date = ?
+                  AND end_date = ?
+              )
             """,
-            (project_id, dataset_signature),
+            (project_id, dataset_signature, start_date, end_date),
         )
         conn.commit()
 
@@ -4502,8 +4507,6 @@ def create_app() -> Flask:
                     "suntrip_analysis.html",
                     projects=[],
                     project=None,
-                    start_date="",
-                    end_date="",
                     vehicles=[],
                     candidates=[],
                     columns=[],
@@ -4520,20 +4523,12 @@ def create_app() -> Flask:
                     trace_detailed_max_km=SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM,
                     trace_detailed_max_minutes=SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_MINUTES,
                 )
-            default_start = str(project["first_session"] or SUNTRIP_ANALYSIS_START_DATE)[:10]
-            default_end = str(project["last_session"] or default_start)[:10]
             dataset_signature = _travel_project_dataset_signature(conn, project["id"])
 
-        start_date = _parse_date_param(request.args.get("start"), default_start)
-        end_date = _parse_date_param(request.args.get("end"), default_end)
-        if end_date < start_date:
-            start_date, end_date = end_date, start_date
         cache_key = (
             "travel_analysis",
             project["id"],
             dataset_signature,
-            start_date.isoformat(),
-            end_date.isoformat(),
         )
         payload = _TRAVEL_ANALYSIS_CACHE.get(cache_key)
         if payload is None:
@@ -4542,8 +4537,8 @@ def create_app() -> Flask:
                     conn,
                     project["id"],
                     dataset_signature,
-                    start_date.isoformat(),
-                    end_date.isoformat(),
+                    "all",
+                    "all",
                 )
             if payload is not None:
                 _TRAVEL_ANALYSIS_CACHE[cache_key] = payload
@@ -4570,7 +4565,7 @@ def create_app() -> Flask:
                 for row in rows:
                     vehicle = _analysis_vehicle_for_device(row["device_id"])
                     day = _session_day(row["start_ts"], row["session_id"])
-                    if not day or day < start_date or day > end_date:
+                    if not day:
                         continue
                     candidate = dict(row) | {
                         "day": day,
@@ -4743,8 +4738,8 @@ def create_app() -> Flask:
             _save_persistent_travel_analysis_cache(
                 project["id"],
                 dataset_signature,
-                start_date.isoformat(),
-                end_date.isoformat(),
+                "all",
+                "all",
                 payload,
             )
 
@@ -4752,8 +4747,6 @@ def create_app() -> Flask:
             "suntrip_analysis.html",
             projects=[dict(row) for row in projects],
             project=dict(project),
-            start_date=start_date.isoformat(),
-            end_date=end_date.isoformat(),
             **payload,
         )
 
