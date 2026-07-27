@@ -274,6 +274,19 @@ def _init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS travel_analysis_cache (
+                project_id INTEGER NOT NULL,
+                dataset_signature TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                payload_blob BLOB NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (project_id, dataset_signature, start_date, end_date)
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 device_id TEXT,
@@ -491,6 +504,19 @@ def _migrate_db() -> None:
                 slug TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS travel_analysis_cache (
+                project_id INTEGER NOT NULL,
+                dataset_signature TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                payload_blob BLOB NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (project_id, dataset_signature, start_date, end_date)
             )
             """
         )
@@ -1994,6 +2020,71 @@ def _travel_project_dataset_signature(conn: sqlite3.Connection, project_id: int)
             json.dumps(list(row), ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
         )
     return digest.hexdigest()
+
+
+def _load_persistent_travel_analysis_cache(
+    conn: sqlite3.Connection,
+    project_id: int,
+    dataset_signature: str,
+    start_date: str,
+    end_date: str,
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT payload_blob
+        FROM travel_analysis_cache
+        WHERE project_id = ? AND dataset_signature = ?
+          AND start_date = ? AND end_date = ?
+        """,
+        (project_id, dataset_signature, start_date, end_date),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(gzip.decompress(row["payload_blob"]).decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        return None
+
+
+def _save_persistent_travel_analysis_cache(
+    project_id: int,
+    dataset_signature: str,
+    start_date: str,
+    end_date: str,
+    payload: dict[str, Any],
+) -> None:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    compressed = gzip.compress(encoded, compresslevel=5)
+    with _get_db() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO travel_analysis_cache (
+                project_id, dataset_signature, start_date, end_date,
+                payload_blob, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                dataset_signature,
+                start_date,
+                end_date,
+                compressed,
+                datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        conn.execute(
+            """
+            DELETE FROM travel_analysis_cache
+            WHERE project_id = ? AND dataset_signature != ?
+            """,
+            (project_id, dataset_signature),
+        )
+        conn.commit()
 
 
 def _set_sessions_travel_project(
@@ -4447,6 +4538,17 @@ def create_app() -> Flask:
         payload = _TRAVEL_ANALYSIS_CACHE.get(cache_key)
         if payload is None:
             with _get_db() as conn:
+                payload = _load_persistent_travel_analysis_cache(
+                    conn,
+                    project["id"],
+                    dataset_signature,
+                    start_date.isoformat(),
+                    end_date.isoformat(),
+                )
+            if payload is not None:
+                _TRAVEL_ANALYSIS_CACHE[cache_key] = payload
+        if payload is None:
+            with _get_db() as conn:
                 rows = conn.execute(
                     """
                     SELECT device_id, session_id, mode, solar_enabled, travel_project_id,
@@ -4638,6 +4740,13 @@ def create_app() -> Flask:
             if len(_TRAVEL_ANALYSIS_CACHE) > 16:
                 _TRAVEL_ANALYSIS_CACHE.clear()
             _TRAVEL_ANALYSIS_CACHE[cache_key] = payload
+            _save_persistent_travel_analysis_cache(
+                project["id"],
+                dataset_signature,
+                start_date.isoformat(),
+                end_date.isoformat(),
+                payload,
+            )
 
         return render_template(
             "suntrip_analysis.html",

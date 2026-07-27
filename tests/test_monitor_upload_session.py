@@ -1113,6 +1113,19 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("Travel Analysis", analysis_html)
         self.assertIn("Tour des Alpes", analysis_html)
         self.assertIn("cargo-bike-3", analysis_html)
+        with sqlite3.connect(self.db_path) as conn:
+            cache_count = conn.execute(
+                "SELECT COUNT(*) FROM travel_analysis_cache WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()[0]
+        self.assertEqual(cache_count, 1)
+        self.monitor_app._TRAVEL_ANALYSIS_CACHE.clear()
+        cached_analysis = client.get(
+            f"/travel_analysis?project_id={project_id}",
+            headers={"Authorization": token},
+        )
+        self.assertEqual(cached_analysis.status_code, 200)
+        self.assertIn("Tour des Alpes", cached_analysis.get_data(as_text=True))
 
     def test_suntrip_trace_exposes_smoothed_gradient_metric(self):
         samples = []
