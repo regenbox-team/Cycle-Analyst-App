@@ -30,11 +30,13 @@ sys.path.insert(0, REPO_ROOT)
 from app.session_summary import (
     SUMMARY_GROUPS,
     build_summary_sections,
+    chronological_samples,
     compute_session_metrics,
     compute_timeline_metrics_by_user,
     filter_plausible_gps_samples,
     format_metric_value,
     gps_segment_plausible,
+    parse_timestamp,
     parse_raw_values,
     _haversine_km,
 )
@@ -78,8 +80,10 @@ HEARTBEAT_ACTIVE_WINDOW_SEC = 120
 DEFAULT_STARTUP_LOCK_TIMEOUT_SEC = 45.0
 DEFAULT_UPLOAD_CHUNK_MAX_BYTES = 256 * 1024
 DEFAULT_RESPONSE_GZIP_MIN_BYTES = 1024
-SESSION_TRACE_CACHE_VERSION = 2
+SESSION_TRACE_CACHE_VERSION = 3
 SESSION_TRACE_MAX_POINTS = 2500
+SESSION_TRACE_BREAK_MIN_GAP_SEC = 120
+SESSION_TRACE_BREAK_MIN_DISTANCE_KM = 1.0
 SUNTRIP_ANALYSIS_TRACE_MAX_POINTS = 1400
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS = 12000
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM = 15.0
@@ -1140,26 +1144,103 @@ def _douglas_peucker(points: list[tuple[float, float]], tolerance: float) -> lis
     return [point for index, point in enumerate(points) if index in keep]
 
 
-def _simplified_session_trace(samples: list[dict[str, Any]]) -> list[list[float]]:
-    points: list[tuple[float, float]] = []
-    for sample in filter_plausible_gps_samples(samples):
+def _gps_trace_segments(samples: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    segments: list[list[dict[str, Any]]] = []
+    previous_sample = None
+    previous_gps = None
+    for sample in chronological_samples(samples):
         gps = _valid_lat_lon(sample.get("gps_lat"), sample.get("gps_lon"))
-        if gps is not None and (not points or gps != points[-1]):
-            points.append(gps)
-    if len(points) <= 2:
-        return [[round(lat, 6), round(lon, 6)] for lat, lon in points]
+        if gps is None:
+            continue
+        should_break = False
+        if previous_sample is not None and previous_gps is not None:
+            distance_km = _haversine_km(previous_gps, gps)
+            previous_ts = parse_timestamp(previous_sample.get("timestamp"))
+            current_ts = parse_timestamp(sample.get("timestamp"))
+            gap_sec = (
+                (current_ts - previous_ts).total_seconds()
+                if previous_ts is not None and current_ts is not None
+                else None
+            )
+            should_break = not gps_segment_plausible(
+                previous_sample,
+                sample,
+                distance_km,
+            ) or (
+                gap_sec is not None
+                and gap_sec >= SESSION_TRACE_BREAK_MIN_GAP_SEC
+                and distance_km >= SESSION_TRACE_BREAK_MIN_DISTANCE_KM
+            )
+        if not segments or should_break:
+            segments.append([])
+        if not segments[-1] or gps != _valid_lat_lon(
+            segments[-1][-1].get("gps_lat"),
+            segments[-1][-1].get("gps_lon"),
+        ):
+            segments[-1].append(sample)
+        previous_sample = sample
+        previous_gps = gps
+    return [segment for segment in segments if segment]
+
+
+def _simplified_session_trace(
+    samples: list[dict[str, Any]],
+) -> list[list[float] | None]:
+    segments = [
+        [
+            _valid_lat_lon(sample.get("gps_lat"), sample.get("gps_lon"))
+            for sample in segment
+        ]
+        for segment in _gps_trace_segments(samples)
+    ]
+    point_segments: list[list[tuple[float, float]]] = [
+        [point for point in segment if point is not None]
+        for segment in segments
+    ]
+    point_segments = [segment for segment in point_segments if segment]
+    if not point_segments:
+        return []
 
     # Increase the tolerance until the cached geometry is small enough for a fast
-    # overview map. Endpoints are always retained.
+    # overview map. Every disconnected segment keeps its own endpoints.
+    point_budget = max(
+        1,
+        SESSION_TRACE_MAX_POINTS - max(0, len(point_segments) - 1),
+    )
     tolerance = 0.000002
-    simplified = points
-    while len(simplified) > SESSION_TRACE_MAX_POINTS and tolerance <= 0.02:
-        simplified = _douglas_peucker(points, tolerance)
+    simplified_segments = point_segments
+    while (
+        sum(len(segment) for segment in simplified_segments) > point_budget
+        and tolerance <= 0.02
+    ):
+        simplified_segments = [
+            _douglas_peucker(segment, tolerance)
+            for segment in point_segments
+        ]
         tolerance *= 1.8
-    if len(simplified) > SESSION_TRACE_MAX_POINTS:
-        step = (len(simplified) - 1) / (SESSION_TRACE_MAX_POINTS - 1)
-        simplified = [simplified[round(index * step)] for index in range(SESSION_TRACE_MAX_POINTS)]
-    return [[round(lat, 6), round(lon, 6)] for lat, lon in simplified]
+    total_points = sum(len(segment) for segment in simplified_segments)
+    if total_points > point_budget:
+        scale = point_budget / total_points
+        sampled_segments = []
+        for segment in simplified_segments:
+            target = max(2, round(len(segment) * scale)) if len(segment) > 1 else 1
+            if target >= len(segment):
+                sampled_segments.append(segment)
+                continue
+            step = (len(segment) - 1) / (target - 1)
+            sampled_segments.append(
+                [segment[round(index * step)] for index in range(target)]
+            )
+        simplified_segments = sampled_segments
+
+    result: list[list[float] | None] = []
+    for segment in simplified_segments:
+        if result:
+            result.append(None)
+        result.extend(
+            [[round(lat, 6), round(lon, 6)] for lat, lon in segment]
+        )
+    return result
 
 
 def _store_session_trace(
@@ -3773,30 +3854,34 @@ def create_app() -> Flask:
             }
             for row in rows
         ]
-        points = []
-        for sample in filter_plausible_gps_samples(samples):
-            try:
-                lat = float(sample["gps_lat"])
-                lon = float(sample["gps_lon"])
-            except Exception:
-                continue
-            alt = None
-            alt_value = sample["gps_alt"] if altitude_mode == "gps" else sample["terrain_alt_m"]
-            if alt_value is None:
-                alt_value = sample["gps_alt"]
-            if alt_value is not None:
+        point_segments = []
+        for sample_segment in _gps_trace_segments(samples):
+            points = []
+            for sample in sample_segment:
                 try:
-                    alt = float(alt_value)
+                    lat = float(sample["gps_lat"])
+                    lon = float(sample["gps_lon"])
                 except Exception:
-                    alt = None
-            points.append(
-                {
-                    "lat": lat,
-                    "lon": lon,
-                    "alt": alt,
-                    "time": _format_gpx_time(sample["timestamp"]),
-                }
-            )
+                    continue
+                alt = None
+                alt_value = sample["gps_alt"] if altitude_mode == "gps" else sample["terrain_alt_m"]
+                if alt_value is None:
+                    alt_value = sample["gps_alt"]
+                if alt_value is not None:
+                    try:
+                        alt = float(alt_value)
+                    except Exception:
+                        alt = None
+                points.append(
+                    {
+                        "lat": lat,
+                        "lon": lon,
+                        "alt": alt,
+                        "time": _format_gpx_time(sample["timestamp"]),
+                    }
+                )
+            if points:
+                point_segments.append(points)
 
         session_label = escape(session_id)
         creator = "Cycle Monitor"
@@ -3806,17 +3891,19 @@ def create_app() -> Flask:
             f"<metadata><name>{session_label}</name></metadata>",
             "<trk>",
             f"<name>{session_label}</name>",
-            "<trkseg>",
         ]
-        for p in points:
-            line = f'<trkpt lat="{p["lat"]:.7f}" lon="{p["lon"]:.7f}">'
-            if p["alt"] is not None:
-                line += f"<ele>{p['alt']:.1f}</ele>"
-            if p["time"]:
-                line += f"<time>{p['time']}</time>"
-            line += "</trkpt>"
-            gpx_lines.append(line)
-        gpx_lines.extend(["</trkseg>", "</trk>", "</gpx>"])
+        for points in point_segments:
+            gpx_lines.append("<trkseg>")
+            for p in points:
+                line = f'<trkpt lat="{p["lat"]:.7f}" lon="{p["lon"]:.7f}">'
+                if p["alt"] is not None:
+                    line += f"<ele>{p['alt']:.1f}</ele>"
+                if p["time"]:
+                    line += f"<time>{p['time']}</time>"
+                line += "</trkpt>"
+                gpx_lines.append(line)
+            gpx_lines.append("</trkseg>")
+        gpx_lines.extend(["</trk>", "</gpx>"])
         gpx_text = "\n".join(gpx_lines)
         filename = f"{session_id}.gpx"
         headers = {

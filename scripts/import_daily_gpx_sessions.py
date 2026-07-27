@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import re
 import sqlite3
 import sys
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -21,21 +24,30 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.import_legacy_monitor_data import (  # noqa: E402
     GpxPoint,
     GpxTrack,
+    child_text,
     haversine_km,
     iso_timestamp,
     load_gpx_tracks,
+    parse_timestamp,
 )
 
 
 DEFAULT_DEVICE_ID = "sc-vehicule-2"
 DEFAULT_MODE = "supercycle_live"
 DEFAULT_TIMEZONE = "Europe/Paris"
+TRACK_DATE_PATTERN = re.compile(r"(?:^|_)(\d{6})(?:_|$)")
+TRACE_BREAK_MIN_GAP_SEC = 120
+TRACE_BREAK_MIN_DISTANCE_KM = 1.0
+MAX_GPS_DISTANCE_KPH = 160.0
+GPS_DISTANCE_JUMP_MARGIN_KM = 0.25
+GPS_DISTANCE_JUMP_FLOOR_KM = 0.25
 
 
 @dataclass
 class TrackFragment:
     source_path: Path
     points: list[GpxPoint]
+    source_track_name: str | None = None
 
     @property
     def start(self) -> datetime:
@@ -70,6 +82,201 @@ class DailySession:
     @property
     def source_point_count(self) -> int:
         return sum(len(fragment.points) for fragment in self.fragments)
+
+    @property
+    def source_track_names(self) -> list[str]:
+        return sorted(
+            {
+                fragment.source_track_name
+                for fragment in self.fragments
+                if fragment.source_track_name
+            }
+        )
+
+
+@dataclass
+class NamedGpxTrack:
+    path: Path
+    name: str
+    day: date
+    points: list[GpxPoint]
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _track_day(name: str) -> date | None:
+    match = TRACK_DATE_PATTERN.search(name)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%y%m%d").date()
+    except ValueError:
+        return None
+
+
+def load_named_gpx_tracks(directory: Path) -> list[NamedGpxTrack]:
+    tracks: list[NamedGpxTrack] = []
+    for path in sorted(directory.glob("*.gpx")):
+        root = ET.parse(path).getroot()
+        for track_element in root.iter():
+            if _local_name(track_element.tag) != "trk":
+                continue
+            name = child_text(track_element, "name") or ""
+            day = _track_day(name)
+            if day is None:
+                continue
+            points: list[GpxPoint] = []
+            for element in track_element.iter():
+                if _local_name(element.tag) != "trkpt":
+                    continue
+                time_text = child_text(element, "time")
+                if not time_text:
+                    continue
+                try:
+                    lat = float(element.attrib["lat"])
+                    lon = float(element.attrib["lon"])
+                    timestamp = parse_timestamp(time_text)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                elevation = child_text(element, "ele")
+                try:
+                    alt = float(elevation) if elevation is not None else None
+                except ValueError:
+                    alt = None
+                if (
+                    math.isfinite(lat)
+                    and math.isfinite(lon)
+                    and -90 <= lat <= 90
+                    and -180 <= lon <= 180
+                ):
+                    points.append(
+                        GpxPoint(
+                            timestamp=timestamp,
+                            lat=lat,
+                            lon=lon,
+                            alt=alt,
+                        )
+                    )
+            if points:
+                tracks.append(
+                    NamedGpxTrack(
+                        path=path,
+                        name=name,
+                        day=day,
+                        points=points,
+                    )
+                )
+    return tracks
+
+
+def _normalize_named_track_timestamps(
+    track: NamedGpxTrack,
+    timezone_name: str,
+) -> list[GpxPoint]:
+    local_timezone = ZoneInfo(timezone_name)
+    original_days = {
+        point.timestamp.astimezone(local_timezone).date()
+        for point in track.points
+    }
+    if original_days == {track.day}:
+        rebased_start = track.points[0].timestamp
+    else:
+        rebased_start = datetime.combine(
+            track.day,
+            time(hour=8),
+            tzinfo=local_timezone,
+        ).astimezone(timezone.utc)
+
+    normalized = [
+        GpxPoint(
+            timestamp=rebased_start,
+            lat=track.points[0].lat,
+            lon=track.points[0].lon,
+            alt=track.points[0].alt,
+        )
+    ]
+    previous_original = track.points[0].timestamp
+    previous_normalized = rebased_start
+    for point in track.points[1:]:
+        delta_seconds = (point.timestamp - previous_original).total_seconds()
+        # VisuGPX can contain an isolated timestamp reversal. Retain XML point
+        # order and make the smallest possible monotonic correction.
+        delta_seconds = max(0.001, delta_seconds)
+        previous_normalized += timedelta(seconds=delta_seconds)
+        normalized.append(
+            GpxPoint(
+                timestamp=previous_normalized,
+                lat=point.lat,
+                lon=point.lon,
+                alt=point.alt,
+            )
+        )
+        previous_original = point.timestamp
+
+    if any(
+        point.timestamp.astimezone(local_timezone).date() != track.day
+        for point in normalized
+    ):
+        raise ValueError(
+            f"track {track.name!r} cannot fit inside its encoded day {track.day}"
+        )
+    return normalized
+
+
+def split_disconnected_points(points: list[GpxPoint]) -> list[list[GpxPoint]]:
+    segments: list[list[GpxPoint]] = []
+    previous = None
+    for point in points:
+        should_break = False
+        if previous is not None:
+            distance_km = haversine_km(previous, point)
+            gap_sec = (point.timestamp - previous.timestamp).total_seconds()
+            plausible_distance_km = max(
+                GPS_DISTANCE_JUMP_FLOOR_KM,
+                (MAX_GPS_DISTANCE_KPH * max(0.0, gap_sec) / 3600.0)
+                + GPS_DISTANCE_JUMP_MARGIN_KM,
+            )
+            should_break = (
+                gap_sec < 0
+                or distance_km > plausible_distance_km
+                or (
+                    gap_sec >= TRACE_BREAK_MIN_GAP_SEC
+                    and distance_km >= TRACE_BREAK_MIN_DISTANCE_KM
+                )
+            )
+        if not segments or should_break:
+            segments.append([])
+        segments[-1].append(point)
+        previous = point
+    return [segment for segment in segments if segment]
+
+
+def group_named_tracks_by_encoded_day(
+    tracks: list[NamedGpxTrack],
+    timezone_name: str,
+) -> list[DailySession]:
+    fragments_by_day: dict[date, list[TrackFragment]] = defaultdict(list)
+    for track in tracks:
+        normalized_points = _normalize_named_track_timestamps(track, timezone_name)
+        fragments_by_day[track.day].extend(
+            [
+                TrackFragment(
+                    source_path=track.path,
+                    source_track_name=track.name,
+                    points=points,
+                )
+                for points in split_disconnected_points(normalized_points)
+            ]
+        )
+    return [
+        DailySession(
+            day=day,
+            fragments=sorted(fragments, key=lambda fragment: fragment.start),
+        )
+        for day, fragments in sorted(fragments_by_day.items())
+    ]
 
 
 def group_tracks_by_local_day(
@@ -156,6 +363,7 @@ def print_report(
             f"points={session.source_point_count:6} "
             f"distance={session_distance_km(session):8.3f} km "
             f"files={','.join(session.source_files)}"
+            f"{' tracks=' + ','.join(session.source_track_names) if session.source_track_names else ''}"
         )
 
 
@@ -197,6 +405,7 @@ def apply_import(
     device_id: str,
     mode: str,
     timezone_name: str,
+    replace_device_gpx_only: bool = False,
 ) -> None:
     os.environ["MONITOR_DB"] = str(target_db.resolve())
     from monitor_server import app as monitor_app
@@ -217,12 +426,43 @@ def apply_import(
                 (device_id, session.session_id, mode),
             ).fetchone()
         ]
-        if collisions:
+        if collisions and not replace_device_gpx_only:
             raise RuntimeError(f"target sessions already exist: {', '.join(collisions)}")
 
         conn.execute("BEGIN IMMEDIATE")
         try:
             ensure_device(conn, device_id=device_id, mode=mode)
+            replaced_sessions: list[tuple[str, str]] = []
+            if replace_device_gpx_only:
+                for row in conn.execute(
+                    """
+                    SELECT session_id, mode, metrics_json
+                    FROM sessions
+                    WHERE device_id = ?
+                    """,
+                    (device_id,),
+                ).fetchall():
+                    try:
+                        metrics = json.loads(row["metrics_json"] or "{}")
+                    except (TypeError, json.JSONDecodeError):
+                        metrics = {}
+                    if isinstance(metrics, dict) and metrics.get("gpx_only_import") is True:
+                        replaced_sessions.append((row["session_id"], row["mode"]))
+                for old_session_id, old_mode in replaced_sessions:
+                    conn.execute(
+                        """
+                        DELETE FROM telemetry_samples
+                        WHERE device_id = ? AND session_id = ? AND mode = ?
+                        """,
+                        (device_id, old_session_id, old_mode),
+                    )
+                    conn.execute(
+                        """
+                        DELETE FROM sessions
+                        WHERE device_id = ? AND session_id = ? AND mode = ?
+                        """,
+                        (device_id, old_session_id, old_mode),
+                    )
             for session in sessions:
                 samples = session_samples(session)
                 distance_km = session_distance_km(session)
@@ -237,6 +477,7 @@ def apply_import(
                     "daily_grouping": True,
                     "daily_grouping_timezone": timezone_name,
                     "gpx_files": session.source_files,
+                    "gpx_track_names": session.source_track_names,
                     "source_gpx_points": session.source_point_count,
                     "stored_gpx_points": len(samples),
                     "distance_km": distance_km,
@@ -283,6 +524,8 @@ def apply_import(
                     ),
                 )
             conn.commit()
+            if replaced_sessions:
+                print(f"Replaced {len(replaced_sessions)} existing GPX-only sessions")
         except Exception:
             conn.rollback()
             raise
@@ -297,13 +540,30 @@ def main() -> int:
     parser.add_argument("--device-id", default=DEFAULT_DEVICE_ID)
     parser.add_argument("--mode", default=DEFAULT_MODE)
     parser.add_argument("--timezone", default=DEFAULT_TIMEZONE)
+    parser.add_argument(
+        "--day-from-track-name",
+        action="store_true",
+        help="Use YYMMDD encoded in each GPX <trk><name> and preserve track boundaries.",
+    )
+    parser.add_argument(
+        "--replace-device-gpx-only",
+        action="store_true",
+        help="Replace all prior GPX-only sessions for this device in the same transaction.",
+    )
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
 
-    tracks, duplicates = load_gpx_tracks(args.gpx_dir)
-    if not tracks:
-        parser.error("no valid GPX tracks found")
-    sessions = group_tracks_by_local_day(tracks, args.timezone)
+    if args.day_from_track_name:
+        named_tracks = load_named_gpx_tracks(args.gpx_dir)
+        if not named_tracks:
+            parser.error("no GPX tracks with a YYMMDD date in <trk><name> found")
+        sessions = group_named_tracks_by_encoded_day(named_tracks, args.timezone)
+        duplicates: list[tuple[str, str]] = []
+    else:
+        tracks, duplicates = load_gpx_tracks(args.gpx_dir)
+        if not tracks:
+            parser.error("no valid GPX tracks found")
+        sessions = group_tracks_by_local_day(tracks, args.timezone)
     print_report(sessions, duplicates)
 
     if args.apply:
@@ -315,6 +575,7 @@ def main() -> int:
             device_id=args.device_id,
             mode=args.mode,
             timezone_name=args.timezone,
+            replace_device_gpx_only=args.replace_device_gpx_only,
         )
         print(f"Imported {len(sessions)} daily sessions into {args.target_db}")
     else:

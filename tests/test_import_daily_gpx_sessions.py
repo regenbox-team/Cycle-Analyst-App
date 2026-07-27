@@ -4,8 +4,14 @@ import sqlite3
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from scripts.import_daily_gpx_sessions import ensure_device, group_tracks_by_local_day
+from scripts.import_daily_gpx_sessions import (
+    NamedGpxTrack,
+    group_named_tracks_by_encoded_day,
+    split_disconnected_points,
+)
 from scripts.import_legacy_monitor_data import GpxPoint, GpxTrack
 
 
@@ -91,3 +97,67 @@ class DailyGpxGroupingTest(unittest.TestCase):
             self.assertEqual(device["session_active"], 0)
             self.assertEqual(device["gps_available"], 0)
             self.assertEqual(device["solar_enabled"], 0)
+
+    def test_uses_encoded_track_day_and_rebases_visugpx_timestamps(self) -> None:
+        tracks = [
+            NamedGpxTrack(
+                path=Path("visugpx.gpx"),
+                name="J10_230726_K",
+                day=datetime.strptime("230726", "%y%m%d").date(),
+                points=[
+                    point("2023-08-24T22:56:03"),
+                    point("2023-08-25T06:47:08"),
+                ],
+            ),
+            NamedGpxTrack(
+                path=Path("visugpx.gpx"),
+                name="J11_230727_K",
+                day=datetime.strptime("230727", "%y%m%d").date(),
+                points=[
+                    point("2023-09-03T03:27:31"),
+                    point("2023-09-03T13:06:41"),
+                ],
+            ),
+        ]
+
+        sessions = group_named_tracks_by_encoded_day(tracks, "Europe/Paris")
+
+        self.assertEqual(
+            [session.session_id for session in sessions],
+            ["gpx-daily-2023-07-26", "gpx-daily-2023-07-27"],
+        )
+        for session in sessions:
+            self.assertTrue(
+                all(
+                    sample.timestamp.astimezone(ZoneInfo("Europe/Paris")).date()
+                    == session.day
+                    for fragment in session.fragments
+                    for sample in fragment.points
+                )
+            )
+
+    def test_splits_a_long_missing_gps_connection(self) -> None:
+        points = [
+            GpxPoint(
+                timestamp=datetime.fromisoformat("2023-07-20T12:00:00+00:00"),
+                lat=47.58,
+                lon=1.33,
+                alt=100.0,
+            ),
+            GpxPoint(
+                timestamp=datetime.fromisoformat("2023-07-20T12:00:10+00:00"),
+                lat=47.581,
+                lon=1.331,
+                alt=101.0,
+            ),
+            GpxPoint(
+                timestamp=datetime.fromisoformat("2023-07-20T13:55:00+00:00"),
+                lat=47.42,
+                lon=1.00,
+                alt=102.0,
+            ),
+        ]
+
+        segments = split_disconnected_points(points)
+
+        self.assertEqual([len(segment) for segment in segments], [2, 1])

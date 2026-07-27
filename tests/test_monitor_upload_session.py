@@ -453,6 +453,50 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertEqual(trace[0], [48.85, 2.3])
         self.assertEqual(trace[-1], [48.85499, 2.30499])
 
+    def test_map_trace_and_gpx_export_break_disconnected_segments(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        samples = [
+            self.sample(0)
+            | {"timestamp": "2026-05-07 10:00:00", "gps_lat": 48.85, "gps_lon": 2.30},
+            self.sample(1)
+            | {"timestamp": "2026-05-07 10:00:10", "gps_lat": 48.851, "gps_lon": 2.301},
+            self.sample(2)
+            | {"timestamp": "2026-05-07 10:10:00", "gps_lat": 49.00, "gps_lon": 3.00},
+            self.sample(3)
+            | {"timestamp": "2026-05-07 10:10:10", "gps_lat": 49.001, "gps_lon": 3.001},
+        ]
+        client = self.monitor_app.app.test_client()
+        response = client.post(
+            "/api/upload_session",
+            json={
+                "device_id": "sc-vehicule-1",
+                "session_id": "disconnected-trace",
+                "mode": "default",
+                "telemetry_samples": samples,
+            },
+            headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with sqlite3.connect(self.db_path) as conn:
+            trace = json.loads(
+                conn.execute(
+                    "SELECT trace_json FROM sessions WHERE session_id = ?",
+                    ("disconnected-trace",),
+                ).fetchone()[0]
+            )
+        self.assertIn(None, trace)
+
+        exported = client.get(
+            "/api/export_gpx?device_id=sc-vehicule-1"
+            "&session_id=disconnected-trace&mode=default",
+            headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+        )
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(exported.get_data(as_text=True).count("<trkseg>"), 2)
+
     def test_device_map_color_can_be_customized(self):
         if not hasattr(self.monitor_app.app, "test_client"):
             self.skipTest("Flask test client is not available in this test environment.")

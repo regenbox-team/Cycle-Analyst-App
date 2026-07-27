@@ -855,11 +855,13 @@
         const distanceToTrace = (latlng, trace) => {
           const point = map.latLngToLayerPoint(latlng);
           let closest = Infinity;
-          for (let index = 1; index < trace.points.length; index += 1) {
-            const start = map.latLngToLayerPoint(trace.points[index - 1]);
-            const end = map.latLngToLayerPoint(trace.points[index]);
-            closest = Math.min(closest, distanceToSegment(point, start, end));
-          }
+          trace.segments.forEach((segment) => {
+            for (let index = 1; index < segment.length; index += 1) {
+              const start = map.latLngToLayerPoint(segment[index - 1]);
+              const end = map.latLngToLayerPoint(segment[index]);
+              closest = Math.min(closest, distanceToSegment(point, start, end));
+            }
+          });
           return closest;
         };
         const clearTraceSelection = () => {
@@ -919,12 +921,22 @@
 
         sessionTraces.forEach((trace) => {
           if (!Array.isArray(trace.points) || trace.points.length < 2) return;
-          const points = trace.points
-            .map((point) => [Number(point[0]), Number(point[1])])
-            .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
-          if (points.length < 2) return;
-          trace.points = points;
-          const layer = L.polyline(points, {
+          const segments = [];
+          let currentSegment = [];
+          trace.points.forEach((point) => {
+            const lat = Array.isArray(point) ? Number(point[0]) : NaN;
+            const lon = Array.isArray(point) ? Number(point[1]) : NaN;
+            if (Number.isFinite(lat) && Number.isFinite(lon)) {
+              currentSegment.push([lat, lon]);
+            } else {
+              if (currentSegment.length >= 2) segments.push(currentSegment);
+              currentSegment = [];
+            }
+          });
+          if (currentSegment.length >= 2) segments.push(currentSegment);
+          if (!segments.length) return;
+          trace.segments = segments;
+          const layer = L.polyline(segments, {
             color: trace.color,
             weight: 3,
             opacity: 0.72,
@@ -948,16 +960,19 @@
             fillColor: trace.color,
             fillOpacity: 1
           };
-          const startMarker = L.circleMarker(points[0], endpointStyle)
+          const firstPoint = segments[0][0];
+          const lastSegment = segments[segments.length - 1];
+          const lastPoint = lastSegment[lastSegment.length - 1];
+          const startMarker = L.circleMarker(firstPoint, endpointStyle)
             .bindTooltip(`Start · ${trace.session_id}`);
-          const finishMarker = L.circleMarker(points[points.length - 1], {
+          const finishMarker = L.circleMarker(lastPoint, {
             ...endpointStyle,
             radius: 5,
             color: trace.color,
             fillColor: "#fff"
           }).bindTooltip(`Finish · ${trace.session_id}`);
           endpointMarkers.push(startMarker, finishMarker);
-          points.forEach((point) => bounds.push(point));
+          segments.forEach((segment) => segment.forEach((point) => bounds.push(point)));
         });
         const updateEndpointVisibility = () => {
           const visible = map.getZoom() >= ENDPOINT_MIN_ZOOM;
