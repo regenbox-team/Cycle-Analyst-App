@@ -729,7 +729,10 @@
               <th>Travel</th>
               <th title="Solar session">☀️</th>
               <th title="Photos">📷</th>
-              <th>Actions</th>
+              <th>JSON</th>
+              <th>GPX</th>
+              <th>Summary</th>
+              <th>Delete</th>
               <th>
                 Distance (km)
                 <button class="sort-btn" data-sort-key="distance" data-sort-order="desc" aria-label="Sort by distance">↕</button>
@@ -742,7 +745,7 @@
             {% if s["month_key"] != current_month.key %}
             {% set current_month.key = s["month_key"] %}
             <tr class="month-separator" data-month-separator="1">
-              <td colspan="8"><span>{{ s["month_label"] }}</span></td>
+              <td colspan="11"><span>{{ s["month_label"] }}</span></td>
             </tr>
             {% endif %}
             <tr
@@ -768,10 +771,16 @@
               <td title="{{ s['photo_count'] or 0 }} photos">{{ "📷" if s["photo_count"] else "" }}</td>
               <td>
                 <a class="action-link primary" href="/api/export_session?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}" download>JSON</a>
+              </td>
+              <td>
                 {% if s["has_gps"] %}
                 <a class="action-link" href="/api/export_gpx?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}">GPX</a>
                 {% endif %}
+              </td>
+              <td>
                 <a class="action-link" href="/session_map?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}">Summary</a>
+              </td>
+              <td>
                 <button class="action-link danger session-delete-btn" type="button" aria-label="Delete session {{ s['session_id'] }}">Delete</button>
               </td>
               <td>{{ "%.2f"|format(s["distance_km"] or 0) }}</td>
@@ -1184,7 +1193,7 @@
           separator.className = "month-separator";
           separator.dataset.monthSeparator = "1";
           const cell = document.createElement("td");
-          cell.colSpan = 8;
+          cell.colSpan = 11;
           const label = document.createElement("span");
           label.textContent = row.dataset.monthLabel || "Date inconnue";
           cell.appendChild(label);
