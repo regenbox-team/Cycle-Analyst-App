@@ -841,6 +841,8 @@
         }).addTo(map);
         const bounds = [];
         const traceEntries = [];
+        const endpointMarkers = [];
+        const ENDPOINT_MIN_ZOOM = 7;
         let selectedKeys = new Set();
         const traceKey = (trace) => `${trace.device_id}\u0000${trace.session_id}\u0000${trace.mode}`;
         const distanceToSegment = (point, start, end) => {
@@ -946,21 +948,35 @@
             fillColor: trace.color,
             fillOpacity: 1
           };
-          L.circleMarker(points[0], endpointStyle).addTo(map).bindTooltip(`Start · ${trace.session_id}`);
-          L.circleMarker(points[points.length - 1], {
+          const startMarker = L.circleMarker(points[0], endpointStyle)
+            .bindTooltip(`Start · ${trace.session_id}`);
+          const finishMarker = L.circleMarker(points[points.length - 1], {
             ...endpointStyle,
             radius: 5,
             color: trace.color,
             fillColor: "#fff"
-          }).addTo(map).bindTooltip(`Finish · ${trace.session_id}`);
+          }).bindTooltip(`Finish · ${trace.session_id}`);
+          endpointMarkers.push(startMarker, finishMarker);
           points.forEach((point) => bounds.push(point));
         });
+        const updateEndpointVisibility = () => {
+          const visible = map.getZoom() >= ENDPOINT_MIN_ZOOM;
+          endpointMarkers.forEach((marker) => {
+            if (visible && !map.hasLayer(marker)) {
+              marker.addTo(map);
+            } else if (!visible && map.hasLayer(marker)) {
+              map.removeLayer(marker);
+            }
+          });
+        };
+        map.on("zoomend", updateEndpointVisibility);
         map.on("click", clearTraceSelection);
         map.on("popupclose", () => {
           if (selectedKeys.size) clearTraceSelection();
         });
         if (traceEntries.length) {
           map.fitBounds(bounds, { padding: [20, 20] });
+          updateEndpointVisibility();
         } else {
           const label = document.createElement("div");
           label.className = "map-empty";
