@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Suntrip Analysis</title>
+    <title>Travel Analysis</title>
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -189,11 +189,6 @@
       .session-head a { color: #0f766e; text-decoration: none; }
       .session-head a:hover { text-decoration: underline; }
       .session-table td { white-space: nowrap; }
-      .stage-toggle {
-        width: 18px;
-        height: 18px;
-        accent-color: var(--accent);
-      }
       .trace-select {
         width: 18px;
         height: 18px;
@@ -540,23 +535,35 @@
     <main>
       <div class="top-row">
         <div>
-          <h1>Suntrip Analysis</h1>
-          <div class="muted">{{ start_date }} to {{ end_date }} · {{ stage_count }} included sessions</div>
+          <h1>Travel Analysis{% if project %} · {{ project.name }}{% endif %}</h1>
+          <div class="muted">
+            {% if project %}{{ start_date }} to {{ end_date }} · {{ stage_count }} included sessions{% else %}No travel project yet{% endif %}
+          </div>
         </div>
         <div class="nav-actions">
           <a class="btn" href="/">Back to monitor</a>
+          {% if project and project.slug == "suntrip" %}
           <a class="btn btn-primary" href="/suntrip">Public Suntrip page</a>
+          {% endif %}
         </div>
       </div>
 
       <div class="card" style="margin-top: 16px;">
-        <form class="filter-form" method="get" action="/suntrip_analysis">
+        <form class="filter-form" method="get" action="/travel_analysis">
+          <label for="project-id">Travel</label>
+          <select id="project-id" name="project_id">
+            {% for item in projects %}
+            <option value="{{ item.id }}" {% if project and item.id == project.id %}selected{% endif %}>
+              {{ item.name }} ({{ item.session_count }})
+            </option>
+            {% endfor %}
+          </select>
           <label for="start">Start</label>
           <input id="start" name="start" type="date" value="{{ start_date }}">
           <label for="end">End</label>
           <input id="end" name="end" type="date" value="{{ end_date }}">
           <button class="btn btn-primary" type="submit">Update</button>
-          <span class="badge">Supercycle 1 / Supercycle 2</span>
+          {% if project %}<span class="badge">{{ vehicles|length }} vehicle{% if vehicles|length != 1 %}s{% endif %}</span>{% endif %}
         </form>
       </div>
 
@@ -668,7 +675,7 @@
           </div>
         </div>
         {% else %}
-        <div class="empty">No Supercycle sessions available for track analysis in this period.</div>
+        <div class="empty">No sessions available for track analysis in this period.</div>
         {% endif %}
       </div>
 
@@ -733,7 +740,7 @@
                 </th>
                 {% endfor %}
                 {% for total in total_columns %}
-                <th class="session-head total-col{{ ' sc2-col' if total.vehicle_key == 'supercycle_2' else '' }}">{{ total.session_count }} included stages</th>
+                <th class="session-head total-col{{ ' sc2-col' if total.vehicle_key == 'supercycle_2' else '' }}">{{ total.session_count }} session{% if total.session_count != 1 %}s{% endif %}</th>
                 {% endfor %}
               </tr>
             </thead>
@@ -785,43 +792,31 @@
           </table>
         </div>
         {% else %}
-        <div class="empty">No sessions marked as Suntrip stages in this period yet.</div>
+        <div class="empty">No sessions assigned to this travel project in this period.</div>
         {% endif %}
       </div>
 
-      <h2>Sessions In Period</h2>
+      <h2>Project Sessions</h2>
       <div class="card">
         {% if candidates %}
         <div class="table-scroll">
           <table class="session-table">
             <thead>
               <tr>
-                <th>Etape</th>
                 <th>View</th>
                 <th>Day</th>
                 <th>Vehicle</th>
-                <th>Device</th>
+                <th>Vehicle ID</th>
                 <th>Session</th>
                 <th>Start</th>
                 <th>Rows</th>
                 <th>Distance</th>
-                <th>Map</th>
+                <th>Summary</th>
               </tr>
             </thead>
             <tbody>
               {% for session in candidates %}
-              <tr class="{{ 'included-row' if session.suntrip_stage else '' }}">
-                <td>
-                  <input
-                    class="stage-toggle"
-                    type="checkbox"
-                    aria-label="Include {{ session.session_id }} as Suntrip stage"
-                    data-device-id="{{ session.device_id }}"
-                    data-session-id="{{ session.session_id }}"
-                    data-mode="{{ session.mode }}"
-                    {% if session.suntrip_stage %}checked{% endif %}
-                  >
-                </td>
+              <tr class="included-row">
                 <td>
                   <input
                     class="trace-select"
@@ -840,14 +835,14 @@
                 <td>{{ session.start_ts_fmt or "" }}</td>
                 <td>{{ session.rows_count or 0 }}</td>
                 <td>{{ "%.2f"|format(session.distance_km or 0) }} km</td>
-                <td><a class="link-btn" href="{{ session.map_url }}">Map</a></td>
+                <td><a class="link-btn" href="{{ session.map_url }}">Summary</a></td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
         {% else %}
-        <div class="empty">No Supercycle 1 or Supercycle 2 sessions found in this period.</div>
+        <div class="empty">No sessions found for this travel project in this period.</div>
         {% endif %}
       </div>
     </main>
@@ -896,6 +891,7 @@
       const traceRadios = document.querySelectorAll(".trace-select");
       const caCorrectionToggle = document.getElementById("ca-correction-toggle");
       const correctionValueCells = document.querySelectorAll("[data-raw-value][data-corrected-value]");
+      const analysisVehicles = {{ vehicles | tojson }};
       const vehicleColors = {
         supercycle_1: "#0d9488",
         supercycle_2: "#8a6a2f"
@@ -910,6 +906,12 @@
         "#c2410c",
         "#475569"
       ];
+      analysisVehicles.forEach((vehicle, index) => {
+        if (!vehicleColors[vehicle.key]) vehicleColors[vehicle.key] = metricPalette[index % metricPalette.length];
+      });
+      const vehicleDash = new Map(
+        analysisVehicles.map((vehicle, index) => [vehicle.key, ["", "8 5", "2 4", "10 4 2 4"][index % 4]])
+      );
       const segmentPalette = ["#be123c", "#2563eb", "#15803d", "#b45309", "#6d28d9", "#0f766e"];
       const chartMetrics = new Map();
       chartMetricGroups.forEach((group) => {
@@ -1596,6 +1598,7 @@
         const requestedMaxPoints = detailed ? traceDetailedMaxPoints : traceStandardMaxPoints;
         setTraceStatus(detailed ? "Loading detailed trace..." : "Loading trace...");
         const params = new URLSearchParams({
+          project_id: "{{ project.id if project else '' }}",
           device_id: selected.device_id,
           session_id: selected.session_id,
           mode: selected.mode || "default",
@@ -1610,7 +1613,7 @@
           params.set("range_max", String(requestedRange[1]));
         }
         try {
-          const traceUrl = new URL("/api/suntrip_analysis/session_trace", window.location.origin);
+          const traceUrl = new URL("/api/travel_analysis/session_trace", window.location.origin);
           traceUrl.search = params.toString();
           const response = await fetch(traceUrl.toString());
           const result = await response.json();
@@ -1651,12 +1654,11 @@
           const option = document.createElement("option");
           option.value = traceSessionKey(session);
           option.textContent = `${session.day_label} · ${session.vehicle_label} · ${session.session_id}`;
-          if (session.suntrip_stage) option.dataset.stage = "1";
           traceSessionSelect.appendChild(option);
         });
-        const firstStage = traceSessions.find((session) => session.suntrip_stage) || traceSessions[0];
-        traceSessionSelect.value = traceSessionKey(firstStage);
-        updateTraceDetailAvailability(firstStage);
+        const firstSession = traceSessions[0];
+        traceSessionSelect.value = traceSessionKey(firstSession);
+        updateTraceDetailAvailability(firstSession);
         traceRadios.forEach((radio) => {
           radio.addEventListener("change", () => {
             if (!radio.checked || !traceSessionSelect) return;
@@ -2039,7 +2041,7 @@
               path += `${path ? " L" : "M"} ${x(index).toFixed(2)} ${y(value, metricScale.scale).toFixed(2)}`;
             });
             if (!path) return;
-            const dash = item.vehicle_key === "supercycle_2" ? "7 5" : "";
+            const dash = vehicleDash.get(item.vehicle_key) || "";
             svg.appendChild(svgNode("path", { class: "chart-line", d: path, stroke: metricScale.color, "stroke-dasharray": dash }));
             (item.values || []).forEach((raw, index) => {
               const value = finiteValue(raw);
@@ -2094,14 +2096,11 @@
 
         const vehicleLegend = document.createElement("div");
         vehicleLegend.className = "chart-legend";
-        [
-          { key: "supercycle_1", label: "Supercycle 1", dashed: false },
-          { key: "supercycle_2", label: "Supercycle 2", dashed: true }
-        ].forEach((item) => {
+        analysisVehicles.forEach((item) => {
           const legendItem = document.createElement("span");
           legendItem.className = "legend-item";
           const swatch = document.createElement("span");
-          swatch.className = item.dashed ? "legend-swatch dashed" : "legend-swatch";
+          swatch.className = vehicleDash.get(item.key) ? "legend-swatch dashed" : "legend-swatch";
           swatch.style.color = vehicleColors[item.key] || "#666666";
           swatch.style.background = vehicleColors[item.key] || "#666666";
           const label = document.createElement("span");
@@ -2154,34 +2153,6 @@
       renderCharts();
       initializeTraceControls();
 
-      const toggles = document.querySelectorAll(".stage-toggle");
-      toggles.forEach((toggle) => {
-        toggle.addEventListener("change", async () => {
-          const payload = {
-            device_id: toggle.dataset.deviceId || "",
-            session_id: toggle.dataset.sessionId || "",
-            mode: toggle.dataset.mode || "default",
-            suntrip_stage: toggle.checked
-          };
-          toggle.disabled = true;
-          try {
-            const response = await fetch("/api/session/suntrip_stage", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload)
-            });
-            if (!response.ok) {
-              const result = await response.json().catch(() => ({}));
-              throw new Error(result.error || "Update failed");
-            }
-            window.location.reload();
-          } catch (error) {
-            toggle.checked = !toggle.checked;
-            toggle.disabled = false;
-            window.alert(error.message || "Update failed");
-          }
-        });
-      });
     </script>
   </body>
 </html>

@@ -822,7 +822,7 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIn("Supercycle 1", html)
         self.assertIn("Supercycle 2", html)
         self.assertIn("Totals", html)
-        self.assertIn("1 included stages", html)
+        self.assertIn("1 session", html)
         self.assertIn("chartMetricGroups", html)
         self.assertIn("metric-chart-check", html)
         self.assertIn("Track Explorer", html)
@@ -1042,6 +1042,77 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertIsNone(overview_points)
         self.assertLess(points[-1]["x_distance"], 0.2)
         self.assertGreater(points[-1]["x_distance"], 0.09)
+
+    def test_travel_project_creation_assignment_and_analysis(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (
+                    device_id, session_id, mode, start_ts, end_ts, rows_count,
+                    distance_km, solar_enabled, uploaded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "cargo-bike-3",
+                    "2026-07-12",
+                    "test",
+                    "2026-07-12 09:00:00",
+                    "2026-07-12 10:00:00",
+                    0,
+                    12.5,
+                    1,
+                    "2026-07-12 10:05:00",
+                ),
+            )
+            conn.commit()
+
+        client = self.monitor_app.app.test_client()
+        token = "Basic YWRtaW46c2VjcmV0"
+        created = client.post(
+            "/api/travel_projects",
+            json={"name": "Tour des Alpes"},
+            headers={"Authorization": token},
+        )
+        self.assertEqual(created.status_code, 201)
+        project_id = created.get_json()["project"]["id"]
+
+        assigned = client.patch(
+            "/api/sessions/travel_project",
+            json={
+                "travel_project_id": project_id,
+                "sessions": [
+                    {
+                        "device_id": "cargo-bike-3",
+                        "session_id": "2026-07-12",
+                        "mode": "test",
+                    }
+                ],
+            },
+            headers={"Authorization": token},
+        )
+        self.assertEqual(assigned.status_code, 200)
+        self.assertEqual(assigned.get_json()["updated_count"], 1)
+
+        page = client.get("/", headers={"Authorization": token})
+        html = page.get_data(as_text=True)
+        self.assertIn("Tour des Alpes", html)
+        self.assertIn("test-session-row", html)
+        self.assertNotIn(
+            "/api/export_gpx?device_id=cargo-bike-3&amp;session_id=2026-07-12",
+            html,
+        )
+
+        analysis = client.get(
+            f"/travel_analysis?project_id={project_id}",
+            headers={"Authorization": token},
+        )
+        analysis_html = analysis.get_data(as_text=True)
+        self.assertEqual(analysis.status_code, 200)
+        self.assertIn("Travel Analysis", analysis_html)
+        self.assertIn("Tour des Alpes", analysis_html)
+        self.assertIn("cargo-bike-3", analysis_html)
 
     def test_suntrip_trace_exposes_smoothed_gradient_metric(self):
         samples = []

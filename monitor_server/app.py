@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import tempfile
+import unicodedata
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
@@ -88,7 +89,7 @@ SUNTRIP_ANALYSIS_TRACE_MAX_POINTS = 1400
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS = 12000
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM = 15.0
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_MINUTES = 30.0
-_SUNTRIP_ANALYSIS_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
+_TRAVEL_ANALYSIS_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
 SUNTRIP_CORRECTION_MIN_DISTANCE_KM = 10.0
 SUNTRIP_CORRECTION_MIN_GPS_POINTS = 100
 SUNTRIP_CORRECTION_MAX_GPS_REJECTED_RATIO = 0.02
@@ -262,6 +263,17 @@ def _init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS travel_projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                slug TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 device_id TEXT,
@@ -279,6 +291,7 @@ def _init_db() -> None:
                 user_ids_json TEXT,
                 metrics_json TEXT,
                 suntrip_stage INTEGER DEFAULT 0,
+                travel_project_id INTEGER,
                 trace_json TEXT,
                 trace_version INTEGER,
                 uploaded_at TEXT,
@@ -461,6 +474,7 @@ def _migrate_db() -> None:
             "solar_enabled": "INTEGER DEFAULT 1",
             "user_ids_json": "TEXT",
             "suntrip_stage": "INTEGER DEFAULT 0",
+            "travel_project_id": "INTEGER",
             "trace_json": "TEXT",
             "trace_version": "INTEGER",
         }
@@ -469,6 +483,45 @@ def _migrate_db() -> None:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {col_type}")
         conn.execute("UPDATE sessions SET solar_enabled = 1 WHERE solar_enabled IS NULL")
         conn.execute("UPDATE sessions SET suntrip_stage = 0 WHERE suntrip_stage IS NULL")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS travel_projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                slug TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_travel_project ON sessions(travel_project_id)"
+        )
+        legacy_suntrip_count = conn.execute(
+            "SELECT COUNT(*) FROM sessions WHERE suntrip_stage = 1 AND travel_project_id IS NULL"
+        ).fetchone()[0]
+        if legacy_suntrip_count:
+            now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute(
+                """
+                INSERT INTO travel_projects (name, slug, created_at, updated_at)
+                VALUES ('Suntrip', 'suntrip', ?, ?)
+                ON CONFLICT(name) DO NOTHING
+                """,
+                (now, now),
+            )
+            suntrip_project = conn.execute(
+                "SELECT id FROM travel_projects WHERE name = 'Suntrip' COLLATE NOCASE"
+            ).fetchone()
+            if suntrip_project:
+                conn.execute(
+                    """
+                    UPDATE sessions
+                    SET travel_project_id = ?
+                    WHERE suntrip_stage = 1 AND travel_project_id IS NULL
+                    """,
+                    (suntrip_project["id"],),
+                )
 
         telemetry_columns = _table_columns(conn, TELEMETRY_TABLE)
         telemetry_missing = {
@@ -1857,6 +1910,15 @@ def _suntrip_vehicle_for_device(device_id: str | None) -> dict[str, Any] | None:
     return None
 
 
+def _analysis_vehicle_for_device(device_id: str | None) -> dict[str, Any]:
+    known = _suntrip_vehicle_for_device(device_id)
+    if known:
+        return known
+    label = str(device_id or "Véhicule inconnu").strip() or "Véhicule inconnu"
+    normalized = _normalize_device_id(label) or hashlib.sha1(label.encode("utf-8")).hexdigest()[:10]
+    return {"key": f"vehicle_{normalized}", "label": label, "aliases": (label,)}
+
+
 def _session_day(start_ts: str | None, session_id: str | None) -> datetime.date | None:
     parsed = _parse_upload_ts(start_ts)
     if parsed:
@@ -1890,6 +1952,123 @@ def _session_key(payload: dict[str, Any]) -> tuple[str, str, str] | None:
     if not normalized["device_id"] or not normalized["session_id"]:
         return None
     return normalized["device_id"], normalized["session_id"], normalized["mode"]
+
+
+def _travel_project_slug(name: str) -> str:
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    slug = "".join(ch if ch.isalnum() else "-" for ch in ascii_name.lower())
+    return "-".join(part for part in slug.split("-") if part) or "voyage"
+
+
+def _unique_travel_project_slug(conn: sqlite3.Connection, name: str) -> str:
+    base = _travel_project_slug(name)
+    slug = base
+    suffix = 2
+    while conn.execute("SELECT 1 FROM travel_projects WHERE slug = ?", (slug,)).fetchone():
+        slug = f"{base}-{suffix}"
+        suffix += 1
+    return slug
+
+
+def _travel_project_dataset_signature(conn: sqlite3.Connection, project_id: int) -> str:
+    project = conn.execute(
+        "SELECT id, updated_at FROM travel_projects WHERE id = ?",
+        (project_id,),
+    ).fetchone()
+    if not project:
+        return ""
+    rows = conn.execute(
+        """
+        SELECT s.id, s.device_id, s.session_id, s.mode, s.start_ts, s.end_ts,
+               s.rows_count, s.distance_km, s.duration_sec, s.avg_speed_kph,
+               s.metrics_json, s.uploaded_at
+        FROM sessions s
+        WHERE s.travel_project_id = ?
+        ORDER BY s.id
+        """,
+        (project_id,),
+    ).fetchall()
+    digest = hashlib.sha256(str(project["updated_at"] or "").encode("utf-8"))
+    for row in rows:
+        digest.update(
+            json.dumps(list(row), ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+        )
+    return digest.hexdigest()
+
+
+def _set_sessions_travel_project(
+    sessions: list[dict[str, Any]],
+    travel_project_id: int | None,
+) -> dict[str, Any]:
+    results = []
+    updated_count = 0
+    affected_project_ids: set[int] = set()
+    with _get_db() as conn:
+        if travel_project_id is not None:
+            project = conn.execute(
+                "SELECT id, name FROM travel_projects WHERE id = ?",
+                (travel_project_id,),
+            ).fetchone()
+            if not project:
+                return {"error": "travel project not found", "updated_count": 0, "results": []}
+        else:
+            project = None
+        for raw in sessions:
+            payload = _session_payload_from_request(raw)
+            if not payload["device_id"] or not payload["session_id"]:
+                results.append({**payload, "status": "skipped", "error": "missing device_id or session_id"})
+                continue
+            existing = conn.execute(
+                """
+                SELECT travel_project_id FROM sessions
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                """,
+                (payload["device_id"], payload["session_id"], payload["mode"]),
+            ).fetchone()
+            if not existing:
+                results.append({**payload, "status": "not_found"})
+                continue
+            if existing["travel_project_id"] is not None:
+                affected_project_ids.add(int(existing["travel_project_id"]))
+            cursor = conn.execute(
+                """
+                UPDATE sessions SET travel_project_id = ?
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                """,
+                (travel_project_id, payload["device_id"], payload["session_id"], payload["mode"]),
+            )
+            if cursor.rowcount:
+                updated_count += 1
+                results.append(
+                    {
+                        **payload,
+                        "status": "updated",
+                        "travel_project_id": travel_project_id,
+                        "travel_project_name": project["name"] if project else None,
+                    }
+                )
+        if travel_project_id is not None:
+            affected_project_ids.add(travel_project_id)
+        if affected_project_ids:
+            now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            placeholders = ",".join("?" for _ in affected_project_ids)
+            conn.execute(
+                f"UPDATE travel_projects SET updated_at = ? WHERE id IN ({placeholders})",
+                (now, *sorted(affected_project_ids)),
+            )
+        conn.commit()
+    if affected_project_ids:
+        for key in list(_TRAVEL_ANALYSIS_CACHE):
+            if len(key) > 1 and key[1] in affected_project_ids:
+                _TRAVEL_ANALYSIS_CACHE.pop(key, None)
+    return {
+        "status": "ok",
+        "requested": len(sessions),
+        "updated_count": updated_count,
+        "travel_project_id": travel_project_id,
+        "travel_project_name": project["name"] if project else None,
+        "results": results,
+    }
 
 
 def _photo_counts_for_sessions(
@@ -2227,6 +2406,19 @@ def _set_suntrip_stage_sessions(sessions: list[dict[str, Any]], suntrip_stage: b
     results = []
     updated_count = 0
     with _get_db() as conn:
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            """
+            INSERT INTO travel_projects (name, slug, created_at, updated_at)
+            VALUES ('Suntrip', 'suntrip', ?, ?)
+            ON CONFLICT(name) DO NOTHING
+            """,
+            (now, now),
+        )
+        suntrip_project = conn.execute(
+            "SELECT id FROM travel_projects WHERE name = 'Suntrip' COLLATE NOCASE"
+        ).fetchone()
+        suntrip_project_id = int(suntrip_project["id"])
         for raw in sessions:
             payload = _session_payload_from_request(raw)
             if not payload["device_id"] or not payload["session_id"]:
@@ -2235,11 +2427,19 @@ def _set_suntrip_stage_sessions(sessions: list[dict[str, Any]], suntrip_stage: b
             cursor = conn.execute(
                 """
                 UPDATE sessions
-                SET suntrip_stage = ?
+                SET suntrip_stage = ?,
+                    travel_project_id = CASE
+                        WHEN ? = 1 THEN ?
+                        WHEN travel_project_id = ? THEN NULL
+                        ELSE travel_project_id
+                    END
                 WHERE device_id = ? AND session_id = ? AND mode = ?
                 """,
                 (
                     1 if suntrip_stage else 0,
+                    1 if suntrip_stage else 0,
+                    suntrip_project_id,
+                    suntrip_project_id,
                     payload["device_id"],
                     payload["session_id"],
                     payload["mode"],
@@ -2250,6 +2450,10 @@ def _set_suntrip_stage_sessions(sessions: list[dict[str, Any]], suntrip_stage: b
                 results.append({**payload, "status": "updated", "suntrip_stage": bool(suntrip_stage)})
             else:
                 results.append({**payload, "status": "not_found", "suntrip_stage": bool(suntrip_stage)})
+        conn.execute(
+            "UPDATE travel_projects SET updated_at = ? WHERE id = ?",
+            (now, suntrip_project_id),
+        )
         conn.commit()
     return {
         "status": "ok",
@@ -2361,7 +2565,10 @@ def _weighted_mean_ratio(samples: list[dict[str, Any]]) -> float | None:
     return sum(float(sample["ratio"]) * float(sample["ca_distance_km"]) for sample in samples) / total_weight
 
 
-def _suntrip_vehicle_corrections(columns: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _suntrip_vehicle_corrections(
+    columns: list[dict[str, Any]],
+    vehicles: tuple[dict[str, Any], ...] | list[dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
     by_vehicle: dict[str, list[dict[str, Any]]] = {}
     for column in columns:
         sample = _ca_gps_correction_sample(column["metrics"])
@@ -2372,7 +2579,7 @@ def _suntrip_vehicle_corrections(columns: list[dict[str, Any]]) -> dict[str, dic
         by_vehicle.setdefault(column["vehicle_key"], []).append(sample)
 
     corrections: dict[str, dict[str, Any]] = {}
-    for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
+    for vehicle in vehicles or SUNTRIP_ANALYSIS_VEHICLES:
         vehicle_key = vehicle["key"]
         samples = by_vehicle.get(vehicle_key, [])
         if not samples:
@@ -2692,7 +2899,7 @@ def _trace_session_payload(
     range_max: float | None = None,
     overview_max_points: int | None = None,
 ) -> dict[str, Any]:
-    vehicle = _suntrip_vehicle_for_device(session["device_id"])
+    vehicle = _analysis_vehicle_for_device(session["device_id"])
     samples = _telemetry_samples_for_session(
         conn,
         session["device_id"],
@@ -2737,57 +2944,37 @@ def _trace_session_payload(
 def _comparison_sessions_for_trace(
     conn: sqlite3.Connection,
     selected: sqlite3.Row,
+    travel_project_id: int | None = None,
 ) -> list[sqlite3.Row]:
-    selected_vehicle = _suntrip_vehicle_for_device(selected["device_id"])
+    selected_vehicle = _analysis_vehicle_for_device(selected["device_id"])
     selected_day = _session_day(selected["start_ts"], selected["session_id"])
-    if not selected_vehicle or not selected_day:
+    if not selected_day:
         return [selected]
 
     start_prefix = selected_day.isoformat()
-    rows = conn.execute(
-        """
-        SELECT device_id, session_id, mode, solar_enabled, suntrip_stage,
+    query = """
+        SELECT device_id, session_id, mode, solar_enabled, suntrip_stage, travel_project_id,
                start_ts, end_ts, rows_count, distance_km, uploaded_at
         FROM sessions
         WHERE (date(start_ts) = ? OR substr(session_id, 1, 10) = ?)
-        ORDER BY suntrip_stage DESC, COALESCE(start_ts, session_id), device_id
-        """,
-        (start_prefix, start_prefix),
-    ).fetchall()
+    """
+    params: list[Any] = [start_prefix, start_prefix]
+    if travel_project_id is not None:
+        query += " AND travel_project_id = ?"
+        params.append(travel_project_id)
+    query += " ORDER BY COALESCE(start_ts, session_id), device_id"
+    rows = conn.execute(query, params).fetchall()
     by_vehicle: dict[str, sqlite3.Row] = {selected_vehicle["key"]: selected}
-    selected_start = _parse_upload_ts(selected["start_ts"]) or datetime.min
     for row in rows:
-        vehicle = _suntrip_vehicle_for_device(row["device_id"])
-        if not vehicle or vehicle["key"] in by_vehicle:
+        vehicle = _analysis_vehicle_for_device(row["device_id"])
+        if vehicle["key"] in by_vehicle:
             continue
         row_day = _session_day(row["start_ts"], row["session_id"])
         if row_day != selected_day:
             continue
         by_vehicle[vehicle["key"]] = row
 
-    if len(by_vehicle) < len(SUNTRIP_ANALYSIS_VEHICLES):
-        candidates = [
-            row
-            for row in rows
-            if (vehicle := _suntrip_vehicle_for_device(row["device_id"]))
-            and vehicle["key"] not in by_vehicle
-            and _session_day(row["start_ts"], row["session_id"]) == selected_day
-        ]
-        candidates.sort(
-            key=lambda row: abs(
-                ((_parse_upload_ts(row["start_ts"]) or selected_start) - selected_start).total_seconds()
-            )
-        )
-        for row in candidates:
-            vehicle = _suntrip_vehicle_for_device(row["device_id"])
-            if vehicle and vehicle["key"] not in by_vehicle:
-                by_vehicle[vehicle["key"]] = row
-
-    return [
-        row
-        for vehicle in SUNTRIP_ANALYSIS_VEHICLES
-        if (row := by_vehicle.get(vehicle["key"]))
-    ]
+    return list(by_vehicle.values())
 
 
 def _is_deleted_session(conn: sqlite3.Connection, device_id: str, session_id: str, mode: str) -> bool:
@@ -3012,10 +3199,31 @@ def create_app() -> Flask:
                 """
             ).fetchall()
             sessions = conn.execute(
+                f"""
+                SELECT s.device_id, s.session_id, s.mode, s.solar_enabled,
+                       s.travel_project_id, p.name AS travel_project_name,
+                       s.start_ts, s.end_ts, s.rows_count, s.distance_km, s.uploaded_at,
+                       EXISTS(
+                           SELECT 1 FROM {TELEMETRY_TABLE} t
+                           WHERE t.device_id = s.device_id
+                             AND t.session_id = s.session_id
+                             AND t.mode = s.mode
+                             AND t.gps_lat IS NOT NULL AND t.gps_lon IS NOT NULL
+                             AND t.gps_lat != 0 AND t.gps_lon != 0
+                       ) AS has_gps
+                FROM sessions s
+                LEFT JOIN travel_projects p ON p.id = s.travel_project_id
+                ORDER BY s.start_ts DESC
                 """
-                SELECT device_id, session_id, mode, solar_enabled, suntrip_stage, start_ts, end_ts, rows_count, distance_km, uploaded_at
-                FROM sessions
-                ORDER BY start_ts DESC
+            ).fetchall()
+            travel_projects = conn.execute(
+                """
+                SELECT p.id, p.name, p.slug, p.created_at, p.updated_at,
+                       COUNT(s.id) AS session_count
+                FROM travel_projects p
+                LEFT JOIN sessions s ON s.travel_project_id = p.id
+                GROUP BY p.id
+                ORDER BY p.name COLLATE NOCASE
                 """
             ).fetchall()
             photo_counts = _photo_counts_for_sessions(
@@ -3078,10 +3286,12 @@ def create_app() -> Flask:
             _backfill_session_traces(conn)
             trace_rows = conn.execute(
                 """
-                SELECT device_id, session_id, mode, start_ts, trace_json
-                FROM sessions
-                WHERE trace_json IS NOT NULL AND trace_json != '[]'
-                ORDER BY start_ts DESC
+                SELECT s.device_id, s.session_id, s.mode, s.start_ts, s.trace_json,
+                       s.travel_project_id, p.name AS travel_project_name
+                FROM sessions s
+                LEFT JOIN travel_projects p ON p.id = s.travel_project_id
+                WHERE s.trace_json IS NOT NULL AND s.trace_json != '[]'
+                ORDER BY s.start_ts DESC
                 """
             ).fetchall()
             conn.commit()
@@ -3113,6 +3323,8 @@ def create_app() -> Flask:
                     "device_id": row["device_id"],
                     "session_id": row["session_id"],
                     "mode": row["mode"],
+                    "travel_project_id": row["travel_project_id"],
+                    "travel_project_name": row["travel_project_name"],
                     "start_ts_fmt": _format_dt(row["start_ts"]),
                     "color": device_colors.get(row["device_id"], _default_device_color(row["device_id"])),
                     "points": points,
@@ -3124,6 +3336,10 @@ def create_app() -> Flask:
                     ),
                 }
             )
+        map_vehicle_ids = sorted(
+            {trace["device_id"] for trace in session_traces},
+            key=lambda value: str(value).lower(),
+        )
         def _session_view_payload(s):
             month_key, month_label = _session_month(s["start_ts"], s["session_id"])
             return dict(s) | {
@@ -3132,7 +3348,8 @@ def create_app() -> Flask:
                 "uploaded_at_fmt": _format_dt(s["uploaded_at"]),
                 "month_key": month_key,
                 "month_label": month_label,
-                "suntrip_stage": bool(s["suntrip_stage"]),
+                "test_mode": "test" in str(s["mode"] or "").lower(),
+                "has_gps": bool(s["has_gps"]),
                 "photo_count": photo_counts.get((s["device_id"], s["session_id"], s["mode"]), 0),
             }
 
@@ -3170,7 +3387,9 @@ def create_app() -> Flask:
             "index.html",
             devices=devices,
             sessions=sessions,
+            travel_projects=[dict(project) for project in travel_projects],
             session_traces=session_traces,
+            map_vehicle_ids=map_vehicle_ids,
             daily_last_30=daily_last_30,
             daily_all=daily_all,
             total_distance_30=total_distance_30,
@@ -3371,6 +3590,60 @@ def create_app() -> Flask:
         if not isinstance(sessions, list) or not sessions:
             return jsonify({"error": "missing sessions"}), 400
         result = _set_suntrip_stage_sessions(sessions, bool(data.get("suntrip_stage")))
+        if result["updated_count"] == 0:
+            return jsonify({"error": "sessions not found", **result}), 404
+        return jsonify(result)
+
+    @app.route("/api/travel_projects", methods=["POST"])
+    @_require_auth
+    def create_travel_project():
+        data = request.get_json(silent=True) or {}
+        name = " ".join(str(data.get("name") or "").strip().split())
+        if not name:
+            return jsonify({"error": "missing travel project name"}), 400
+        if len(name) > 120:
+            return jsonify({"error": "travel project name is too long"}), 400
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        with _get_db() as conn:
+            if conn.execute(
+                "SELECT 1 FROM travel_projects WHERE name = ? COLLATE NOCASE",
+                (name,),
+            ).fetchone():
+                return jsonify({"error": "a travel project with this name already exists"}), 409
+            slug = _unique_travel_project_slug(conn, name)
+            cursor = conn.execute(
+                """
+                INSERT INTO travel_projects (name, slug, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (name, slug, now, now),
+            )
+            conn.commit()
+        return jsonify(
+            {
+                "status": "created",
+                "project": {"id": cursor.lastrowid, "name": name, "slug": slug, "session_count": 0},
+            }
+        ), 201
+
+    @app.route("/api/sessions/travel_project", methods=["PATCH"])
+    @_require_auth
+    def update_sessions_travel_project():
+        data = request.get_json(silent=True) or {}
+        sessions = data.get("sessions")
+        if not isinstance(sessions, list) or not sessions:
+            return jsonify({"error": "missing sessions"}), 400
+        raw_project_id = data.get("travel_project_id")
+        if raw_project_id in (None, "", "null"):
+            travel_project_id = None
+        else:
+            try:
+                travel_project_id = int(raw_project_id)
+            except (TypeError, ValueError):
+                return jsonify({"error": "invalid travel_project_id"}), 400
+        result = _set_sessions_travel_project(sessions, travel_project_id)
+        if result.get("error"):
+            return jsonify(result), 404
         if result["updated_count"] == 0:
             return jsonify({"error": "sessions not found", **result}), 404
         return jsonify(result)
@@ -4105,32 +4378,97 @@ def create_app() -> Flask:
         return render_template("suntrip.html")
 
     @app.route("/suntrip_analysis")
+    @app.route("/travel_analysis")
     @_require_auth
     def suntrip_analysis():
-        start_date = _parse_date_param(request.args.get("start"), SUNTRIP_ANALYSIS_START_DATE)
-        end_date = _parse_date_param(request.args.get("end"), SUNTRIP_ANALYSIS_END_DATE)
+        with _get_db() as conn:
+            projects = conn.execute(
+                """
+                SELECT p.id, p.name, p.slug, p.created_at, p.updated_at,
+                       COUNT(s.id) AS session_count,
+                       MIN(COALESCE(s.start_ts, substr(s.session_id, 1, 10))) AS first_session,
+                       MAX(COALESCE(s.start_ts, substr(s.session_id, 1, 10))) AS last_session
+                FROM travel_projects p
+                LEFT JOIN sessions s ON s.travel_project_id = p.id
+                GROUP BY p.id
+                ORDER BY CASE WHEN COUNT(s.id) > 0 THEN 0 ELSE 1 END,
+                         last_session DESC,
+                         p.name COLLATE NOCASE
+                """
+            ).fetchall()
+            requested_project_id = request.args.get("project_id")
+            project = None
+            if requested_project_id:
+                try:
+                    project_id = int(requested_project_id)
+                except (TypeError, ValueError):
+                    project_id = 0
+                project = next((row for row in projects if row["id"] == project_id), None)
+            if project is None and projects:
+                project = projects[0]
+            if project is None:
+                return render_template(
+                    "suntrip_analysis.html",
+                    projects=[],
+                    project=None,
+                    start_date="",
+                    end_date="",
+                    vehicles=[],
+                    candidates=[],
+                    columns=[],
+                    total_columns=[],
+                    day_groups=[],
+                    metric_groups=[],
+                    chart_metric_groups=[],
+                    trace_sessions=[],
+                    trace_metric_options=[],
+                    ca_gps_corrections=[],
+                    stage_count=0,
+                    trace_standard_max_points=SUNTRIP_ANALYSIS_TRACE_MAX_POINTS,
+                    trace_detailed_max_points=SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS,
+                    trace_detailed_max_km=SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM,
+                    trace_detailed_max_minutes=SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_MINUTES,
+                )
+            default_start = str(project["first_session"] or SUNTRIP_ANALYSIS_START_DATE)[:10]
+            default_end = str(project["last_session"] or default_start)[:10]
+            dataset_signature = _travel_project_dataset_signature(conn, project["id"])
+
+        start_date = _parse_date_param(request.args.get("start"), default_start)
+        end_date = _parse_date_param(request.args.get("end"), default_end)
         if end_date < start_date:
             start_date, end_date = end_date, start_date
-        cache_key = ("suntrip_analysis", _db_state_key(), start_date.isoformat(), end_date.isoformat())
-        payload = _SUNTRIP_ANALYSIS_CACHE.get(cache_key)
+        cache_key = (
+            "travel_analysis",
+            project["id"],
+            dataset_signature,
+            start_date.isoformat(),
+            end_date.isoformat(),
+        )
+        payload = _TRAVEL_ANALYSIS_CACHE.get(cache_key)
         if payload is None:
-            vehicle_order = {vehicle["key"]: index for index, vehicle in enumerate(SUNTRIP_ANALYSIS_VEHICLES)}
-
             with _get_db() as conn:
                 rows = conn.execute(
                     """
-                    SELECT device_id, session_id, mode, solar_enabled, suntrip_stage,
+                    SELECT device_id, session_id, mode, solar_enabled, travel_project_id,
                            start_ts, end_ts, rows_count, distance_km, uploaded_at
                     FROM sessions
+                    WHERE travel_project_id = ?
                     ORDER BY COALESCE(start_ts, session_id), device_id
-                    """
+                    """,
+                    (project["id"],),
                 ).fetchall()
+                vehicles_by_key: dict[str, dict[str, Any]] = {}
+                for row in rows:
+                    vehicle = _analysis_vehicle_for_device(row["device_id"])
+                    vehicles_by_key.setdefault(vehicle["key"], vehicle)
+                vehicles = sorted(vehicles_by_key.values(), key=lambda item: item["label"].lower())
+                vehicle_order = {vehicle["key"]: index for index, vehicle in enumerate(vehicles)}
 
                 candidates = []
                 for row in rows:
-                    vehicle = _suntrip_vehicle_for_device(row["device_id"])
+                    vehicle = _analysis_vehicle_for_device(row["device_id"])
                     day = _session_day(row["start_ts"], row["session_id"])
-                    if not vehicle or not day or day < start_date or day > end_date:
+                    if not day or day < start_date or day > end_date:
                         continue
                     candidate = dict(row) | {
                         "day": day,
@@ -4141,7 +4479,7 @@ def create_app() -> Flask:
                         "vehicle_order": vehicle_order.get(vehicle["key"], 99),
                         "start_ts_fmt": _format_dt(row["start_ts"]),
                         "end_ts_fmt": _format_dt(row["end_ts"]),
-                        "suntrip_stage": bool(row["suntrip_stage"]),
+                        "suntrip_stage": True,
                         "map_url": url_for(
                             "session_map",
                             device_id=row["device_id"],
@@ -4162,8 +4500,6 @@ def create_app() -> Flask:
 
                 columns = []
                 for candidate in candidates:
-                    if not candidate["suntrip_stage"]:
-                        continue
                     samples = _telemetry_samples_for_session(
                         conn,
                         candidate["device_id"],
@@ -4173,7 +4509,7 @@ def create_app() -> Flask:
                     metrics = compute_session_metrics(samples)
                     columns.append(candidate | {"metrics": metrics, "sample_count": len(samples)})
 
-            ca_gps_corrections = _suntrip_vehicle_corrections(columns)
+            ca_gps_corrections = _suntrip_vehicle_corrections(columns, vehicles)
             for column in columns:
                 correction = ca_gps_corrections.get(column["vehicle_key"], {})
                 factor = correction.get("factor") if correction.get("available") else 1.0
@@ -4187,7 +4523,7 @@ def create_app() -> Flask:
                 day_groups[-1]["columns"].append(column)
 
             total_columns = []
-            for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
+            for vehicle in vehicles:
                 vehicle_columns = [column for column in columns if column["vehicle_key"] == vehicle["key"]]
                 if not vehicle_columns:
                     continue
@@ -4232,7 +4568,7 @@ def create_app() -> Flask:
                         }
                     )
                     series = []
-                    for vehicle in SUNTRIP_ANALYSIS_VEHICLES:
+                    for vehicle in vehicles:
                         values = []
                         for day in day_groups:
                             day_vehicle_columns = [
@@ -4283,7 +4619,7 @@ def create_app() -> Flask:
                 for candidate in candidates
             ]
             payload = {
-                "vehicles": SUNTRIP_ANALYSIS_VEHICLES,
+                "vehicles": vehicles,
                 "candidates": candidates,
                 "columns": columns,
                 "total_columns": total_columns,
@@ -4299,23 +4635,30 @@ def create_app() -> Flask:
                 "ca_gps_corrections": list(ca_gps_corrections.values()),
                 "stage_count": len(columns),
             }
-            if len(_SUNTRIP_ANALYSIS_CACHE) > 8:
-                _SUNTRIP_ANALYSIS_CACHE.clear()
-            _SUNTRIP_ANALYSIS_CACHE[cache_key] = payload
+            if len(_TRAVEL_ANALYSIS_CACHE) > 16:
+                _TRAVEL_ANALYSIS_CACHE.clear()
+            _TRAVEL_ANALYSIS_CACHE[cache_key] = payload
 
         return render_template(
             "suntrip_analysis.html",
+            projects=[dict(row) for row in projects],
+            project=dict(project),
             start_date=start_date.isoformat(),
             end_date=end_date.isoformat(),
             **payload,
         )
 
     @app.route("/api/suntrip_analysis/session_trace")
+    @app.route("/api/travel_analysis/session_trace")
     @_require_auth
     def suntrip_analysis_session_trace():
         device_id = request.args.get("device_id")
         session_id = request.args.get("session_id")
         mode = request.args.get("mode", "default")
+        try:
+            travel_project_id = int(request.args.get("project_id")) if request.args.get("project_id") else None
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid project_id"}), 400
         metric_key = request.args.get("metric") or "ca_speed_kph"
         compare = request.args.get("compare", "1").strip().lower() not in {"0", "false", "no", "off"}
         requested_detailed = request.args.get("detailed", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -4354,7 +4697,7 @@ def create_app() -> Flask:
         with _get_db() as conn:
             selected = conn.execute(
                 """
-                SELECT device_id, session_id, mode, solar_enabled, suntrip_stage,
+                SELECT device_id, session_id, mode, solar_enabled, suntrip_stage, travel_project_id,
                        start_ts, end_ts, rows_count, distance_km, uploaded_at
                 FROM sessions
                 WHERE device_id = ? AND session_id = ? AND mode = ?
@@ -4363,7 +4706,13 @@ def create_app() -> Flask:
             ).fetchone()
             if not selected:
                 return jsonify({"error": "session not found"}), 404
-            sessions = _comparison_sessions_for_trace(conn, selected) if compare else [selected]
+            if travel_project_id is not None and selected["travel_project_id"] != travel_project_id:
+                return jsonify({"error": "session is not assigned to this travel project"}), 404
+            sessions = (
+                _comparison_sessions_for_trace(conn, selected, travel_project_id)
+                if compare
+                else [selected]
+            )
             detailed = requested_detailed
             max_allowed_points = (
                 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS

@@ -133,6 +133,41 @@
         -webkit-overflow-scrolling: touch;
       }
       .table-card table { min-width: max-content; }
+      .test-session-row td,
+      .test-session-row a,
+      .test-session-row button { color: #c45d00; }
+      .travel-controls,
+      .map-filters {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin: 10px 0 14px;
+      }
+      .travel-controls input,
+      .travel-controls select {
+        min-height: 36px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #fff;
+        padding: 6px 9px;
+      }
+      .map-filter-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      .map-filter-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #faf7f0;
+        font-size: 12px;
+      }
       .device-color {
         width: 28px;
         height: 28px;
@@ -238,12 +273,6 @@
         cursor: wait;
         opacity: 0.65;
       }
-      .stage-check {
-        width: 18px;
-        height: 18px;
-        accent-color: var(--accent);
-      }
-      .stage-row td { background: #f0fdfa; }
       .modal-backdrop {
         position: fixed;
         inset: 0;
@@ -504,16 +533,16 @@
         </div>
         <div class="bulk-buttons">
           <button id="compact-db-btn" class="action-link" type="button">Compact DB</button>
-          <a class="action-link primary" href="/suntrip_analysis">Suntrip analysis</a>
+          <a class="action-link primary" href="/travel_analysis">Travel analysis</a>
         </div>
       </div>
 
-      <h2>Devices</h2>
+      <h2>Vehicles</h2>
       <div class="card table-card">
         <table>
           <thead>
             <tr>
-              <th>Device</th>
+              <th>Vehicle</th>
               <th>Color</th>
               <th>Status</th>
               <th>Last Seen</th>
@@ -573,7 +602,7 @@
         {% if latest_photo %}
           <div class="photo-meta">
             <div class="photo-tile">
-              <div class="photo-label">Device</div>
+              <div class="photo-label">Vehicle</div>
               <div class="photo-value">{{ latest_photo["device_id"] }}</div>
             </div>
             <div class="photo-tile">
@@ -636,9 +665,33 @@
         </div>
       </div>
 
-      <h2>Recent Sessions</h2>
+      <h2>Sessions</h2>
       <div class="card">
         <div class="pill">All GPX traces</div>
+        <div class="map-filters" aria-label="Map filters">
+          <strong>Vehicles</strong>
+          <div class="map-filter-group">
+            {% for device_id in map_vehicle_ids %}
+            <label class="map-filter-chip">
+              <input class="map-device-filter" type="checkbox" value="{{ device_id }}" checked>
+              {{ device_id }}
+            </label>
+            {% endfor %}
+          </div>
+          <strong>Travels</strong>
+          <div class="map-filter-group">
+            {% for project in travel_projects %}
+            <label class="map-filter-chip">
+              <input class="map-project-filter" type="checkbox" value="{{ project['id'] }}" checked>
+              {{ project["name"] }}
+            </label>
+            {% endfor %}
+            <label class="map-filter-chip">
+              <input class="map-project-filter" type="checkbox" value="unassigned" checked>
+              No travel
+            </label>
+          </div>
+        </div>
         <div class="map-wrap">
           <div id="monitor-map" class="map" role="img" aria-label="Recent session locations"></div>
         </div>
@@ -648,12 +701,22 @@
         <div class="bulk-actions">
           <div class="bulk-count"><span id="selected-count">0</span> selected</div>
           <div class="bulk-buttons">
-            <button id="bulk-stage-btn" class="action-link primary" type="button" disabled>Mark Suntrip</button>
-            <button id="bulk-unstage-btn" class="action-link" type="button" disabled>Unmark Suntrip</button>
+            <select id="travel-project-select" aria-label="Travel project">
+              <option value="">No travel</option>
+              {% for project in travel_projects %}
+              <option value="{{ project['id'] }}">{{ project["name"] }}</option>
+              {% endfor %}
+            </select>
+            <button id="bulk-travel-btn" class="action-link primary" type="button" disabled>Assign travel</button>
             <button id="bulk-solar-profile-btn" class="action-link primary" type="button" disabled>Solar profile</button>
             <button id="bulk-video-btn" class="action-link primary" type="button" disabled>Photo video</button>
             <button id="bulk-delete-btn" class="action-link danger" type="button" disabled>Delete selected</button>
           </div>
+        </div>
+        <div class="travel-controls">
+          <strong>Travel projects</strong>
+          <input id="new-travel-project-name" type="text" maxlength="120" placeholder="New travel name">
+          <button id="create-travel-project-btn" class="action-link" type="button">Create project</button>
         </div>
         <table class="table-compact">
           <thead>
@@ -661,23 +724,16 @@
               <th class="select-col">
                 <input id="select-all-sessions" class="session-check" type="checkbox" aria-label="Select all sessions">
               </th>
-              <th>Device</th>
+              <th>Vehicle</th>
               <th>Session</th>
-              <th>Mode</th>
-              <th>Suntrip</th>
+              <th>Travel</th>
               <th title="Solar session">☀️</th>
               <th title="Photos">📷</th>
               <th>Actions</th>
               <th>
-                Start
-                <button class="sort-btn" data-sort-key="start" data-sort-order="desc" aria-label="Sort by start time">↕</button>
-              </th>
-              <th>Rows</th>
-              <th>
                 Distance (km)
                 <button class="sort-btn" data-sort-key="distance" data-sort-order="desc" aria-label="Sort by distance">↕</button>
               </th>
-              <th>Uploaded</th>
             </tr>
           </thead>
           <tbody id="sessions-body">
@@ -686,11 +742,11 @@
             {% if s["month_key"] != current_month.key %}
             {% set current_month.key = s["month_key"] %}
             <tr class="month-separator" data-month-separator="1">
-              <td colspan="12"><span>{{ s["month_label"] }}</span></td>
+              <td colspan="8"><span>{{ s["month_label"] }}</span></td>
             </tr>
             {% endif %}
             <tr
-              class="{{ 'stage-row' if s['suntrip_stage'] else '' }}"
+              class="{{ 'test-session-row' if s['test_mode'] else '' }}"
               data-session-row="1"
               data-start="{{ s['start_ts'] or '' }}"
               data-distance="{{ s['distance_km'] or 0 }}"
@@ -698,6 +754,7 @@
               data-session-id="{{ s['session_id'] }}"
               data-mode="{{ s['mode'] }}"
               data-photo-count="{{ s['photo_count'] or 0 }}"
+              data-travel-project-id="{{ s['travel_project_id'] or '' }}"
               data-month-key="{{ s['month_key'] }}"
               data-month-label="{{ s['month_label'] }}"
             >
@@ -706,27 +763,18 @@
               </td>
               <td>{{ s["device_id"] }}</td>
               <td>{{ s["session_id"] }}</td>
-              <td>{{ s["mode"] }}</td>
-              <td>
-                <input
-                  class="stage-check session-stage-check"
-                  type="checkbox"
-                  aria-label="Mark {{ s['session_id'] }} as Suntrip stage"
-                  {% if s["suntrip_stage"] %}checked{% endif %}
-                >
-              </td>
+              <td>{{ s["travel_project_name"] or "" }}</td>
               <td>{{ "☀️" if s["solar_enabled"] else "" }}</td>
               <td title="{{ s['photo_count'] or 0 }} photos">{{ "📷" if s["photo_count"] else "" }}</td>
               <td>
-                <a class="action-link primary" href="/api/export_session?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}" download>Session JSON</a>
+                <a class="action-link primary" href="/api/export_session?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}" download>JSON</a>
+                {% if s["has_gps"] %}
                 <a class="action-link" href="/api/export_gpx?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}">GPX</a>
-                <a class="action-link" href="/session_map?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}">Map</a>
+                {% endif %}
+                <a class="action-link" href="/session_map?device_id={{ s['device_id']|urlencode }}&session_id={{ s['session_id']|urlencode }}&mode={{ s['mode']|urlencode }}">Summary</a>
                 <button class="action-link danger session-delete-btn" type="button" aria-label="Delete session {{ s['session_id'] }}">Delete</button>
               </td>
-              <td>{{ s["start_ts_fmt"] or "" }}</td>
-              <td>{{ s["rows_count"] or 0 }}</td>
               <td>{{ "%.2f"|format(s["distance_km"] or 0) }}</td>
-              <td>{{ s["uploaded_at_fmt"] or "" }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -841,9 +889,18 @@
         }).addTo(map);
         const bounds = [];
         const traceEntries = [];
-        const endpointMarkers = [];
         const ENDPOINT_MIN_ZOOM = 7;
         let selectedKeys = new Set();
+        const selectedDeviceFilters = () => new Set(
+          Array.from(document.querySelectorAll(".map-device-filter:checked")).map((input) => input.value)
+        );
+        const selectedProjectFilters = () => new Set(
+          Array.from(document.querySelectorAll(".map-project-filter:checked")).map((input) => input.value)
+        );
+        const traceIsVisible = (trace) => {
+          const projectKey = trace.travel_project_id == null ? "unassigned" : String(trace.travel_project_id);
+          return selectedDeviceFilters().has(trace.device_id) && selectedProjectFilters().has(projectKey);
+        };
         const traceKey = (trace) => `${trace.device_id}\u0000${trace.session_id}\u0000${trace.mode}`;
         const distanceToSegment = (point, start, end) => {
           const dx = end.x - start.x;
@@ -875,6 +932,7 @@
         };
         const showTraceSelection = (latlng) => {
           const matches = traceEntries
+            .filter((entry) => traceIsVisible(entry.trace))
             .map((entry) => ({ ...entry, distance: distanceToTrace(latlng, entry.trace) }))
             .filter((entry) => entry.distance <= 12)
             .sort((a, b) => a.distance - b.distance);
@@ -948,7 +1006,8 @@
           layer.on("click", (event) => {
             showTraceSelection(event.latlng);
           });
-          traceEntries.push({ trace, layer });
+          const entry = { trace, layer, startMarker: null, finishMarker: null };
+          traceEntries.push(entry);
           const deviceLayers = traceLayersByDevice.get(trace.device_id) || [];
           deviceLayers.push({ trace, layer });
           traceLayersByDevice.set(trace.device_id, deviceLayers);
@@ -971,27 +1030,34 @@
             color: trace.color,
             fillColor: "#fff"
           }).bindTooltip(`Finish · ${trace.session_id}`);
-          endpointMarkers.push(startMarker, finishMarker);
+          entry.startMarker = startMarker;
+          entry.finishMarker = finishMarker;
           segments.forEach((segment) => segment.forEach((point) => bounds.push(point)));
         });
-        const updateEndpointVisibility = () => {
-          const visible = map.getZoom() >= ENDPOINT_MIN_ZOOM;
-          endpointMarkers.forEach((marker) => {
-            if (visible && !map.hasLayer(marker)) {
-              marker.addTo(map);
-            } else if (!visible && map.hasLayer(marker)) {
-              map.removeLayer(marker);
-            }
+        const applyMapFilters = () => {
+          const endpointsVisible = map.getZoom() >= ENDPOINT_MIN_ZOOM;
+          traceEntries.forEach(({ trace, layer, startMarker, finishMarker }) => {
+            const visible = traceIsVisible(trace);
+            if (visible && !map.hasLayer(layer)) layer.addTo(map);
+            if (!visible && map.hasLayer(layer)) map.removeLayer(layer);
+            [startMarker, finishMarker].forEach((marker) => {
+              if (visible && endpointsVisible && !map.hasLayer(marker)) marker.addTo(map);
+              if ((!visible || !endpointsVisible) && map.hasLayer(marker)) map.removeLayer(marker);
+            });
           });
+          clearTraceSelection();
         };
-        map.on("zoomend", updateEndpointVisibility);
+        document.querySelectorAll(".map-device-filter, .map-project-filter").forEach((input) => {
+          input.addEventListener("change", applyMapFilters);
+        });
+        map.on("zoomend", applyMapFilters);
         map.on("click", clearTraceSelection);
         map.on("popupclose", () => {
           if (selectedKeys.size) clearTraceSelection();
         });
         if (traceEntries.length) {
           map.fitBounds(bounds, { padding: [20, 20] });
-          updateEndpointVisibility();
+          applyMapFilters();
         } else {
           const label = document.createElement("div");
           label.className = "map-empty";
@@ -1033,9 +1099,9 @@
           const deviceId = button.dataset.deviceId || "";
           const sessionCount = Number(button.dataset.sessionCount || 0);
           const confirmed = await showMonitorDialog({
-            title: "Delete device",
-            message: `Delete ${deviceId} from the Devices table? Its ${sessionCount} session${sessionCount === 1 ? "" : "s"} will be preserved. If this device is still active, it will reappear at its next heartbeat.`,
-            confirmLabel: "Delete device",
+            title: "Delete vehicle",
+            message: `Delete ${deviceId} from the Vehicles table? Its ${sessionCount} session${sessionCount === 1 ? "" : "s"} will be preserved. If this vehicle is still active, it will reappear at its next heartbeat.`,
+            confirmLabel: "Delete vehicle",
             cancelLabel: "Cancel",
             danger: true
           });
@@ -1046,11 +1112,11 @@
               method: "DELETE"
             });
             const payload = await response.json();
-            if (!response.ok) throw new Error(payload.error || "Unable to delete the device.");
+            if (!response.ok) throw new Error(payload.error || "Unable to delete the vehicle.");
             button.closest("[data-device-row]")?.remove();
           } catch (error) {
             button.disabled = false;
-            await showMonitorMessage(error.message || "Unable to delete the device.", "Delete device");
+            await showMonitorMessage(error.message || "Unable to delete the vehicle.", "Delete vehicle");
           }
         });
       });
@@ -1059,8 +1125,10 @@
       const tbody = document.getElementById("sessions-body");
       const selectAllSessions = document.getElementById("select-all-sessions");
       const bulkDeleteBtn = document.getElementById("bulk-delete-btn");
-      const bulkStageBtn = document.getElementById("bulk-stage-btn");
-      const bulkUnstageBtn = document.getElementById("bulk-unstage-btn");
+      const bulkTravelBtn = document.getElementById("bulk-travel-btn");
+      const travelProjectSelect = document.getElementById("travel-project-select");
+      const newTravelProjectName = document.getElementById("new-travel-project-name");
+      const createTravelProjectBtn = document.getElementById("create-travel-project-btn");
       const bulkSolarProfileBtn = document.getElementById("bulk-solar-profile-btn");
       const bulkVideoBtn = document.getElementById("bulk-video-btn");
       const compactDbBtn = document.getElementById("compact-db-btn");
@@ -1116,7 +1184,7 @@
           separator.className = "month-separator";
           separator.dataset.monthSeparator = "1";
           const cell = document.createElement("td");
-          cell.colSpan = 12;
+          cell.colSpan = 8;
           const label = document.createElement("span");
           label.textContent = row.dataset.monthLabel || "Date inconnue";
           cell.appendChild(label);
@@ -1131,8 +1199,7 @@
         const checkedCount = checks.filter((check) => check.checked).length;
         if (selectedCount) selectedCount.textContent = String(checkedCount);
         if (bulkDeleteBtn) bulkDeleteBtn.disabled = checkedCount === 0;
-        if (bulkStageBtn) bulkStageBtn.disabled = checkedCount === 0;
-        if (bulkUnstageBtn) bulkUnstageBtn.disabled = checkedCount === 0;
+        if (bulkTravelBtn) bulkTravelBtn.disabled = checkedCount === 0;
         if (bulkSolarProfileBtn) bulkSolarProfileBtn.disabled = checkedCount === 0;
         if (bulkVideoBtn) {
           const selectedPhotoCount = selectedRows()
@@ -1148,13 +1215,6 @@
         rows.forEach((row) => row.remove());
         renderMonthSeparators();
         updateSelectionState();
-      };
-      const applyStageState = (rows, suntripStage) => {
-        rows.forEach((row) => {
-          row.classList.toggle("stage-row", suntripStage);
-          const check = row.querySelector(".session-stage-check");
-          if (check) check.checked = suntripStage;
-        });
       };
       compactDbBtn?.addEventListener("click", async () => {
         const confirmed = await showMonitorDialog({
@@ -1181,32 +1241,6 @@
           compactDbBtn.disabled = false;
         }
       });
-      const updateRowsStage = async (rows, suntripStage) => {
-        if (!rows.length) return;
-        const sessions = rows.map(getSessionPayload);
-        const response = await fetch("/api/sessions/suntrip_stage", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessions, suntrip_stage: suntripStage })
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(result.error || "Suntrip update failed");
-        }
-        const updatedKeys = new Set(
-          (result.results || [])
-            .filter((item) => item.status === "updated")
-            .map((item) => `${item.device_id}\u0000${item.session_id}\u0000${item.mode}`)
-        );
-        const updatedRows = rows.filter((row) => {
-          const payload = getSessionPayload(row);
-          return updatedKeys.has(`${payload.device_id}\u0000${payload.session_id}\u0000${payload.mode}`);
-        });
-        applyStageState(updatedRows, suntripStage);
-        if (updatedRows.length !== rows.length) {
-          await showMonitorMessage(`${updatedRows.length} of ${rows.length} selected sessions were updated.`);
-        }
-      };
       if (tbody) {
         tbody.addEventListener("click", async (event) => {
           const button = event.target.closest(".session-delete-btn");
@@ -1250,22 +1284,6 @@
         tbody.addEventListener("change", (event) => {
           if (event.target.matches(".session-row-check")) {
             updateSelectionState();
-          }
-          if (event.target.matches(".session-stage-check")) {
-            const check = event.target;
-            const row = check.closest("tr");
-            if (!row) return;
-            const next = check.checked;
-            check.disabled = true;
-            updateRowsStage([row], next)
-              .catch(async (error) => {
-                check.checked = !next;
-                row.classList.toggle("stage-row", !next);
-                await showMonitorMessage(error.message || "Suntrip update failed", "Update failed");
-              })
-              .finally(() => {
-                check.disabled = false;
-              });
           }
         });
       }
@@ -1418,26 +1436,52 @@
           }
         });
       }
-      const wireBulkStage = (button, suntripStage) => {
-        if (!button || !tbody) return;
-        button.addEventListener("click", async () => {
-          const rows = selectedRows();
-          if (!rows.length) return;
-          const originalText = button.textContent;
-          button.disabled = true;
-          button.textContent = suntripStage ? "Marking" : "Unmarking";
-          try {
-            await updateRowsStage(rows, suntripStage);
-          } catch (error) {
-            await showMonitorMessage(error.message || "Suntrip update failed", "Update failed");
-          } finally {
-            button.textContent = originalText;
-            updateSelectionState();
-          }
-        });
-      };
-      wireBulkStage(bulkStageBtn, true);
-      wireBulkStage(bulkUnstageBtn, false);
+      bulkTravelBtn?.addEventListener("click", async () => {
+        const rows = selectedRows();
+        if (!rows.length) return;
+        const originalText = bulkTravelBtn.textContent;
+        bulkTravelBtn.disabled = true;
+        bulkTravelBtn.textContent = "Assigning";
+        try {
+          const projectId = travelProjectSelect?.value || null;
+          const response = await fetch("/api/sessions/travel_project", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessions: rows.map(getSessionPayload),
+              travel_project_id: projectId
+            })
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || "Travel assignment failed");
+          window.location.reload();
+        } catch (error) {
+          await showMonitorMessage(error.message || "Travel assignment failed", "Assignment failed");
+          bulkTravelBtn.textContent = originalText;
+          updateSelectionState();
+        }
+      });
+      createTravelProjectBtn?.addEventListener("click", async () => {
+        const name = newTravelProjectName?.value.trim() || "";
+        if (!name) {
+          newTravelProjectName?.focus();
+          return;
+        }
+        createTravelProjectBtn.disabled = true;
+        try {
+          const response = await fetch("/api/travel_projects", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name })
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || "Unable to create the travel project");
+          window.location.reload();
+        } catch (error) {
+          await showMonitorMessage(error.message || "Unable to create the travel project", "Creation failed");
+          createTravelProjectBtn.disabled = false;
+        }
+      });
       updateSelectionState();
       renderMonthSeparators();
       const getValue = (row, key) => {
