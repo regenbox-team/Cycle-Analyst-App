@@ -4510,9 +4510,9 @@ def create_app() -> Flask:
             points.append(point)
         metrics_by_user = compute_timeline_metrics_by_user(samples)
         metrics_by_user["Total"] = compute_session_metrics(samples)
-        display_distance_km = metrics_by_user["Total"].get("distance")
-        if display_distance_km is None and session_row:
-            display_distance_km = session_row["distance_km"]
+        display_distance_km = session_row["distance_km"] if session_row else None
+        if display_distance_km is None:
+            display_distance_km = metrics_by_user["Total"].get("distance")
         session_users = [user for user in metrics_by_user.keys() if user != "Total"]
         all_users = ["Total"] if len(session_users) <= 1 else ["Total"] + session_users
 
