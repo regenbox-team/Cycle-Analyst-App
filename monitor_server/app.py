@@ -2933,7 +2933,6 @@ def create_app() -> Flask:
                 SELECT device_id, session_id, mode, solar_enabled, suntrip_stage, start_ts, end_ts, rows_count, distance_km, uploaded_at
                 FROM sessions
                 ORDER BY start_ts DESC
-                LIMIT 50
                 """
             ).fetchall()
             photo_counts = _photo_counts_for_sessions(
