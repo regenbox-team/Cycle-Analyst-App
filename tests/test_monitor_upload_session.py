@@ -482,6 +482,38 @@ class MonitorUploadSessionTest(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(stored, "#123abc")
 
+    def test_device_can_be_deleted_without_deleting_its_sessions(self):
+        if not hasattr(self.monitor_app.app, "test_client"):
+            self.skipTest("Flask test client is not available in this test environment.")
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("INSERT INTO devices (device_id) VALUES (?)", ("old-device",))
+            conn.execute(
+                "INSERT INTO sessions (device_id, session_id, mode) VALUES (?, ?, ?)",
+                ("old-device", "preserved-session", "default"),
+            )
+            conn.commit()
+
+        response = self.monitor_app.app.test_client().delete(
+            "/api/devices/old-device",
+            headers={"Authorization": "Basic YWRtaW46c2VjcmV0"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["sessions_preserved"], 1)
+        with sqlite3.connect(self.db_path) as conn:
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM devices WHERE device_id = ?", ("old-device",)).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM sessions WHERE device_id = ?",
+                    ("old-device",),
+                ).fetchone()[0],
+                1,
+            )
+
     def test_compact_db_endpoint_returns_size_stats(self):
         if not hasattr(self.monitor_app.app, "test_client"):
             self.skipTest("Flask test client is not available in this test environment.")

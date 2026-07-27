@@ -521,11 +521,12 @@
               <th>Session</th>
               <th>Test</th>
               <th>Localisation</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {% for d in devices %}
-            <tr>
+            <tr data-device-row="{{ d['device_id'] }}">
               <td>{{ d["device_id"] }}</td>
               <td>
                 <input
@@ -552,6 +553,14 @@
               <td>{{ "yes" if d["test_mode"] else "no" }}</td>
               <td>
                 <span class="loc-cross {{ "loc-ready" if d["gps_available"] else "loc-missing" }}" title="{{ "location available" if d["gps_available"] else "no location" }}">+</span>
+              </td>
+              <td>
+                <button
+                  class="action-link danger device-delete-btn"
+                  type="button"
+                  data-device-id="{{ d['device_id'] }}"
+                  data-session-count="{{ d['session_count'] or 0 }}"
+                >Delete</button>
               </td>
             </tr>
             {% endfor %}
@@ -984,6 +993,33 @@
             await showMonitorMessage(error.message || "Unable to save the color.", "Map color");
           } finally {
             input.disabled = false;
+          }
+        });
+      });
+
+      document.querySelectorAll(".device-delete-btn").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const deviceId = button.dataset.deviceId || "";
+          const sessionCount = Number(button.dataset.sessionCount || 0);
+          const confirmed = await showMonitorDialog({
+            title: "Delete device",
+            message: `Delete ${deviceId} from the Devices table? Its ${sessionCount} session${sessionCount === 1 ? "" : "s"} will be preserved. If this device is still active, it will reappear at its next heartbeat.`,
+            confirmLabel: "Delete device",
+            cancelLabel: "Cancel",
+            danger: true
+          });
+          if (!confirmed) return;
+          button.disabled = true;
+          try {
+            const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, {
+              method: "DELETE"
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || "Unable to delete the device.");
+            button.closest("[data-device-row]")?.remove();
+          } catch (error) {
+            button.disabled = false;
+            await showMonitorMessage(error.message || "Unable to delete the device.", "Delete device");
           }
         });
       });

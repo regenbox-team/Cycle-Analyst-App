@@ -2922,10 +2922,12 @@ def create_app() -> Flask:
         with _get_db() as conn:
             device_rows = conn.execute(
                 """
-                SELECT device_id, last_seen, last_session, session_active, mode, test_mode, map_color,
-                       solar_enabled, last_gps_lat, last_gps_lon, last_gps_ts, gps_available
-                FROM devices
-                ORDER BY last_seen DESC
+                SELECT d.device_id, d.last_seen, d.last_session, d.session_active, d.mode,
+                       d.test_mode, d.map_color, d.solar_enabled, d.last_gps_lat,
+                       d.last_gps_lon, d.last_gps_ts, d.gps_available,
+                       (SELECT COUNT(*) FROM sessions s WHERE s.device_id = d.device_id) AS session_count
+                FROM devices d
+                ORDER BY d.last_seen DESC
                 """
             ).fetchall()
             sessions = conn.execute(
@@ -3115,6 +3117,29 @@ def create_app() -> Flask:
         if cursor.rowcount == 0:
             return jsonify({"error": "device not found"}), 404
         return jsonify({"status": "ok", "device_id": device_id, "color": color})
+
+    @app.route("/api/devices/<path:device_id>", methods=["DELETE"])
+    @_require_auth
+    def delete_device(device_id: str):
+        with _get_db() as conn:
+            session_count = conn.execute(
+                "SELECT COUNT(*) FROM sessions WHERE device_id = ?",
+                (device_id,),
+            ).fetchone()[0]
+            cursor = conn.execute(
+                "DELETE FROM devices WHERE device_id = ?",
+                (device_id,),
+            )
+            conn.commit()
+        if cursor.rowcount == 0:
+            return jsonify({"error": "device not found"}), 404
+        return jsonify(
+            {
+                "status": "deleted",
+                "device_id": device_id,
+                "sessions_preserved": int(session_count),
+            }
+        )
 
     @app.route("/api/health")
     @_require_auth
