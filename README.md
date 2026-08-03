@@ -36,7 +36,9 @@
 - Raspberry Pi split services:
   - Recommended for road use: recorder, photo worker, and web run as separate systemd services.
   - Install/update with `python3 scripts/setup_pi_services.py --apply`.
-  - See `docs/services_setup.md`.
+  - Quickstart for `jeandard@sc-vehicule-1`: `docs/pi_quickstart.md`.
+  - Complete guide: `docs/pi_setup_guide.md`.
+  - Service details: `docs/services_setup.md`.
 
 - WSGI (gunicorn/uwsgi): use `wsgi:application`
   - Example: `gunicorn -w 2 wsgi:application`
