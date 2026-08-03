@@ -256,6 +256,53 @@ SETTINGS: tuple[EnvSetting, ...] = (
         choices=SOLAR_INVERT_CHOICES,
     ),
     EnvSetting(
+        "APP_MOTOR_SENSOR",
+        "Motor current sensor",
+        "ina228",
+        "Active le capteur INA228 optionnel entre la batterie et le hub 60 V.",
+        "INA228 motor sensor",
+        enabled_by_default=False,
+        detail="Interrupteur principal. Laisse cette variable desactivee sur les vehicules sans ce capteur; le tableau de bord utilise alors automatiquement le Cycle Analyst.",
+        choices=SOLAR_SENSOR_CHOICES,
+    ),
+    EnvSetting(
+        "APP_MOTOR_I2C_BUS", "I2C bus", "1", "Bus I2C du capteur moteur.",
+        "INA228 motor sensor", enabled_by_default=False, choices=I2C_BUS_CHOICES,
+        detail="Peut etre le meme bus que le capteur solaire, mais les deux capteurs doivent avoir des adresses differentes.",
+    ),
+    EnvSetting(
+        "APP_MOTOR_I2C_ADDR", "I2C address", "0x44", "Adresse I2C du capteur moteur.",
+        "INA228 motor sensor", enabled_by_default=False, choices=I2C_ADDR_CHOICES,
+        detail="0x44 est propose pour rester distinct du capteur solaire 0x45.",
+    ),
+    EnvSetting(
+        "APP_MOTOR_SHUNT_OHMS", "Shunt ohms", "0.0002", "Valeur du shunt du capteur moteur.",
+        "INA228 motor sensor", input_type="number", enabled_by_default=False,
+        detail="Doit correspondre exactement au shunt physique.",
+    ),
+    EnvSetting(
+        "APP_MOTOR_MAX_AMPS", "Max amps", "204.8", "Courant pleine echelle du capteur moteur.",
+        "INA228 motor sensor", input_type="number", enabled_by_default=False,
+        detail="Determine la calibration CURRENT_LSB de l'INA228.",
+    ),
+    EnvSetting(
+        "APP_MOTOR_CURRENT_GAIN", "Current gain", "1.0", "Correction multiplicative du courant moteur.",
+        "INA228 motor sensor", input_type="number", enabled_by_default=False,
+    ),
+    EnvSetting(
+        "APP_MOTOR_CURRENT_OFFSET", "Current offset A", "0.0", "Offset du courant moteur en amperes.",
+        "INA228 motor sensor", input_type="number", enabled_by_default=False,
+    ),
+    EnvSetting(
+        "APP_MOTOR_CURRENT_DEADBAND_A", "Current deadband A", "0.05", "Zone morte du courant moteur.",
+        "INA228 motor sensor", input_type="number", enabled_by_default=False,
+    ),
+    EnvSetting(
+        "APP_MOTOR_INVERT_SIGN", "Invert motor sign", "false", "Sens du courant du capteur moteur.",
+        "INA228 motor sensor", enabled_by_default=False, choices=SOLAR_INVERT_CHOICES,
+        detail="Inverse le signe si un courant de traction apparait negatif.",
+    ),
+    EnvSetting(
         "APP_CAMERA_COMMAND",
         "Camera command",
         "fswebcam -d /dev/video0 -q -S 10 --palette YUYV -r 640x480 --jpeg 70 --no-banner {output}",

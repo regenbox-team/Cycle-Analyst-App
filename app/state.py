@@ -51,6 +51,29 @@ solar_sensor = {
     "last_update": 0.0,
 }
 
+# Optional INA228 between the battery and the 60 V hub. Detailed raw values are
+# live-only; the database stores only the compact fields needed for analysis.
+motor_sensor = {
+    "enabled": False,
+    "source": None,
+    "address": None,
+    "manufacturer_id": None,
+    "device_id": None,
+    "current_a": 0.0,
+    "bus_v": 0.0,
+    "shunt_v": 0.0,
+    "power_w": 0.0,
+    "raw_current_a": 0.0,
+    "raw_power_w": 0.0,
+    "temperature_c": 0.0,
+    "corrected_current_a": 0.0,
+    "corrected_power_w": 0.0,
+    "solar_correction_a": 0.0,
+    "generator_correction_a": 0.0,
+    "valid": False,
+    "last_update": 0.0,
+}
+
 
 def default_photo_capture_settings() -> dict:
     return {
@@ -226,6 +249,7 @@ def save_session_metrics_to_file() -> None:
                 "latest_raw_values": latest_raw_values,
                 "gps_state": gps_state,
                 "solar_sensor": solar_sensor,
+                "motor_sensor": motor_sensor,
                 "current_user": current_user,
                 "current_user_id": current_user_id,
             }
@@ -260,6 +284,9 @@ def load_session_metrics_from_file(for_session: str | None = None) -> bool:
             solar = runtime.get("solar_sensor")
             if isinstance(solar, dict):
                 solar_sensor.update(solar)
+            motor = runtime.get("motor_sensor")
+            if isinstance(motor, dict):
+                motor_sensor.update(motor)
             globals()["session_id"] = runtime.get("session_id") or globals()["session_id"]
             globals()["session_active"] = bool(runtime.get("session_active"))
             user = runtime.get("current_user")

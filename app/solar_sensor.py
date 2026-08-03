@@ -70,26 +70,29 @@ class SolarDebugSample:
     die_temp_c: float
 
 
-def sensor_enabled() -> bool:
-    return os.getenv("APP_SOLAR_SENSOR", "").strip().lower() == "ina228"
+def sensor_enabled(prefix: str = "APP_SOLAR") -> bool:
+    return os.getenv(f"{prefix}_SENSOR", "").strip().lower() == "ina228"
 
 
 class INA228Sensor:
-    def __init__(self) -> None:
+    def __init__(self, env_prefix: str = "APP_SOLAR") -> None:
         from smbus2 import SMBus, i2c_msg  # lazy import: optional dependency
 
         self._SMBus = SMBus
         self._i2c_msg = i2c_msg
         self._bus = None
-        self.bus_id = int(os.getenv("APP_SOLAR_I2C_BUS", "1"))
-        self.address = int(os.getenv("APP_SOLAR_I2C_ADDR", "0x45"), 0)
-        self.shunt_ohms = float(os.getenv("APP_SOLAR_SHUNT_OHMS", "0.0002"))
-        self.max_amps = float(os.getenv("APP_SOLAR_MAX_AMPS", "204.8"))
-        self.current_gain = float(os.getenv("APP_SOLAR_CURRENT_GAIN", "1.0"))
-        self.current_offset = float(os.getenv("APP_SOLAR_CURRENT_OFFSET", "0.0"))
-        self.current_deadband_a = float(os.getenv("APP_SOLAR_CURRENT_DEADBAND_A", "0.15"))
-        self.current_sign = -1.0 if os.getenv("APP_SOLAR_INVERT_SIGN", "").strip().lower() in {"1", "true", "yes", "on"} else 1.0
-        self.filter = AdaptiveSolarFilter(_filter_config_from_env(self.current_deadband_a))
+        self.env_prefix = env_prefix
+        self.bus_id = int(os.getenv(f"{env_prefix}_I2C_BUS", "1"))
+        default_address = "0x45" if env_prefix == "APP_SOLAR" else "0x44"
+        self.address = int(os.getenv(f"{env_prefix}_I2C_ADDR", default_address), 0)
+        self.shunt_ohms = float(os.getenv(f"{env_prefix}_SHUNT_OHMS", "0.0002"))
+        self.max_amps = float(os.getenv(f"{env_prefix}_MAX_AMPS", "204.8"))
+        self.current_gain = float(os.getenv(f"{env_prefix}_CURRENT_GAIN", "1.0"))
+        self.current_offset = float(os.getenv(f"{env_prefix}_CURRENT_OFFSET", "0.0"))
+        default_deadband = "0.15" if env_prefix == "APP_SOLAR" else "0.05"
+        self.current_deadband_a = float(os.getenv(f"{env_prefix}_CURRENT_DEADBAND_A", default_deadband))
+        self.current_sign = -1.0 if os.getenv(f"{env_prefix}_INVERT_SIGN", "").strip().lower() in {"1", "true", "yes", "on"} else 1.0
+        self.filter = AdaptiveSolarFilter(_filter_config_from_env(self.current_deadband_a, env_prefix))
         self._last_sample_ts = None
         self.current_lsb = self.max_amps / INA228_CURRENT_LSB_DIVISOR
         self.expected_shunt_cal = int(INA228_CALIBRATION_FACTOR * self.current_lsb * self.shunt_ohms) & 0x7FFF
@@ -259,9 +262,13 @@ class INA228Sensor:
         return bytes(read)
 
 
-def read_solar_sample(sensor: INA228Sensor | None, failure_backoff_until: float) -> tuple[SolarSample | None, float, INA228Sensor | None]:
+def read_sensor_sample(
+    sensor: INA228Sensor | None,
+    failure_backoff_until: float,
+    env_prefix: str = "APP_SOLAR",
+) -> tuple[SolarSample | None, float, INA228Sensor | None]:
     now = time.time()
-    if not sensor_enabled():
+    if not sensor_enabled(env_prefix):
         if sensor is not None:
             sensor.close()
         return None, 0.0, None
@@ -271,12 +278,16 @@ def read_solar_sample(sensor: INA228Sensor | None, failure_backoff_until: float)
 
     try:
         if sensor is None:
-            sensor = INA228Sensor()
+            sensor = INA228Sensor(env_prefix)
         return sensor.read_sample(), 0.0, sensor
     except Exception:
         if sensor is not None:
             sensor.close()
         return None, now + 2.0, None
+
+
+def read_solar_sample(sensor: INA228Sensor | None, failure_backoff_until: float) -> tuple[SolarSample | None, float, INA228Sensor | None]:
+    return read_sensor_sample(sensor, failure_backoff_until, "APP_SOLAR")
 
 
 def _sign_extend(value: int, bits: int) -> int:
@@ -305,12 +316,15 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _filter_config_from_env(current_deadband_a: float) -> SolarFilterConfig:
+def _filter_config_from_env(current_deadband_a: float, prefix: str = "APP_SOLAR") -> SolarFilterConfig:
+    default_tau = 4.0 if prefix == "APP_SOLAR" else 0.6
+    default_fast_tau = 0.8 if prefix == "APP_SOLAR" else 0.15
+    default_jump = 2.5 if prefix == "APP_SOLAR" else 5.0
     return SolarFilterConfig(
-        enabled=_env_bool("APP_SOLAR_FILTER_ENABLED", True),
-        tau_seconds=max(0.05, _env_float("APP_SOLAR_FILTER_TAU_SECONDS", 4.0)),
-        fast_tau_seconds=max(0.05, _env_float("APP_SOLAR_FILTER_FAST_TAU_SECONDS", 0.8)),
-        median_window=max(1, _env_int("APP_SOLAR_FILTER_MEDIAN_WINDOW", 5)),
-        jump_threshold_a=max(0.0, _env_float("APP_SOLAR_FILTER_JUMP_THRESHOLD_A", 2.5)),
-        output_deadband_a=max(0.0, _env_float("APP_SOLAR_FILTER_OUTPUT_DEADBAND_A", current_deadband_a)),
+        enabled=_env_bool(f"{prefix}_FILTER_ENABLED", True),
+        tau_seconds=max(0.05, _env_float(f"{prefix}_FILTER_TAU_SECONDS", default_tau)),
+        fast_tau_seconds=max(0.05, _env_float(f"{prefix}_FILTER_FAST_TAU_SECONDS", default_fast_tau)),
+        median_window=max(1, _env_int(f"{prefix}_FILTER_MEDIAN_WINDOW", 5)),
+        jump_threshold_a=max(0.0, _env_float(f"{prefix}_FILTER_JUMP_THRESHOLD_A", default_jump)),
+        output_deadband_a=max(0.0, _env_float(f"{prefix}_FILTER_OUTPUT_DEADBAND_A", current_deadband_a)),
     )

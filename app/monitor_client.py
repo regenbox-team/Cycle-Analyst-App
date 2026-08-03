@@ -245,7 +245,9 @@ def _fetch_session_rows(db_path: str, session_id: str) -> list[dict[str, Any]]:
                        {col("gps_sats")}, {col("gps_hdop")},
                        {col("solar_current_a")}, {col("solar_bus_v")}, {col("solar_shunt_v")},
                        {col("solar_power_w")}, {col("solar_temperature_c")},
-                       {bool_col("solar_enabled")}
+                       {bool_col("solar_enabled")},
+                       {col("motor_sensor_current_a")}, {col("motor_sensor_bus_v")},
+                       {col("motor_corrected_current_a")}, {col("motor_sensor_valid")}
                 FROM logs
                 WHERE session = ?
                 ORDER BY timestamp, id
@@ -275,6 +277,10 @@ def _fetch_session_rows(db_path: str, session_id: str) -> list[dict[str, Any]]:
                 "solar_power_w": r[18],
                 "solar_temperature_c": r[19],
                 "solar_enabled": r[20],
+                "motor_sensor_current_a": r[21],
+                "motor_sensor_bus_v": r[22],
+                "motor_corrected_current_a": r[23],
+                "motor_sensor_valid": r[24],
             }
             for r in rows
         ]

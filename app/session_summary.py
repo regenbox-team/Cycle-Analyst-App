@@ -196,6 +196,23 @@ def _empty_metrics() -> dict[str, Any]:
         "gps_hdop_sum": 0.0,
         "gps_hdop_count": 0,
         "solar_samples": 0,
+        "motor_sensor_samples": 0,
+        "motor_ca_current_sum": 0.0,
+        "motor_ca_current_max": float("-inf"),
+        "motor_sensor_current_sum": 0.0,
+        "motor_sensor_current_max": float("-inf"),
+        "motor_ca_voltage_sum": 0.0,
+        "motor_sensor_voltage_sum": 0.0,
+        "motor_ca_power_sum": 0.0,
+        "motor_ca_power_max": float("-inf"),
+        "motor_sensor_power_sum": 0.0,
+        "motor_sensor_power_max": float("-inf"),
+        "motor_current_delta_sum": 0.0,
+        "motor_current_delta_max": 0.0,
+        "motor_voltage_delta_sum": 0.0,
+        "motor_voltage_delta_max": 0.0,
+        "motor_power_delta_sum": 0.0,
+        "motor_power_delta_max": 0.0,
     }
 
 
@@ -204,6 +221,12 @@ def _finalize_metrics(m: dict[str, Any]) -> dict[str, Any]:
         m["power_max"] = 0.0
     if m["power_min"] == float("inf"):
         m["power_min"] = 0.0
+    for key in (
+        "motor_ca_current_max", "motor_sensor_current_max",
+        "motor_ca_power_max", "motor_sensor_power_max",
+    ):
+        if m[key] == float("-inf"):
+            m[key] = 0.0
     m.pop(_ELEVATION_ANCHOR_KEY, None)
     m.pop(_RAW_GPS_ELEVATION_ANCHOR_KEY, None)
     return m
@@ -309,6 +332,46 @@ def _solar_power_for_sample(sample: dict[str, Any], solar_enabled: bool) -> tupl
     return max(0.0, solar_power), has_solar
 
 
+def _add_motor_sensor_comparison(
+    m: dict[str, Any], sample: dict[str, Any], values: list[float] | None
+) -> None:
+    valid_value = sample.get("motor_sensor_valid")
+    try:
+        valid = bool(int(valid_value))
+    except (TypeError, ValueError):
+        valid = bool(valid_value)
+    if not values or not valid:
+        return
+    sensor_current = _safe_float(sample.get("motor_corrected_current_a"))
+    sensor_voltage = _safe_float(sample.get("motor_sensor_bus_v"))
+    if sensor_current is None or sensor_voltage is None:
+        return
+    ca_voltage = values[1]
+    ca_current = values[2]
+    ca_power = ca_voltage * ca_current
+    sensor_power = sensor_voltage * sensor_current
+    current_delta = abs(sensor_current - ca_current)
+    voltage_delta = abs(sensor_voltage - ca_voltage)
+    power_delta = abs(sensor_power - ca_power)
+    m["motor_sensor_samples"] += 1
+    m["motor_ca_current_sum"] += ca_current
+    m["motor_ca_current_max"] = max(m["motor_ca_current_max"], ca_current)
+    m["motor_sensor_current_sum"] += sensor_current
+    m["motor_sensor_current_max"] = max(m["motor_sensor_current_max"], sensor_current)
+    m["motor_ca_voltage_sum"] += ca_voltage
+    m["motor_sensor_voltage_sum"] += sensor_voltage
+    m["motor_ca_power_sum"] += ca_power
+    m["motor_ca_power_max"] = max(m["motor_ca_power_max"], ca_power)
+    m["motor_sensor_power_sum"] += sensor_power
+    m["motor_sensor_power_max"] = max(m["motor_sensor_power_max"], sensor_power)
+    m["motor_current_delta_sum"] += current_delta
+    m["motor_current_delta_max"] = max(m["motor_current_delta_max"], current_delta)
+    m["motor_voltage_delta_sum"] += voltage_delta
+    m["motor_voltage_delta_max"] = max(m["motor_voltage_delta_max"], voltage_delta)
+    m["motor_power_delta_sum"] += power_delta
+    m["motor_power_delta_max"] = max(m["motor_power_delta_max"], power_delta)
+
+
 def _add_instant_metrics(m: dict[str, Any], sample: dict[str, Any], values: list[float] | None, solar_power: float, has_solar: bool) -> None:
     m["sample_count"] += 1
     if has_solar:
@@ -316,6 +379,7 @@ def _add_instant_metrics(m: dict[str, Any], sample: dict[str, Any], values: list
         m["solar_power_sum"] += solar_power
         m["solar_power_count"] += 1
         m["solar_power_max"] = max(m["solar_power_max"], solar_power)
+    _add_motor_sensor_comparison(m, sample, values)
 
     if values:
         v = values[1]
@@ -482,6 +546,8 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
                     m["regen_Wh"] += abs(power) * dt / 3600
             m["human_Wh"] += human_power * dt / 3600
 
+        _add_motor_sensor_comparison(m, sample, values)
+
         gps = _valid_gps(sample.get("gps_lat"), sample.get("gps_lon"))
         if gps is not None:
             m["gps_points"] += 1
@@ -611,6 +677,28 @@ SUMMARY_GROUPS: list[tuple[str, list[MetricSpec]]] = [
         ],
     ),
     (
+        "Motor sensor comparison",
+        [
+            ("Valid sensor samples", "", lambda m: m["motor_sensor_samples"]),
+            ("Avg CA current", "A", lambda m: safe_div(m["motor_ca_current_sum"], m["motor_sensor_samples"])),
+            ("Max CA current", "A", lambda m: m["motor_ca_current_max"]),
+            ("Avg sensor current", "A", lambda m: safe_div(m["motor_sensor_current_sum"], m["motor_sensor_samples"])),
+            ("Max sensor current", "A", lambda m: m["motor_sensor_current_max"]),
+            ("Avg CA power", "W", lambda m: safe_div(m["motor_ca_power_sum"], m["motor_sensor_samples"])),
+            ("Max CA power", "W", lambda m: m["motor_ca_power_max"]),
+            ("Avg sensor power", "W", lambda m: safe_div(m["motor_sensor_power_sum"], m["motor_sensor_samples"])),
+            ("Max sensor power", "W", lambda m: m["motor_sensor_power_max"]),
+            ("Avg CA voltage", "V", lambda m: safe_div(m["motor_ca_voltage_sum"], m["motor_sensor_samples"])),
+            ("Avg sensor voltage", "V", lambda m: safe_div(m["motor_sensor_voltage_sum"], m["motor_sensor_samples"])),
+            ("Avg current delta", "A", lambda m: safe_div(m["motor_current_delta_sum"], m["motor_sensor_samples"])),
+            ("Max current delta", "A", lambda m: m["motor_current_delta_max"]),
+            ("Avg voltage delta", "V", lambda m: safe_div(m["motor_voltage_delta_sum"], m["motor_sensor_samples"])),
+            ("Max voltage delta", "V", lambda m: m["motor_voltage_delta_max"]),
+            ("Avg power delta", "W", lambda m: safe_div(m["motor_power_delta_sum"], m["motor_sensor_samples"])),
+            ("Max power delta", "W", lambda m: m["motor_power_delta_max"]),
+        ],
+    ),
+    (
         "Energy",
         [
             ("Battery Used", "Ah", lambda m: m["Ah"]),
@@ -688,6 +776,8 @@ def format_metric_value(value: float, unit: str) -> str:
 def build_summary_table(metrics_by_user: dict[str, dict[str, Any]], users: list[str]) -> list[list[str]]:
     table = [["Metric"] + users]
     for category, metrics in SUMMARY_GROUPS:
+        if category == "Motor sensor comparison" and not any(metrics_by_user[user].get("motor_sensor_samples", 0) for user in users):
+            continue
         table.append([f"-- {category} --"] + [""] * len(users))
         for label, unit, func in metrics:
             row = [label]
@@ -700,6 +790,8 @@ def build_summary_table(metrics_by_user: dict[str, dict[str, Any]], users: list[
 def build_summary_sections(metrics_by_user: dict[str, dict[str, Any]], users: list[str]) -> list[dict[str, Any]]:
     sections = []
     for category, metrics in SUMMARY_GROUPS:
+        if category == "Motor sensor comparison" and not any(metrics_by_user[user].get("motor_sensor_samples", 0) for user in users):
+            continue
         rows = []
         for label, unit, func in metrics:
             rows.append(

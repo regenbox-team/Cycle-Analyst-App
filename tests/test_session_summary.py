@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.session_summary import compute_session_metrics
+from app.session_summary import build_summary_sections, compute_session_metrics
 
 
 def raw_line(*, ah=0.0, amps=10.0, speed=20.0, distance=0.0, human_amps=1.0):
@@ -21,6 +21,40 @@ def raw_line(*, ah=0.0, amps=10.0, speed=20.0, distance=0.0, human_amps=1.0):
 
 
 class SessionSummaryTest(unittest.TestCase):
+    def test_computes_motor_sensor_comparison_and_shows_section(self):
+        samples = [
+            {
+                "timestamp": "2026-04-30T10:00:00",
+                "raw": raw_line(amps=10.0),
+                "motor_sensor_bus_v": 51.0,
+                "motor_corrected_current_a": 11.0,
+                "motor_sensor_valid": 1,
+            },
+            {
+                "timestamp": "2026-04-30T10:00:01",
+                "raw": raw_line(amps=14.0),
+                "motor_sensor_bus_v": 49.0,
+                "motor_corrected_current_a": 13.0,
+                "motor_sensor_valid": 1,
+            },
+        ]
+
+        metrics = compute_session_metrics(samples)
+        sections = build_summary_sections({"Total": metrics}, ["Total"])
+
+        self.assertEqual(metrics["motor_sensor_samples"], 2)
+        self.assertAlmostEqual(metrics["motor_sensor_current_sum"] / 2, 12.0)
+        self.assertAlmostEqual(metrics["motor_ca_current_sum"] / 2, 12.0)
+        self.assertAlmostEqual(metrics["motor_current_delta_max"], 1.0)
+        self.assertIn("Motor sensor comparison", [section["category"] for section in sections])
+
+    def test_hides_motor_sensor_section_without_valid_samples(self):
+        metrics = compute_session_metrics([
+            {"timestamp": "2026-04-30T10:00:00", "raw": raw_line(), "motor_sensor_valid": 0}
+        ])
+        sections = build_summary_sections({"Total": metrics}, ["Total"])
+        self.assertNotIn("Motor sensor comparison", [section["category"] for section in sections])
+
     def test_computes_gps_and_solar_observations(self):
         samples = [
             {

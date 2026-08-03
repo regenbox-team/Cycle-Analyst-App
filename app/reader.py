@@ -14,7 +14,14 @@ from .metrics import update_metrics, update_solar_only_metrics
 from .photo_capture import maybe_schedule_photo_capture
 from . import state
 from . import modes
-from .solar_sensor import read_solar_sample
+from .solar_sensor import read_sensor_sample, read_solar_sample
+
+
+def corrected_motor_current(sensor_current_a, solar_current_a, generator_current_a) -> float:
+    """Return pure motor current using the vehicle's measured bus topology."""
+    return float(sensor_current_a or 0.0) - (
+        float(solar_current_a or 0.0) + float(generator_current_a or 0.0)
+    )
 
 
 def parse_line(line: str):
@@ -104,6 +111,8 @@ def read_serial():
     last_port = None
     solar_sensor = None
     solar_failure_backoff_until = 0.0
+    motor_sensor = None
+    motor_failure_backoff_until = 0.0
 
     while True:
         time.sleep(0.1)
@@ -184,6 +193,68 @@ def read_serial():
                 "temperature_c": 0.0,
             })
 
+        motor_sample, motor_failure_backoff_until, motor_sensor = read_sensor_sample(
+            motor_sensor,
+            motor_failure_backoff_until,
+            "APP_MOTOR",
+        )
+        if (
+            motor_sample is not None
+            and solar_sensor is not None
+            and getattr(motor_sensor, "bus_id", None) == getattr(solar_sensor, "bus_id", None)
+            and getattr(motor_sensor, "address", None) == getattr(solar_sensor, "address", None)
+        ):
+            motor_sensor.close()
+            motor_sensor = None
+            motor_sample = None
+            motor_failure_backoff_until = now_ts + 2.0
+        if motor_sample is not None:
+            generator_a = float(data[13]) if data is not None else (
+                float(state.latest_raw_values[13]) if state.latest_raw_values else 0.0
+            )
+            solar_a = float(state.solar_sensor.get("current_a") or 0.0) if solar_roof_enabled else 0.0
+            corrected_a = corrected_motor_current(motor_sample.current_a, solar_a, generator_a)
+            state.motor_sensor.update({
+                "enabled": True,
+                "source": motor_sample.source,
+                "address": getattr(motor_sensor, "address", None),
+                "manufacturer_id": getattr(motor_sensor, "manufacturer_id", None),
+                "device_id": getattr(motor_sensor, "device_id", None),
+                "current_a": motor_sample.current_a,
+                "bus_v": motor_sample.bus_v,
+                "shunt_v": motor_sample.shunt_v,
+                "power_w": motor_sample.power_w,
+                "raw_current_a": getattr(motor_sample, "raw_current_a", motor_sample.current_a),
+                "raw_power_w": getattr(motor_sample, "raw_power_w", motor_sample.power_w),
+                "temperature_c": motor_sample.temperature_c,
+                "corrected_current_a": corrected_a,
+                "corrected_power_w": motor_sample.bus_v * corrected_a,
+                "solar_correction_a": solar_a,
+                "generator_correction_a": generator_a,
+                "valid": True,
+                "last_update": now_ts,
+            })
+        else:
+            state.motor_sensor.update({
+                "enabled": False,
+                "source": None,
+                "address": None,
+                "manufacturer_id": None,
+                "device_id": None,
+                "current_a": 0.0,
+                "bus_v": 0.0,
+                "shunt_v": 0.0,
+                "power_w": 0.0,
+                "raw_current_a": 0.0,
+                "raw_power_w": 0.0,
+                "temperature_c": 0.0,
+                "corrected_current_a": 0.0,
+                "corrected_power_w": 0.0,
+                "solar_correction_a": 0.0,
+                "generator_correction_a": 0.0,
+                "valid": False,
+            })
+
         # Reopen if port changed
         from . import modes as _modes
         SERIAL_PORT = _modes.SERIAL_PORT
@@ -251,11 +322,24 @@ def read_serial():
 
         if data is not None:
             state.latest_raw_values = data
+            if state.motor_sensor.get("valid"):
+                generator_a = float(data[13])
+                solar_a = float(state.solar_sensor.get("current_a") or 0.0) if solar_roof_enabled else 0.0
+                corrected_a = corrected_motor_current(
+                    state.motor_sensor.get("current_a"), solar_a, generator_a
+                )
+                state.motor_sensor.update({
+                    "corrected_current_a": corrected_a,
+                    "corrected_power_w": float(state.motor_sensor.get("bus_v") or 0.0) * corrected_a,
+                    "solar_correction_a": solar_a,
+                    "generator_correction_a": generator_a,
+                })
 
         live_gps_update = float(state.gps_state.get("last_update") or 0.0)
         if (
             data is not None
             or solar_sample is not None
+            or motor_sample is not None
             or live_gps_update > last_live_state_write_time
         ) and now_ts - last_live_state_write_time >= 1:
             last_live_state_write_time = now_ts
@@ -273,7 +357,7 @@ def read_serial():
         elif solar_sample is not None:
             update_solar_only_metrics(solar_sample, now)
 
-        if now - last_db_write_time >= 1 and (data is not None or solar_sample is not None):
+        if now - last_db_write_time >= 1 and (data is not None or solar_sample is not None or motor_sample is not None):
             last_db_write_time = now
             if bool(state.session_metrics.get("solar_enabled", state.solar_roof_enabled)):
                 try:
@@ -317,8 +401,9 @@ def read_serial():
                             user_id, user_initials, user_snapshot_json,
                             gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                             solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c,
-                            solar_enabled
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            solar_enabled,
+                            motor_sensor_current_a, motor_sensor_bus_v, motor_corrected_current_a, motor_sensor_valid
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             timestamp,
@@ -342,6 +427,10 @@ def read_serial():
                             state.solar_sensor.get("power_w") if session_solar_enabled else None,
                             state.solar_sensor.get("temperature_c") if session_solar_enabled else None,
                             1 if session_solar_enabled else 0,
+                            state.motor_sensor.get("current_a") if state.motor_sensor.get("enabled") else None,
+                            state.motor_sensor.get("bus_v") if state.motor_sensor.get("enabled") else None,
+                            state.motor_sensor.get("corrected_current_a") if state.motor_sensor.get("valid") else None,
+                            1 if state.motor_sensor.get("valid") else 0,
                         ),
                     )
             except Exception:

@@ -606,6 +606,27 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   pointer-events: none;
 }
 
+.power-source-controls {
+  position: absolute;
+  top: 0.18rem;
+  right: 0.35rem;
+  z-index: 2;
+  display: flex;
+  gap: 0.2rem;
+}
+
+.meter-source-button {
+  min-width: 0;
+  padding: 0.14rem 0.3rem;
+  border-radius: 0.35rem;
+  font-size: 0.52rem;
+  line-height: 1.1;
+}
+
+.meter-comparison-text {
+  font-size: 6px;
+}
+
 /* SVG Meters */
 .speedometer, .power-meter, .human-meter, .solar-meter {
   width: 100%;

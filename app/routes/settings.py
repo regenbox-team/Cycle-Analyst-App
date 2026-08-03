@@ -109,6 +109,43 @@ def diagnostics_solar_sensor():
         return _json_status("error", lines, live=live), 500
 
 
+def diagnostics_motor_sensor():
+    lines: list[str] = []
+    live = dict(getattr(state, "motor_sensor", {}) or {})
+    lines.append(f"Live state: enabled={live.get('enabled')} valid={live.get('valid')}")
+    lines.append(
+        f"Raw bus: {float(live.get('bus_v') or 0):.3f} V, "
+        f"{float(live.get('current_a') or 0):.3f} A"
+    )
+    lines.append(
+        f"Correction: solar={float(live.get('solar_correction_a') or 0):.3f} A, "
+        f"generator={float(live.get('generator_correction_a') or 0):.3f} A"
+    )
+    lines.append(
+        f"Pure motor: {float(live.get('corrected_current_a') or 0):.3f} A, "
+        f"{float(live.get('corrected_power_w') or 0):.3f} W"
+    )
+    try:
+        from app.solar_sensor import INA228Sensor, sensor_enabled
+        if not sensor_enabled("APP_MOTOR"):
+            lines.append("APP_MOTOR_SENSOR is disabled; direct I2C test skipped.")
+            return _json_status("warning", lines, live=live)
+        sensor = INA228Sensor("APP_MOTOR")
+        try:
+            sample = sensor.read_debug_sample()
+        finally:
+            sensor.close()
+        lines.extend([
+            f"INA228 detected on bus {sample.bus_id}, address 0x{sample.address:02x}.",
+            f"Voltage={sample.bus_v:.3f} V, current={sample.current_a:.3f} A, power={sample.power_calc_w:.3f} W.",
+            f"Shunt={sample.shunt_v:.6f} V, die temperature={sample.die_temp_c:.2f} C.",
+        ])
+        return _json_status("ok", lines, sample=asdict(sample), live=live)
+    except Exception as exc:
+        lines.append(f"Direct motor INA228 test failed: {exc}")
+        return _json_status("error", lines, live=live), 500
+
+
 def diagnostics_camera():
     lines: list[str] = []
     try:
@@ -264,6 +301,7 @@ def create_blueprint():
     bp.add_url_rule("/settings", view_func=settings_page)
     bp.add_url_rule("/settings/save", methods=["POST"], view_func=save_settings_page)
     bp.add_url_rule("/settings/diagnostics/solar_sensor", view_func=diagnostics_solar_sensor)
+    bp.add_url_rule("/settings/diagnostics/motor_sensor", view_func=diagnostics_motor_sensor)
     bp.add_url_rule("/settings/diagnostics/camera", methods=["POST"], view_func=diagnostics_camera)
     bp.add_url_rule("/settings/diagnostics/camera_image", view_func=diagnostics_camera_image)
     bp.add_url_rule("/settings/diagnostics/cycle_analyst", view_func=diagnostics_cycle_analyst)
@@ -278,6 +316,7 @@ def register(app):
     app.add_url_rule("/settings", view_func=settings_page)
     app.add_url_rule("/settings/save", methods=["POST"], view_func=save_settings_page)
     app.add_url_rule("/settings/diagnostics/solar_sensor", view_func=diagnostics_solar_sensor)
+    app.add_url_rule("/settings/diagnostics/motor_sensor", view_func=diagnostics_motor_sensor)
     app.add_url_rule("/settings/diagnostics/camera", methods=["POST"], view_func=diagnostics_camera)
     app.add_url_rule("/settings/diagnostics/camera_image", view_func=diagnostics_camera_image)
     app.add_url_rule("/settings/diagnostics/cycle_analyst", view_func=diagnostics_cycle_analyst)

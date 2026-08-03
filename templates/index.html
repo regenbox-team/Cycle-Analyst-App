@@ -70,6 +70,10 @@
     <!-- Power Meter -->
     <div class="box power-box">
       <div class="box-title">Power</div>
+      <div class="power-source-controls">
+        <button type="button" id="power-source-toggle" class="meter-source-button">Power: CA</button>
+        <button type="button" id="voltage-source-toggle" class="meter-source-button">Voltage: CA</button>
+      </div>
       <svg class="power-meter" viewBox="0 0 200 200">
         <path id="power-bg" fill="none" stroke="#ccc" stroke-width="18" stroke-linecap="round"/>
         <path id="power-arc" fill="none" stroke="orange" stroke-width="18" stroke-linecap="round"/>
@@ -88,6 +92,9 @@
         <text x="100" y="135" text-anchor="middle" fill="#000">
           <tspan id="amp-number" class="tspan-number-s">0</tspan>
           <tspan id="amp-unit" class="tspan-unit" dx="4">A</tspan>
+        </text>
+        <text x="100" y="153" text-anchor="middle" fill="#555" class="meter-comparison-text">
+          <tspan id="amp-comparison">CA 0.0 A / sensor --</tspan>
         </text>
       </svg>
  

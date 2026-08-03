@@ -341,7 +341,11 @@ def _init_db() -> None:
                 solar_shunt_v REAL,
                 solar_power_w REAL,
                 solar_temperature_c REAL,
-                solar_enabled INTEGER DEFAULT 1
+                solar_enabled INTEGER DEFAULT 1,
+                motor_sensor_current_a REAL,
+                motor_sensor_bus_v REAL,
+                motor_corrected_current_a REAL,
+                motor_sensor_valid INTEGER DEFAULT 0
             )
             """
         )
@@ -485,6 +489,10 @@ def _migrate_db() -> None:
             "uphill_m": "REAL",
             "raw_gps_uphill_m": "REAL",
             "solar_enabled": "INTEGER DEFAULT 1",
+            "motor_sensor_current_a": "REAL",
+            "motor_sensor_bus_v": "REAL",
+            "motor_corrected_current_a": "REAL",
+            "motor_sensor_valid": "INTEGER DEFAULT 0",
             "user_ids_json": "TEXT",
             "suntrip_stage": "INTEGER DEFAULT 0",
             "travel_project_id": "INTEGER",
@@ -687,6 +695,10 @@ def _migrate_db() -> None:
                 "solar_power_w",
                 "solar_temperature_c",
                 "solar_enabled",
+                "motor_sensor_current_a",
+                "motor_sensor_bus_v",
+                "motor_corrected_current_a",
+                "motor_sensor_valid",
             ]
             source_columns = [
                 name if name in legacy_columns else ("1 AS solar_enabled" if name == "solar_enabled" else f"NULL AS {name}")
@@ -1141,7 +1153,8 @@ def _telemetry_samples_for_session(
                solar_enabled, gps_lat, gps_lon, gps_alt,
                terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
                gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
-               solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c
+               solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c,
+               motor_sensor_current_a, motor_sensor_bus_v, motor_corrected_current_a, motor_sensor_valid
         FROM {TELEMETRY_TABLE}
         WHERE device_id = ? AND session_id = ? AND mode = ?
         ORDER BY timestamp IS NULL, timestamp, id
@@ -1173,6 +1186,10 @@ def _telemetry_samples_for_session(
             "solar_shunt_v": row["solar_shunt_v"],
             "solar_power_w": row["solar_power_w"],
             "solar_temperature_c": row["solar_temperature_c"],
+            "motor_sensor_current_a": row["motor_sensor_current_a"],
+            "motor_sensor_bus_v": row["motor_sensor_bus_v"],
+            "motor_corrected_current_a": row["motor_corrected_current_a"],
+            "motor_sensor_valid": row["motor_sensor_valid"],
         }
         for row in rows
     ]
@@ -1406,8 +1423,9 @@ def _insert_telemetry_samples(
             user_id, user_initials, user_snapshot_json,
             gps_lat, gps_lon, gps_alt, terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
             gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
-            solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled,
+            motor_sensor_current_a, motor_sensor_bus_v, motor_corrected_current_a, motor_sensor_valid
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -1437,6 +1455,10 @@ def _insert_telemetry_samples(
                 row.get("solar_power_w"),
                 row.get("solar_temperature_c"),
                 1 if row.get("solar_enabled", solar_enabled) else 0,
+                row.get("motor_sensor_current_a"),
+                row.get("motor_sensor_bus_v"),
+                row.get("motor_corrected_current_a"),
+                1 if row.get("motor_sensor_valid") else 0,
             )
             for row in samples
         ],
@@ -4065,7 +4087,8 @@ def create_app() -> Flask:
                        user_id, user_initials, user_snapshot_json,
                        gps_lat, gps_lon, gps_alt, terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
                        gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
-                       solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
+                       solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled,
+                       motor_sensor_current_a, motor_sensor_bus_v, motor_corrected_current_a, motor_sensor_valid
                 FROM {TELEMETRY_TABLE}
                 WHERE device_id = ? AND session_id = ? AND mode = ?
                 ORDER BY id
@@ -4119,6 +4142,10 @@ def create_app() -> Flask:
                 "solar_power_w": r[21],
                 "solar_temperature_c": r[22],
                 "solar_enabled": r[23],
+                "motor_sensor_current_a": r[24],
+                "motor_sensor_bus_v": r[25],
+                "motor_corrected_current_a": r[26],
+                "motor_sensor_valid": r[27],
             }
             for r in rows
         ]
@@ -4980,7 +5007,8 @@ def create_app() -> Flask:
                        user_id, user_initials, user_snapshot_json,
                        gps_lat, gps_lon, gps_alt, terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
                        gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
-                       solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled
+                       solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c, solar_enabled,
+                       motor_sensor_current_a, motor_sensor_bus_v, motor_corrected_current_a, motor_sensor_valid
                 FROM {TELEMETRY_TABLE}
                 WHERE device_id = ? AND session_id = ? AND mode = ?
                 ORDER BY id
@@ -5015,6 +5043,10 @@ def create_app() -> Flask:
                 "solar_power_w": row["solar_power_w"],
                 "solar_temperature_c": row["solar_temperature_c"],
                 "solar_enabled": row["solar_enabled"],
+                "motor_sensor_current_a": row["motor_sensor_current_a"],
+                "motor_sensor_bus_v": row["motor_sensor_bus_v"],
+                "motor_corrected_current_a": row["motor_corrected_current_a"],
+                "motor_sensor_valid": row["motor_sensor_valid"],
             }
             samples.append(sample)
         for sample in filter_plausible_gps_samples(samples):

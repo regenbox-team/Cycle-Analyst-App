@@ -345,12 +345,17 @@ def summary():
         user_id_col = "user_id" if "user_id" in cols else "NULL AS user_id"
         user_initials_col = "user_initials" if "user_initials" in cols else "user AS user_initials"
         user_snapshot_col = "user_snapshot_json" if "user_snapshot_json" in cols else "NULL AS user_snapshot_json"
+        motor_current_col = "motor_sensor_current_a" if "motor_sensor_current_a" in cols else "NULL AS motor_sensor_current_a"
+        motor_voltage_col = "motor_sensor_bus_v" if "motor_sensor_bus_v" in cols else "NULL AS motor_sensor_bus_v"
+        motor_corrected_col = "motor_corrected_current_a" if "motor_corrected_current_a" in cols else "NULL AS motor_corrected_current_a"
+        motor_valid_col = "motor_sensor_valid" if "motor_sensor_valid" in cols else "0 AS motor_sensor_valid"
         rows = conn.execute(
             f"""
             SELECT user, timestamp, raw,
                    gps_lat, gps_lon, gps_alt, gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
                    solar_current_a, solar_bus_v, solar_shunt_v, solar_power_w, solar_temperature_c,
-                   {solar_enabled_col}, {user_id_col}, {user_initials_col}, {user_snapshot_col}
+                   {solar_enabled_col}, {user_id_col}, {user_initials_col}, {user_snapshot_col},
+                   {motor_current_col}, {motor_voltage_col}, {motor_corrected_col}, {motor_valid_col}
             FROM logs
             WHERE session = ?
             ORDER BY id
@@ -380,6 +385,10 @@ def summary():
             "user_id": row[17],
             "user_initials": row[18],
             "user_snapshot_json": row[19],
+            "motor_sensor_current_a": row[20],
+            "motor_sensor_bus_v": row[21],
+            "motor_corrected_current_a": row[22],
+            "motor_sensor_valid": row[23],
         }
         for row in rows
     ]

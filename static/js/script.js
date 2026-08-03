@@ -25,6 +25,8 @@ const POWER_HISTORY_POLL_MS = 3000;
 const POWER_HISTORY_POLL_HIDDEN_MS = 10000;
 let metricsRequestInFlight = false;
 let powerHistoryRequestInFlight = false;
+let selectedPowerSource = localStorage.getItem('motorPowerSource') === 'sensor' ? 'sensor' : 'ca';
+let selectedVoltageSource = localStorage.getItem('motorVoltageSource') === 'sensor' ? 'sensor' : 'ca';
 const powerHistoryState = {
   motor: true,
   human: true,
@@ -1474,15 +1476,40 @@ async function fetchMetrics() {
       num(json.calculated_CA_values?.speed_max, 0)
     );
 
-    // Power + Amps
-    const amps = num(json.raw_CA_values?.[2], 0);
+    // Power + Amps. The sensor value is the pure motor current:
+    // hub sensor - (solar sensor + human generator).
+    const caAmps = num(json.calculated_CA_values?.ca_current_live ?? json.raw_CA_values?.[2], 0);
+    const sensorValid = json.calculated_CA_values?.motor_sensor_valid === true;
+    const sensorAmps = num(json.calculated_CA_values?.motor_sensor_current_live, 0);
+    if (!sensorValid) {
+      selectedPowerSource = 'ca';
+      selectedVoltageSource = 'ca';
+    }
+    const amps = selectedPowerSource === 'sensor' && sensorValid ? sensorAmps : caAmps;
+    const displayedPower = selectedPowerSource === 'sensor' && sensorValid
+      ? num(json.calculated_CA_values?.motor_sensor_power_live, 0)
+      : num(json.calculated_CA_values?.power_live, 0);
     updatePowerMeter(
-      num(json.calculated_CA_values?.power_live, 0),
+      displayedPower,
       num(json.calculated_CA_values?.power_avg, 0),
       num(json.calculated_CA_values?.power_max, 0),
       amps
     );
     updateAmpArc(amps);
+    const comparison = document.getElementById('amp-comparison');
+    if (comparison) comparison.textContent = sensorValid
+      ? `CA ${caAmps.toFixed(1)} A / sensor ${sensorAmps.toFixed(1)} A`
+      : `CA ${caAmps.toFixed(1)} A / sensor --`;
+    const powerToggle = document.getElementById('power-source-toggle');
+    if (powerToggle) {
+      powerToggle.disabled = !sensorValid;
+      powerToggle.textContent = `Power: ${selectedPowerSource === 'sensor' && sensorValid ? 'sensor' : 'CA'}`;
+    }
+    const voltageToggle = document.getElementById('voltage-source-toggle');
+    if (voltageToggle) {
+      voltageToggle.disabled = !sensorValid;
+      voltageToggle.textContent = `Voltage: ${selectedVoltageSource === 'sensor' && sensorValid ? 'sensor' : 'CA'}`;
+    }
 
     // Temperature
     updateTempBar(
@@ -1541,11 +1568,11 @@ async function fetchMetrics() {
       document.getElementById('ah-bar-detail').innerText = `gross ${grossAh.toFixed(1)} Ah / recovered ${recoveredAh.toFixed(1)} Ah`;
     }
 
-    const voltage = solarBattery?.enabled
-      ? num(solarBattery.voltage_used, 0)
-      : num(json.raw_CA_values?.[1], 0);
-    const voltageLabel = solarBattery?.voltage_source === "solar_sensor" ? " solar" : "";
-    document.getElementById('ah-voltage-value').innerText = `${voltage.toFixed(1)} V${voltageLabel}`;
+    const caVoltage = num(json.calculated_CA_values?.ca_voltage_live ?? json.raw_CA_values?.[1], 0);
+    const sensorVoltage = num(json.calculated_CA_values?.motor_sensor_voltage_live, 0);
+    const voltage = selectedVoltageSource === 'sensor' && sensorValid ? sensorVoltage : caVoltage;
+    const voltageComparison = sensorValid ? ` (CA ${caVoltage.toFixed(1)} / sensor ${sensorVoltage.toFixed(1)})` : "";
+    document.getElementById('ah-voltage-value').innerText = `${voltage.toFixed(1)} V${voltageComparison}`;
 
     // Human cumulative & kcal
     const solarWh = num(json.calculated_CA_values?.human_Wh ?? json.calculated_CA_values?.solar_Wh, 0);
@@ -1985,6 +2012,17 @@ window.addEventListener("DOMContentLoaded", () => {
   ensureBoxIds();
   restoreLayoutOrder();
   initDragAndDrop();
+
+  const powerSourceToggle = document.getElementById('power-source-toggle');
+  if (powerSourceToggle) powerSourceToggle.addEventListener('click', () => {
+    selectedPowerSource = selectedPowerSource === 'ca' ? 'sensor' : 'ca';
+    localStorage.setItem('motorPowerSource', selectedPowerSource);
+  });
+  const voltageSourceToggle = document.getElementById('voltage-source-toggle');
+  if (voltageSourceToggle) voltageSourceToggle.addEventListener('click', () => {
+    selectedVoltageSource = selectedVoltageSource === 'ca' ? 'sensor' : 'ca';
+    localStorage.setItem('motorVoltageSource', selectedVoltageSource);
+  });
 
   const editBtn = document.getElementById('layout-edit-toggle');
   const resetBtn = document.getElementById('layout-reset');

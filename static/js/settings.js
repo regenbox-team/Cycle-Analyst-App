@@ -154,7 +154,7 @@
   async function runDiagnostic(name, button) {
     const log = document.getElementById(`diagnostic-${name}`);
     if (!log) return;
-    const method = name === 'solar_sensor' || name === 'cycle_analyst' ? 'GET' : 'POST';
+    const method = name === 'solar_sensor' || name === 'motor_sensor' || name === 'cycle_analyst' ? 'GET' : 'POST';
     log.textContent = 'Running...';
     log.classList.remove('ok', 'error', 'warning');
     if (button) button.disabled = true;
