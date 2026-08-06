@@ -300,6 +300,15 @@ def _capture_image() -> str:
     os.close(fd)
     command = _resolve_capture_command(output_path)
     try:
+        control_command = _resolve_v4l2_control_command(command)
+        if control_command:
+            subprocess.run(
+                control_command,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
         subprocess.run(
             command,
             check=True,
@@ -366,6 +375,48 @@ def _resolve_capture_command(output_path: str) -> list[str]:
         ]
 
     raise RuntimeError("no supported camera command found; set APP_CAMERA_COMMAND")
+
+
+def _camera_device_from_command(command: list[str]) -> str:
+    for flag in ("-d", "--device"):
+        try:
+            index = command.index(flag)
+        except ValueError:
+            continue
+        if index + 1 < len(command):
+            return command[index + 1]
+    return "/dev/video0"
+
+
+def _parse_v4l2_controls(raw_value: str) -> list[str]:
+    normalized = str(raw_value or "").replace(",", " ")
+    try:
+        tokens = shlex.split(normalized)
+    except ValueError:
+        tokens = normalized.split()
+    controls: list[str] = []
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        if token.startswith("--set-ctrl="):
+            token = token.split("=", 1)[1]
+        if "=" not in token:
+            raise RuntimeError(f"invalid APP_CAMERA_V4L2_CTRLS token: {token}")
+        controls.append(token)
+    return controls
+
+
+def _resolve_v4l2_control_command(capture_command: list[str]) -> list[str]:
+    controls = _parse_v4l2_controls(os.getenv("APP_CAMERA_V4L2_CTRLS", ""))
+    if not controls:
+        return []
+    v4l2_ctl = shutil.which("v4l2-ctl")
+    if not v4l2_ctl:
+        raise RuntimeError("APP_CAMERA_V4L2_CTRLS is set but v4l2-ctl is not installed")
+    command = [v4l2_ctl, "-d", _camera_device_from_command(capture_command)]
+    command.extend(f"--set-ctrl={control}" for control in controls)
+    return command
 
 
 def _validate_capture_command(command: list[str], source: str) -> None:

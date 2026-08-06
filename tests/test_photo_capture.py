@@ -1,4 +1,5 @@
 import base64
+import os
 import types
 import sys
 import tempfile
@@ -85,6 +86,42 @@ class PhotoCaptureMathTest(unittest.TestCase):
 
     def test_multiple_intervals_collapse_to_latest_crossed_step(self):
         self.assertEqual(next_capture_distance(2.26, 1.0, 0.5), 2.0)
+
+
+class PhotoCaptureCameraCommandTest(unittest.TestCase):
+    def setUp(self):
+        self.previous_controls = os.environ.get("APP_CAMERA_V4L2_CTRLS")
+        self.previous_which = photo_capture.shutil.which
+
+    def tearDown(self):
+        if self.previous_controls is None:
+            os.environ.pop("APP_CAMERA_V4L2_CTRLS", None)
+        else:
+            os.environ["APP_CAMERA_V4L2_CTRLS"] = self.previous_controls
+        photo_capture.shutil.which = self.previous_which
+
+    def test_parse_v4l2_controls_accepts_commas_and_spaces(self):
+        self.assertEqual(
+            photo_capture._parse_v4l2_controls("auto_exposure=1, exposure_time_absolute=80 gain=0"),
+            ["auto_exposure=1", "exposure_time_absolute=80", "gain=0"],
+        )
+
+    def test_resolve_v4l2_control_command_uses_capture_device(self):
+        os.environ["APP_CAMERA_V4L2_CTRLS"] = "auto_exposure=1,exposure_time_absolute=80"
+        photo_capture.shutil.which = lambda name: "/usr/bin/v4l2-ctl" if name == "v4l2-ctl" else None
+
+        command = photo_capture._resolve_v4l2_control_command(["fswebcam", "-d", "/dev/video1", "out.jpg"])
+
+        self.assertEqual(
+            command,
+            [
+                "/usr/bin/v4l2-ctl",
+                "-d",
+                "/dev/video1",
+                "--set-ctrl=auto_exposure=1",
+                "--set-ctrl=exposure_time_absolute=80",
+            ],
+        )
 
 
 class PhotoCaptureQueueTest(unittest.TestCase):

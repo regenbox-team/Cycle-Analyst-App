@@ -149,9 +149,12 @@ def diagnostics_motor_sensor():
 def diagnostics_camera():
     lines: list[str] = []
     try:
-        from app.photo_capture import _capture_image, _resolve_capture_command
+        from app.photo_capture import _capture_image, _resolve_capture_command, _resolve_v4l2_control_command
 
         preview_command = _resolve_capture_command("__output__.jpg")
+        control_command = _resolve_v4l2_control_command(preview_command)
+        if control_command:
+            lines.append(f"Pre-command: {' '.join(control_command)}")
         lines.append(f"Command: {' '.join(preview_command)}")
         temp_path = _capture_image()
         try:
