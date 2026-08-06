@@ -311,6 +311,16 @@ SETTINGS: tuple[EnvSetting, ...] = (
         detail="La page decompose cette commande en champs simples puis reconstruit APP_CAMERA_COMMAND. Le marqueur {output} est ajoute automatiquement a la fin.",
     ),
     EnvSetting(
+        "APP_CAMERA_V4L2_CTRLS",
+        "Camera V4L2 controls",
+        "",
+        "Controles V4L2 appliques juste avant chaque capture.",
+        "Camera",
+        enabled_by_default=False,
+        placeholder="auto_exposure=1,exposure_time_absolute=80,gain=0",
+        detail="Utile si la webcam surexpose en mode auto. Format: name=value separes par des virgules ou espaces. Les noms exacts dependent de la camera; verifie avec v4l2-ctl --list-ctrls.",
+    ),
+    EnvSetting(
         "MONITOR_DEVICE_ID",
         "Vehicle name",
         socket.gethostname(),
