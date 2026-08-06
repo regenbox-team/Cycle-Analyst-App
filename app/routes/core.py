@@ -223,8 +223,70 @@ def _get_metrics_payload():
     }
 
 
+def _get_live_metrics_payload():
+    sm = state.session_metrics
+    raw = state.latest_raw_values
+    solar_enabled = bool(sm.get("solar_enabled", state.solar_roof_enabled))
+    solar_sensor = state.solar_sensor if solar_enabled else {}
+    solar_power_live = (
+        solar_sensor.get("current_a", 0.0) * solar_sensor.get("bus_v", 0.0)
+        if solar_enabled else 0.0
+    )
+
+    return {
+        "raw_CA_values": raw,
+        "session_id": state.session_id,
+        "user": state.current_user,
+        "battery_capacity_ah": VEHICLE_CONFIGS.get(vehicle_mode, {}).get("battery_capacity_ah", 64),
+        "solar_enabled": solar_enabled,
+        "ca_reset_prompt": bool(sm.get("ca_reset_prompt", False)) and not solar_enabled,
+        "solar_sensor": state.solar_sensor if solar_enabled else {"enabled": False},
+        "motor_sensor": state.motor_sensor,
+        "calculated_CA_values": {
+            "speed_avg": sm["speed_sum"] / max(1, sm["speed_count"]),
+            "speed_max": sm["speed_max"],
+            "power_live": raw[1] * raw[2] if raw else 0,
+            "ca_current_live": raw[2] if raw else 0,
+            "ca_voltage_live": raw[1] if raw else 0,
+            "motor_sensor_current_live": state.motor_sensor.get("corrected_current_a", 0.0),
+            "motor_sensor_voltage_live": state.motor_sensor.get("bus_v", 0.0),
+            "motor_sensor_power_live": state.motor_sensor.get("corrected_power_w", 0.0),
+            "motor_sensor_valid": bool(state.motor_sensor.get("valid")),
+            "power_avg": sm["power_sum"] / max(1, sm["speed_count"]),
+            "power_max": sm["power_max"] if sm["power_max"] != float('-inf') else 0,
+            "solar_enabled": solar_enabled,
+            "solar_current_live": solar_sensor.get("current_a", 0.0) if solar_enabled else 0.0,
+            "solar_voltage_live": solar_sensor.get("bus_v", 0.0) if solar_enabled else 0.0,
+            "solar_power_live": solar_power_live,
+            "solar_power_max": sm.get("solar_power_max", 0.0) if solar_enabled else 0.0,
+            "solar_power_avg": (
+                sm.get("solar_power_sum", 0.0) / max(1, sm.get("solar_power_count", 0))
+                if solar_enabled else 0.0
+            ),
+            "human_current_live": raw[13] if raw else 0,
+            "human_power_live": raw[1] * raw[13] if raw else 0,
+            "human_power_max": sm["human_power_max"],
+            "human_power_avg": sm["human_power_sum"] / max(1, sm["human_power_count"]),
+            "distance_km": sm["distance_km"],
+            "live_Wh_per_km": (
+                (raw[1] * raw[2]) / max(0.1, raw[3])
+                if raw and raw[3] >= 1 else 0
+            ),
+            "live_net_Wh_per_km": (
+                ((raw[1] * raw[2]) - (raw[1] * raw[13]) - solar_power_live)
+                / max(0.1, raw[3])
+                if raw and raw[3] >= 1 else 0
+            ),
+        }
+    }
+
+
 def metrics():
     return jsonify(_get_metrics_payload())
+
+
+def metrics_live():
+    return jsonify(_get_live_metrics_payload())
 
 
 def _bounded_int_arg(name: str, default: int, min_value: int, max_value: int) -> int:
@@ -588,6 +650,7 @@ def create_blueprint():
     from flask import Blueprint
     bp = Blueprint("core", __name__)
     bp.add_url_rule("/metrics", view_func=metrics)
+    bp.add_url_rule("/metrics_live", view_func=metrics_live)
     bp.add_url_rule("/power_history", view_func=power_history)
     bp.add_url_rule("/session_track", view_func=session_track)
     bp.add_url_rule("/solar_session_profile", view_func=solar_session_profile)
@@ -601,6 +664,7 @@ def create_blueprint():
 
 def register(app):
     app.add_url_rule("/metrics", view_func=metrics)
+    app.add_url_rule("/metrics_live", view_func=metrics_live)
     app.add_url_rule("/power_history", view_func=power_history)
     app.add_url_rule("/session_track", view_func=session_track)
     app.add_url_rule("/solar_session_profile", view_func=solar_session_profile)
