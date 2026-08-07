@@ -92,6 +92,7 @@ function setText(id, text) {
 }
 
 function diagnoseDashboardCause(reader) {
+  if (!reader || !Number(reader.updated_at)) return "reader diag missing";
   const rawAge = Number(reader?.raw_age_ms);
   const rawHz = Number(reader?.raw_hz);
   const loopMs = Number(reader?.loop_ms);
@@ -118,7 +119,9 @@ function updateDashboardDiagDisplay(reader = dashboardDiag.reader) {
   );
   setText(
     "sys-reader-diag",
-    `Reader: ${fmtHz(reader?.raw_hz)} age ${fmtMs(reader?.raw_age_ms)} loop ${fmtMs(reader?.loop_ms)} src ${fmtMs(reader?.source_ms)} i2c ${fmtMs(num(reader?.solar_ms, 0) + num(reader?.motor_ms, 0))}`
+    reader && Number(reader.updated_at)
+      ? `Reader: ${fmtHz(reader?.raw_hz)} age ${fmtMs(reader?.raw_age_ms)} loop ${fmtMs(reader?.loop_ms)} src ${fmtMs(reader?.source_ms)} i2c ${fmtMs(num(reader?.solar_ms, 0) + num(reader?.motor_ms, 0))}`
+      : "Reader: no diag"
   );
   setText("sys-cause-diag", `Cause: ${cause}`);
 }

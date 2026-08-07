@@ -270,6 +270,7 @@ def save_session_metrics_to_file() -> None:
                 "gps_state": gps_state,
                 "solar_sensor": solar_sensor,
                 "motor_sensor": motor_sensor,
+                "reader_diag": reader_diag,
                 "current_user": current_user,
                 "current_user_id": current_user_id,
             }
@@ -307,6 +308,9 @@ def load_session_metrics_from_file(for_session: str | None = None) -> bool:
             motor = runtime.get("motor_sensor")
             if isinstance(motor, dict):
                 motor_sensor.update(motor)
+            diag = runtime.get("reader_diag")
+            if isinstance(diag, dict):
+                reader_diag.update(diag)
             globals()["session_id"] = runtime.get("session_id") or globals()["session_id"]
             globals()["session_active"] = bool(runtime.get("session_active"))
             user = runtime.get("current_user")
