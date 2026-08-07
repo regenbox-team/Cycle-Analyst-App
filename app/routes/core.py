@@ -103,6 +103,13 @@ def _get_metrics_payload():
     solar_battery = None
     Wh_remaining = standard_Wh_remaining
     if solar_enabled:
+        from app.solar_range import battery_curve_payload, update_rest_voltage_observation
+        update_rest_voltage_observation(
+            sm, voltage,
+            state.latest_raw_values[2] if state.latest_raw_values else None,
+            state.latest_raw_values[3] if state.latest_raw_values else None,
+            capacity_ah=capacity_ah,
+        )
         solar_battery = build_estimate(
             sm,
             voltage,
@@ -111,6 +118,8 @@ def _get_metrics_payload():
             gps_state=getattr(state, "gps_state", None),
         )
         Wh_remaining = solar_battery["remaining_wh"]
+        solar_battery["curve"] = battery_curve_payload(sm, capacity_ah)
+        solar_battery["can_reset_full"] = bool(state.session_active) and float(sm.get("distance_km") or 0.0) <= 0.2 and abs(float(net_Wh or 0.0)) <= 20.0
 
     net_list = sm.get("net_Wh_per_km_last", [])
     net_last_km = net_list[-1] if net_list else 0

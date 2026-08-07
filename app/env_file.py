@@ -175,6 +175,15 @@ SETTINGS: tuple[EnvSetting, ...] = (
         detail="Chemin vers une courbe de decharge reconstruite. Laisse vide si tu veux rester sur le calcul standard par Ah et tension.",
     ),
     EnvSetting(
+        "APP_BATTERY_USE_PREVIOUS_STATE",
+        "Reuse previous battery state",
+        "1",
+        "Reprend l'estimation de batterie de la session precedente.",
+        "Solar and battery",
+        detail="Si desactive, chaque nouvelle session estime son SOC initial uniquement avec la tension et la courbe batterie. Le bouton Batterie rechargee du dashboard permet toujours de forcer 100 % au depart.",
+        choices=BOOLEAN_CHOICES,
+    ),
+    EnvSetting(
         "APP_SOLAR_SENSOR",
         "Solar sensor",
         "ina228",

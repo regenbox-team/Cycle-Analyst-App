@@ -155,6 +155,36 @@ def load_samples(db_path: Path, selected_sessions: set[str] | None = None) -> di
     return by_session
 
 
+def load_export_payload(payload: dict, selected_sessions: set[str] | None = None) -> dict[str, list[Sample]]:
+    """Load one monitor export, or a JSON object/list containing exported log rows."""
+    rows = payload.get("logs", payload.get("samples", [])) if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return {}
+    by_session: dict[str, list[Sample]] = {}
+    default_session = str(payload.get("session_id") or payload.get("session") or "json-session") if isinstance(payload, dict) else "json-session"
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        session = str(row.get("session") or row.get("session_id") or default_session)
+        if selected_sessions and session not in selected_sessions:
+            continue
+        parsed = parse_raw_values(row.get("raw"))
+        if parsed is None:
+            continue
+        ah, voltage, current_a, speed_kph, distance_km = parsed
+        timestamp = str(row.get("timestamp") or "")
+        by_session.setdefault(session, []).append(Sample(session, parse_timestamp(timestamp), timestamp, ah, voltage, current_a, speed_kph, distance_km))
+    return by_session
+
+
+def merge_sample_sets(*sets: dict[str, list[Sample]]) -> dict[str, list[Sample]]:
+    merged: dict[str, list[Sample]] = {}
+    for sample_set in sets:
+        for session, samples in sample_set.items():
+            merged.setdefault(session, []).extend(samples)
+    return merged
+
+
 def summarize_sessions(db_path: Path) -> list[dict]:
     summaries = []
     by_session = load_samples(db_path)

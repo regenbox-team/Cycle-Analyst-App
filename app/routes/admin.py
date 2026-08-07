@@ -56,6 +56,22 @@ def reset_session():
     return jsonify({"status": "Session reset", "session_id": state.session_id})
 
 
+def reset_battery_full():
+    if not state.session_active:
+        return jsonify({"error": "No active session"}), 409
+    metrics = state.session_metrics
+    net_wh = float(metrics.get("positive_Wh") or 0.0) - float(metrics.get("regen_Wh") or 0.0) - float(metrics.get("human_Wh") or 0.0) - float(metrics.get("solar_Wh") or 0.0)
+    if float(metrics.get("distance_km") or 0.0) > 0.2 or abs(net_wh) > 20.0:
+        return jsonify({"error": "Battery reset is only available at the beginning of a session"}), 409
+    from app.solar_range import force_full_battery
+    from app.config import VEHICLE_CONFIGS
+    from app import modes
+    capacity_ah = VEHICLE_CONFIGS.get(modes.vehicle_mode, {}).get("battery_capacity_ah", 64)
+    force_full_battery(metrics, capacity_ah)
+    state.save_session_metrics_to_file()
+    return jsonify({"status": "ok", "percent": 100.0})
+
+
 def restart_service():
     """Attempt to restart the systemd service. Requires sudoers rule.
     Example sudoers (no password) for user 'pi':
@@ -79,6 +95,7 @@ def create_blueprint():
     bp.add_url_rule("/switch_user", methods=["POST"], view_func=switch_user)
     bp.add_url_rule("/add_ah", methods=["POST"], view_func=add_ah)
     bp.add_url_rule("/reset", methods=["POST"], view_func=reset_session)
+    bp.add_url_rule("/battery/reset_full", methods=["POST"], view_func=reset_battery_full)
     bp.add_url_rule("/restart_service", methods=["POST"], view_func=restart_service)
     return bp
 
@@ -87,4 +104,5 @@ def register(app):
     app.add_url_rule("/switch_user", methods=["POST"], view_func=switch_user)
     app.add_url_rule("/add_ah", methods=["POST"], view_func=add_ah)
     app.add_url_rule("/reset", methods=["POST"], view_func=reset_session)
+    app.add_url_rule("/battery/reset_full", methods=["POST"], view_func=reset_battery_full)
     app.add_url_rule("/restart_service", methods=["POST"], view_func=restart_service)

@@ -124,6 +124,24 @@ class SolarRangeTest(unittest.TestCase):
         self.assertFalse(solar_range.imported_solar_profile_status()["enabled"])
         self.assertNotEqual(theoretical_solar_power_w(noon, latitude=0, longitude=0, panel_max_w=10), 480.0)
 
+    def test_force_full_battery_resets_energy_origin(self):
+        metrics = {"positive_Wh": 12.0, "regen_Wh": 0.0, "human_Wh": 0.0, "solar_Wh": 0.0}
+        solar_range.force_full_battery(metrics, 64)
+        estimate = build_estimate(metrics, 50.0, 64)
+        self.assertEqual(estimate["percent"], 100.0)
+        metrics["positive_Wh"] = 22.0
+        self.assertAlmostEqual(solar_range.net_session_battery_use_wh(metrics), 10.0)
+
+    def test_rest_observation_becomes_stale_after_five_wh(self):
+        metrics = {"positive_Wh": 0.0, "regen_Wh": 0.0, "human_Wh": 0.0, "solar_Wh": 0.0}
+        for second in range(121):
+            solar_range.update_rest_voltage_observation(metrics, 50.36, 0.2, 0.0, capacity_ah=64, now=1000 + second)
+        payload = solar_range.battery_curve_payload(metrics, 64)
+        self.assertTrue(payload["rest_observation_fresh"])
+        self.assertAlmostEqual(payload["rest_observation"]["soc_percent"], 70.0)
+        metrics["positive_Wh"] = 5.1
+        self.assertFalse(solar_range.battery_curve_payload(metrics, 64)["rest_observation_fresh"])
+
 
 if __name__ == "__main__":
     unittest.main()

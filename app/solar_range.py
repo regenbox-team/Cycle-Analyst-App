@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import math
 import os
+import statistics
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -53,6 +55,10 @@ def battery_capacity_wh(capacity_ah: float | int | None = None) -> float:
         return max(0.0, float(capacity_ah) * battery_nominal_voltage())
     except Exception:
         return 0.0
+
+
+def use_previous_battery_state() -> bool:
+    return str(os.getenv("APP_BATTERY_USE_PREVIOUS_STATE", "1")).strip().lower() not in {"0", "false", "no", "off"}
 
 
 def select_estimation_voltage(ca_voltage: float | int | None, solar_voltage: float | int | None = None) -> tuple[float | None, str]:
@@ -274,7 +280,7 @@ def initialize_solar_session(
 ) -> dict:
     capacity_wh = battery_capacity_wh(capacity_ah)
     voltage, voltage_source = select_estimation_voltage(voltage, solar_voltage)
-    stored = load_state()
+    stored = load_state() if use_previous_battery_state() else {}
     voltage_soc = soc_from_voltage(voltage)
     voltage_wh = capacity_wh * voltage_soc / 100.0 if voltage_soc is not None else None
     stored_wh = stored.get("remaining_wh")
@@ -310,13 +316,105 @@ def initialize_solar_session(
     return build_estimate(session_metrics, voltage, capacity_ah)
 
 
-def net_session_battery_use_wh(session_metrics: dict) -> float:
+def force_full_battery(session_metrics: dict, capacity_ah: float | int | None = None) -> dict:
+    """Reset the session energy origin to a fully charged pack."""
+    capacity_wh = battery_capacity_wh(capacity_ah)
+    session_metrics["solar_battery_start_wh"] = capacity_wh
+    session_metrics["solar_battery_capacity_wh"] = capacity_wh
+    session_metrics["solar_battery_start_soc"] = 100.0
+    session_metrics["solar_battery_estimate_source"] = "manual_full_charge"
+    session_metrics["solar_battery_confidence"] = 1.0
+    session_metrics["solar_battery_use_baseline_wh"] = _raw_net_session_battery_use_wh(session_metrics)
+    session_metrics.pop("battery_rest_candidate", None)
+    session_metrics.pop("battery_rest_observation", None)
+    return session_metrics
+
+
+def update_rest_voltage_observation(
+    session_metrics: dict,
+    voltage: float | int | None,
+    current_a: float | int | None,
+    speed_kph: float | int | None,
+    *,
+    capacity_ah: float | int | None = None,
+    now: float | None = None,
+) -> dict | None:
+    """Record a curve-based SOC only after a stable, low-current two-minute rest."""
+    now = float(now if now is not None else time.time())
+    try:
+        v, current, speed = float(voltage), float(current_a), float(speed_kph)
+    except (TypeError, ValueError):
+        session_metrics.pop("battery_rest_candidate", None)
+        return session_metrics.get("battery_rest_observation")
+    if v <= 0 or abs(current) > 1.5 or speed > 1.0:
+        session_metrics.pop("battery_rest_candidate", None)
+        return session_metrics.get("battery_rest_observation")
+
+    candidate = session_metrics.get("battery_rest_candidate")
+    if not isinstance(candidate, dict):
+        candidate = {"started_at": now, "samples": []}
+    samples = list(candidate.get("samples") or [])
+    samples.append(v)
+    candidate["samples"] = samples[-180:]
+    session_metrics["battery_rest_candidate"] = candidate
+    if now - float(candidate.get("started_at") or now) < 120 or len(samples) < 20:
+        return session_metrics.get("battery_rest_observation")
+    tail = samples[-60:]
+    voltage_std = statistics.pstdev(tail) if len(tail) > 1 else 0.0
+    if voltage_std > 0.05:
+        return session_metrics.get("battery_rest_observation")
+    settled_voltage = statistics.median(tail)
+    soc = soc_from_voltage(settled_voltage)
+    if soc is None:
+        return session_metrics.get("battery_rest_observation")
+    capacity_wh = battery_capacity_wh(capacity_ah)
+    observation = {
+        "voltage": settled_voltage,
+        "soc_percent": soc,
+        "remaining_wh": capacity_wh * soc / 100.0,
+        "voltage_std": voltage_std,
+        "observed_at": now,
+        "used_wh_at_observation": net_session_battery_use_wh(session_metrics),
+    }
+    session_metrics["battery_rest_observation"] = observation
+    return observation
+
+
+def battery_curve_payload(session_metrics: dict, capacity_ah: float | int | None = None) -> dict:
+    capacity_wh = battery_capacity_wh(capacity_ah)
+    observation = session_metrics.get("battery_rest_observation")
+    if not isinstance(observation, dict):
+        observation = None
+    consumed_since = None
+    fresh = False
+    if observation:
+        consumed_since = max(0.0, net_session_battery_use_wh(session_metrics) - float(observation.get("used_wh_at_observation") or 0.0))
+        fresh = consumed_since < 5.0
+    return {
+        "capacity_wh": capacity_wh,
+        "points": [
+            {"voltage": voltage, "soc": soc, "remaining_wh": capacity_wh * soc / 100.0}
+            for voltage, soc in load_discharge_curve()
+        ],
+        "rest_observation": observation,
+        "rest_observation_fresh": fresh,
+        "wh_since_observation": consumed_since,
+        "rest_required_seconds": 120,
+        "fresh_for_wh": 5.0,
+    }
+
+
+def _raw_net_session_battery_use_wh(session_metrics: dict) -> float:
     return (
         float(session_metrics.get("positive_Wh") or 0.0)
         - float(session_metrics.get("regen_Wh") or 0.0)
         - float(session_metrics.get("human_Wh") or 0.0)
         - float(session_metrics.get("solar_Wh") or 0.0)
     )
+
+
+def net_session_battery_use_wh(session_metrics: dict) -> float:
+    return _raw_net_session_battery_use_wh(session_metrics) - float(session_metrics.get("solar_battery_use_baseline_wh") or 0.0)
 
 
 def _solar_declination_rad(day_of_year: int) -> float:

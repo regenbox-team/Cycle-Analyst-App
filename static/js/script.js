@@ -11,6 +11,7 @@ let isLongRange = false;
 let metricsPaused = false;
 let solarPotentialChartOpen = false;
 let latestSolarBattery = null;
+let latestBatteryCurve = null;
 let latestSolarSessionProfile = null;
 let solarSessionProfileLoading = false;
 let solarSessionProfileFetchedAt = 0;
@@ -1633,6 +1634,7 @@ async function fetchMetrics({ full = false } = {}) {
     if (full) {
       // Battery / Ah
       const solarBattery = json.calculated_CA_values?.solar_battery ?? json.solar_battery ?? null;
+      latestBatteryCurve = solarBattery;
       const ahConsumed = num(
         json.calculated_CA_values?.battery_ah_used_net ?? json.battery_ah_used_net,
         0
@@ -1654,6 +1656,9 @@ async function fetchMetrics({ full = false } = {}) {
       } else {
         document.getElementById('ah-bar-detail').innerText = `gross ${grossAh.toFixed(1)} Ah / recovered ${recoveredAh.toFixed(1)} Ah`;
       }
+      const resetFullButton = document.getElementById('battery-reset-full');
+      if (resetFullButton) resetFullButton.hidden = !solarBattery?.can_reset_full;
+      if (!document.getElementById('battery-curve-modal')?.hidden) renderBatteryCurve();
 
       const caVoltage = num(json.calculated_CA_values?.ca_voltage_live ?? json.raw_CA_values?.[1], 0);
       const sensorVoltage = num(json.calculated_CA_values?.motor_sensor_voltage_live, 0);
@@ -1805,6 +1810,81 @@ function startFullMetricsLoop() {
   };
   tick();
 }
+
+function batteryCurveInterpolate(points, wh) {
+  const ordered = points.slice().sort((a, b) => num(a.remaining_wh) - num(b.remaining_wh));
+  if (!ordered.length) return null;
+  if (wh <= num(ordered[0].remaining_wh)) return ordered[0];
+  if (wh >= num(ordered[ordered.length - 1].remaining_wh)) return ordered[ordered.length - 1];
+  for (let i = 1; i < ordered.length; i += 1) {
+    if (wh <= num(ordered[i].remaining_wh)) {
+      const a = ordered[i - 1], b = ordered[i];
+      const ratio = (wh - num(a.remaining_wh)) / Math.max(.001, num(b.remaining_wh) - num(a.remaining_wh));
+      return {
+        remaining_wh: wh,
+        soc: num(a.soc) + ratio * (num(b.soc) - num(a.soc)),
+        voltage: num(a.voltage) + ratio * (num(b.voltage) - num(a.voltage)),
+      };
+    }
+  }
+  return ordered[0];
+}
+
+function renderBatteryCurve(selectedWh = null) {
+  const battery = latestBatteryCurve;
+  const curve = battery?.curve;
+  const points = curve?.points || [];
+  const chart = document.getElementById('battery-curve-chart');
+  if (!chart || !points.length) {
+    if (chart) chart.innerHTML = '<p>No valid battery curve loaded.</p>';
+    return;
+  }
+  const width = 860, height = 360, pad = {left: 70, right: 25, top: 25, bottom: 52};
+  const capacity = Math.max(1, num(curve.capacity_wh));
+  const voltages = points.map(p => num(p.voltage));
+  let minV = Math.min(...voltages), maxV = Math.max(...voltages);
+  const vp = Math.max(.25, (maxV - minV) * .08); minV -= vp; maxV += vp;
+  const x = wh => pad.left + num(wh) / capacity * (width - pad.left - pad.right);
+  const y = v => pad.top + (1 - (num(v) - minV) / Math.max(.01, maxV - minV)) * (height - pad.top - pad.bottom);
+  const ordered = points.slice().sort((a,b) => num(a.remaining_wh) - num(b.remaining_wh));
+  const path = ordered.map((p,i) => `${i ? 'L' : 'M'} ${x(p.remaining_wh).toFixed(1)} ${y(p.voltage).toFixed(1)}`).join(' ');
+  const xGrid = [0,.25,.5,.75,1].map(t => `<line class="battery-curve-grid" x1="${x(capacity*t)}" y1="${pad.top}" x2="${x(capacity*t)}" y2="${height-pad.bottom}"/><text class="battery-curve-axis" x="${x(capacity*t)-18}" y="${height-20}">${Math.round(capacity*t)} Wh</text>`).join('');
+  const yGrid = [0,.25,.5,.75,1].map(t => { const value=maxV-t*(maxV-minV), py=pad.top+t*(height-pad.top-pad.bottom); return `<line class="battery-curve-grid" x1="${pad.left}" y1="${py}" x2="${width-pad.right}" y2="${py}"/><text class="battery-curve-axis" x="8" y="${py+4}">${value.toFixed(1)} V</text>`; }).join('');
+  const obs = curve.rest_observation;
+  const currentDot = obs ? `<circle class="battery-curve-current ${curve.rest_observation_fresh ? 'fresh' : ''}" cx="${x(obs.remaining_wh)}" cy="${y(obs.voltage)}" r="8"><title>Last rested voltage observation</title></circle>` : '';
+  const selected = selectedWh === null ? null : batteryCurveInterpolate(points, selectedWh);
+  const selectedDot = selected ? `<circle class="battery-curve-selected" cx="${x(selected.remaining_wh)}" cy="${y(selected.voltage)}" r="7"/>` : '';
+  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" data-left="${pad.left}" data-right="${pad.right}" data-width="${width}">${xGrid}${yGrid}<path class="battery-curve-line" d="${path}"/>${currentDot}${selectedDot}</svg>`;
+  const status = document.getElementById('battery-curve-status');
+  status.textContent = obs
+    ? `Last rested observation: ${num(obs.voltage).toFixed(2)} V · ${num(obs.soc_percent).toFixed(1)}% · ${num(obs.remaining_wh).toFixed(0)} Wh${curve.rest_observation_fresh ? ' (fresh)' : ` (stored, ${num(curve.wh_since_observation).toFixed(1)} Wh since)`}`
+    : `Waiting for ${curve.rest_required_seconds || 120}s at ≤1 km/h and ≤1.5 A for a voltage-based observation.`;
+  if (selected) document.getElementById('battery-curve-readout').textContent = `Selected: ${selected.voltage.toFixed(2)} V · ${selected.soc.toFixed(1)}% · ${selected.remaining_wh.toFixed(0)} Wh available`;
+  chart.querySelector('svg').addEventListener('pointerdown', event => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const svgX = (event.clientX - rect.left) / rect.width * width;
+    const wh = Math.max(0, Math.min(capacity, (svgX - pad.left) / (width - pad.left - pad.right) * capacity));
+    renderBatteryCurve(wh);
+  });
+}
+
+function openBatteryCurve() {
+  const modal = document.getElementById('battery-curve-modal');
+  modal.hidden = false;
+  renderBatteryCurve();
+}
+
+document.getElementById('battery-box')?.addEventListener('click', openBatteryCurve);
+document.getElementById('battery-box')?.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') openBatteryCurve(); });
+document.getElementById('battery-curve-close')?.addEventListener('click', () => { document.getElementById('battery-curve-modal').hidden = true; });
+document.getElementById('battery-curve-modal')?.addEventListener('click', event => { if (event.target.id === 'battery-curve-modal') event.currentTarget.hidden = true; });
+document.getElementById('battery-reset-full')?.addEventListener('click', async () => {
+  const status = document.getElementById('battery-reset-status');
+  const response = await fetch('/battery/reset_full', {method: 'POST'});
+  const data = await response.json();
+  status.textContent = response.ok ? 'Battery set to 100%.' : (data.error || 'Reset failed.');
+  if (response.ok) await fetchMetrics({full: true});
+});
 
 /* ====== EVENT LISTENERS ====== */
 document.getElementById("switch-user-button").addEventListener("click", async () => {

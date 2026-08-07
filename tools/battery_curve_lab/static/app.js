@@ -5,6 +5,7 @@ const state = {
   selected: new Set(),
   lastPoints: [],
   lastCurve: []
+  ,source: "db", jsonKeys: [], monitorDevice: "", monitorMode: "supercycle_live"
 };
 
 const $ = (id) => document.getElementById(id);
@@ -45,6 +46,9 @@ async function loadDatabases() {
 }
 
 async function loadSessions() {
+  state.source = $("source-select").value;
+  if (state.source === "json") return loadJsonSessions();
+  if (state.source === "monitor") return loadMonitorSessions();
   state.db = $("db-select").value;
   state.selected.clear();
   const data = await getJson(`/api/sessions?db=${encodeURIComponent(state.db)}`);
@@ -53,6 +57,22 @@ async function loadSessions() {
   if (state.sessions[0]) {
     await previewSession(state.sessions[0].session);
   }
+}
+
+async function loadJsonSessions() {
+  const files = $("json-files").files;
+  if (!files.length) { $("json-files").click(); return; }
+  const body = new FormData(); Array.from(files).forEach(file => body.append("files", file));
+  const data = await getJson("/api/json_sources", {method: "POST", body});
+  state.jsonKeys = data.sources.map(source => source.key);
+  state.sessions = data.sources.flatMap(source => source.sessions);
+  state.selected.clear(); renderSessions();
+}
+
+async function loadMonitorSessions() {
+  state.monitorDevice = $("monitor-device").value.trim(); state.monitorMode = $("monitor-mode").value.trim() || "supercycle_live";
+  const data = await getJson(`/api/monitor_sessions?device=${encodeURIComponent(state.monitorDevice)}&mode=${encodeURIComponent(state.monitorMode)}`);
+  state.monitorDevice = data.device; state.sessions = data.sessions; state.selected.clear(); renderSessions();
 }
 
 function renderSessions() {
@@ -69,9 +89,9 @@ function renderSessions() {
         <div>
           <div class="session-name">${escapeHtml(session.session)}</div>
           <div class="session-stats">
-            ${session.duration_min} min · ${session.samples} samples<br>
-            V ${session.voltage_min}-${session.voltage_max} · Ah ${session.ah_min}-${session.ah_max}<br>
-            ${session.distance_km} km · W ${session.power_min}-${session.power_max}
+            ${session.duration_min ?? "—"} min · ${session.samples ?? "remote"} samples<br>
+            V ${session.voltage_min ?? "—"}-${session.voltage_max ?? "—"} · Ah ${session.ah_min ?? "—"}-${session.ah_max ?? "—"}<br>
+            ${session.distance_km ?? "—"} km · W ${session.power_min ?? "—"}-${session.power_max ?? "—"}
           </div>
         </div>
         <button>View</button>
@@ -89,7 +109,10 @@ async function previewSession(session) {
   state.activeSession = session;
   renderSessions();
   const maxPoints = Math.max(200, Math.min(5000, num($("preview-samples").value, 1600)));
-  const data = await getJson(`/api/session_series?db=${encodeURIComponent(state.db)}&session=${encodeURIComponent(session)}&max_points=${maxPoints}`);
+  const requestData = {source: state.source, db: state.db, session, json_keys: state.jsonKeys, device: state.monitorDevice, mode: state.monitorMode};
+  const data = state.source === "db"
+    ? await getJson(`/api/session_series?db=${encodeURIComponent(state.db)}&session=${encodeURIComponent(session)}&max_points=${maxPoints}`)
+    : await getJson(`/api/session_series?max_points=${maxPoints}`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(requestData)});
   $("preview-title").textContent = session;
   $("preview-meta").textContent = `${data.returned_samples} displayed points from ${data.total_samples} samples`;
   drawMultiChart($("session-chart"), data.points);
@@ -162,6 +185,10 @@ function drawMultiChart(container, points) {
 
 function payloadFromControls() {
   return {
+    source: state.source,
+    json_keys: state.jsonKeys,
+    device: state.monitorDevice,
+    mode: state.monitorMode,
     db: state.db,
     sessions: Array.from(state.selected),
     capacity_ah: num($("capacity-ah").value, 64),
@@ -259,6 +286,14 @@ function renderPointsTable(points) {
 }
 
 $("reload-btn").addEventListener("click", loadSessions);
+$("source-select").addEventListener("change", () => {
+  const source = $("source-select").value;
+  $("db-select").hidden = source !== "db";
+  $("json-files").hidden = source !== "json";
+  $("monitor-device").hidden = source !== "monitor";
+  $("monitor-mode").hidden = source !== "monitor";
+});
+$("json-files").addEventListener("change", loadSessions);
 $("session-filter").addEventListener("input", renderSessions);
 $("preview-samples").addEventListener("change", () => {
   if (state.activeSession) previewSession(state.activeSession);

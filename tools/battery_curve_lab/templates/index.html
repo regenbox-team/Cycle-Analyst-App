@@ -13,8 +13,13 @@
       <p>Standalone session viewer and LG MH1 curve extractor</p>
     </div>
     <div class="db-picker">
+      <label for="source-select">Source</label>
+      <select id="source-select"><option value="db">SQLite database</option><option value="json">JSON exports</option><option value="monitor">Monitor server</option></select>
       <label for="db-select">Database</label>
       <select id="db-select"></select>
+      <input id="json-files" type="file" accept="application/json,.json" multiple hidden>
+      <input id="monitor-device" placeholder="Monitor device id" hidden>
+      <input id="monitor-mode" value="supercycle_live" placeholder="Mode" hidden>
       <button id="reload-btn">Load</button>
     </div>
   </header>

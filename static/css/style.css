@@ -775,6 +775,22 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   transition: width 0.3s ease;
 }
 
+.bar-box { cursor: pointer; }
+.battery-curve-modal[hidden] { display: none; }
+.battery-curve-modal { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; padding: 1rem; background: rgba(10, 18, 28, 0.68); }
+.battery-curve-dialog { width: min(920px, 96vw); max-height: 94vh; overflow: auto; border-radius: 1rem; padding: 1rem; background: var(--background, #fff); box-shadow: 0 1rem 4rem rgba(0,0,0,.35); }
+.battery-curve-head, .battery-curve-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.battery-curve-head h2 { margin: 0; }
+.battery-curve-status, .battery-curve-readout, .battery-curve-actions { margin-top: .65rem; font-size: var(--font-small); }
+.battery-curve-chart { min-height: 300px; width: 100%; touch-action: none; }
+.battery-curve-chart svg { display: block; width: 100%; min-height: 300px; }
+.battery-curve-grid { stroke: #c8ced6; stroke-width: 1; }
+.battery-curve-line { fill: none; stroke: var(--highlight, #f28c28); stroke-width: 4; }
+.battery-curve-axis { fill: var(--text-dark, #333); font-size: 13px; }
+.battery-curve-current { stroke: #73808c; fill: #73808c; }
+.battery-curve-current.fresh { stroke: #1677d2; fill: #1677d2; }
+.battery-curve-selected { stroke: #111; fill: #fff; stroke-width: 3; }
+
 .bar-value {
   font-size: var(--font-medium);
   min-width: 4rem;
