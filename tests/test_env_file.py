@@ -109,6 +109,11 @@ class EnvFileTest(unittest.TestCase):
         self.assertIn("detail", flat["APP_GPS_BAUDRATE"])
         self.assertIn("camera_choices", flat["APP_CAMERA_COMMAND"])
         self.assertGreaterEqual(len(flat["APP_CAMERA_COMMAND"]["camera_choices"]["resolution"]), 2)
+        skip_values = {
+            option["value"]
+            for option in flat["APP_CAMERA_COMMAND"]["camera_choices"]["skip_frames"]
+        }
+        self.assertIn("180", skip_values)
 
 
 if __name__ == "__main__":

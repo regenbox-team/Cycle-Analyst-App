@@ -61,7 +61,16 @@ MONITOR_CHUNK_BYTES_CHOICES = (
 CAMERA_CHOICES = {
     "program": (("fswebcam", "fswebcam - USB webcam"), ("libcamera-still", "libcamera-still - Pi camera")),
     "device": (("/dev/video0", "/dev/video0"), ("/dev/video1", "/dev/video1"), ("/dev/video2", "/dev/video2")),
-    "skip_frames": (("0", "0"), ("10", "10"), ("30", "30"), ("60", "60 - stable exposure"), ("90", "90")),
+    "skip_frames": (
+        ("0", "0"),
+        ("10", "10"),
+        ("30", "30"),
+        ("60", "60 - stable exposure"),
+        ("90", "90"),
+        ("120", "120"),
+        ("180", "180 - slow webcam warmup"),
+        ("240", "240"),
+    ),
     "palette": (("YUYV", "YUYV - avoids grey frames"), ("MJPEG", "MJPEG"), ("RGB3", "RGB3")),
     "resolution": (("640x480", "640x480"), ("800x600", "800x600"), ("1280x720", "1280x720"), ("1920x1080", "1920x1080")),
     "jpeg_quality": (("70", "70"), ("85", "85 - default"), ("90", "90"), ("95", "95")),
