@@ -28,6 +28,15 @@ const POWER_HISTORY_POLL_HIDDEN_MS = 10000;
 let metricsRequestInFlight = false;
 let fullMetricsRequestInFlight = false;
 let powerHistoryRequestInFlight = false;
+const dashboardDiag = {
+  liveHz: 0,
+  fetchMs: 0,
+  renderMs: 0,
+  serverMs: 0,
+  skips: 0,
+  lastLiveEndMs: 0,
+  reader: null
+};
 let selectedPowerSource = localStorage.getItem('motorPowerSource') === 'sensor' ? 'sensor' : 'ca';
 let selectedVoltageSource = localStorage.getItem('motorVoltageSource') === 'sensor' ? 'sensor' : 'ca';
 const powerHistoryState = {
@@ -56,6 +65,62 @@ function clamp(value, min, max) {
 function num(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function diagEma(current, value, alpha = 0.25) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return current || 0;
+  const c = Number(current);
+  return Number.isFinite(c) && c > 0 ? (c * (1 - alpha)) + (n * alpha) : n;
+}
+
+function fmtMs(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${Math.round(n)}ms`;
+}
+
+function fmtHz(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "-";
+  return `${n.toFixed(1)}Hz`;
+}
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function diagnoseDashboardCause(reader) {
+  const rawAge = Number(reader?.raw_age_ms);
+  const rawHz = Number(reader?.raw_hz);
+  const loopMs = Number(reader?.loop_ms);
+  const sourceMs = Number(reader?.source_ms);
+  const fetchMs = Number(dashboardDiag.fetchMs);
+  const renderMs = Number(dashboardDiag.renderMs);
+  const liveHz = Number(dashboardDiag.liveHz);
+
+  if (Number.isFinite(rawAge) && rawAge > 2000) return "source data stale";
+  if (Number.isFinite(sourceMs) && sourceMs > 700) return "serial/source wait";
+  if (Number.isFinite(loopMs) && loopMs > 700) return "reader loop slow";
+  if (Number.isFinite(rawHz) && rawHz > 0 && rawHz < 1.5) return "source < 1.5Hz";
+  if (Number.isFinite(fetchMs) && fetchMs > 350) return "server/network";
+  if (Number.isFinite(renderMs) && renderMs > 80) return "browser render";
+  if (Number.isFinite(liveHz) && liveHz > 0 && liveHz < 2) return "dashboard loop";
+  return "OK";
+}
+
+function updateDashboardDiagDisplay(reader = dashboardDiag.reader) {
+  const cause = diagnoseDashboardCause(reader);
+  setText(
+    "sys-dash-diag",
+    `Dash: ${fmtHz(dashboardDiag.liveHz)} fetch ${fmtMs(dashboardDiag.fetchMs)} render ${fmtMs(dashboardDiag.renderMs)} srv ${fmtMs(dashboardDiag.serverMs)} skip ${dashboardDiag.skips}`
+  );
+  setText(
+    "sys-reader-diag",
+    `Reader: ${fmtHz(reader?.raw_hz)} age ${fmtMs(reader?.raw_age_ms)} loop ${fmtMs(reader?.loop_ms)} src ${fmtMs(reader?.source_ms)} i2c ${fmtMs(num(reader?.solar_ms, 0) + num(reader?.motor_ms, 0))}`
+  );
+  setText("sys-cause-diag", `Cause: ${cause}`);
 }
 
 function polarToCartesian(cx, cy, r, angleDeg) {
@@ -1460,12 +1525,21 @@ async function fetchMetrics({ full = false } = {}) {
     if (fullMetricsRequestInFlight) return;
     fullMetricsRequestInFlight = true;
   } else {
-    if (metricsRequestInFlight) return;
+    if (metricsRequestInFlight) {
+      dashboardDiag.skips += 1;
+      updateDashboardDiagDisplay();
+      return;
+    }
     metricsRequestInFlight = true;
   }
+  let fetchMs = 0;
+  let renderStartMs = 0;
   try {
+    const requestStartMs = performance.now();
     const res = await fetch(full ? '/metrics' : '/metrics_live', { cache: 'no-store' });
     const json = await res.json();
+    fetchMs = performance.now() - requestStartMs;
+    renderStartMs = performance.now();
     const solarEnabled = json.solar_enabled !== false && json.calculated_CA_values?.solar_enabled !== false;
     setSolarUiEnabled(solarEnabled);
 
@@ -1687,6 +1761,20 @@ async function fetchMetrics({ full = false } = {}) {
 
     document.getElementById("switch-user-button").textContent = "User: " + (json.user ?? "JD");
     document.getElementById("session-id").textContent = json.session_id ?? "-";
+
+    if (!full) {
+      const finishedMs = performance.now();
+      const observedHz = dashboardDiag.lastLiveEndMs
+        ? 1000 / Math.max(1, finishedMs - dashboardDiag.lastLiveEndMs)
+        : 0;
+      dashboardDiag.lastLiveEndMs = finishedMs;
+      dashboardDiag.liveHz = diagEma(dashboardDiag.liveHz, observedHz);
+      dashboardDiag.fetchMs = diagEma(dashboardDiag.fetchMs, fetchMs);
+      dashboardDiag.renderMs = diagEma(dashboardDiag.renderMs, finishedMs - renderStartMs);
+      dashboardDiag.serverMs = diagEma(dashboardDiag.serverMs, json.diag?.server_ms);
+      dashboardDiag.reader = json.diag?.reader || null;
+      updateDashboardDiagDisplay();
+    }
 
   } catch (err) {
     console.error('Error fetching metrics:', err);

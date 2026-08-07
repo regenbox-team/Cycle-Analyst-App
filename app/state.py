@@ -19,6 +19,26 @@ gps_reader_started: bool = False
 monitor_started: bool = False
 solar_roof_enabled: bool = True
 
+# Ultra-light runtime diagnostics exposed to the dashboard. Values are updated
+# in memory only, never persisted.
+reader_diag = {
+    "updated_at": 0.0,
+    "loop_hz": 0.0,
+    "loop_ms": 0.0,
+    "work_ms": 0.0,
+    "source_ms": 0.0,
+    "solar_ms": 0.0,
+    "motor_ms": 0.0,
+    "metrics_ms": 0.0,
+    "db_ms": 0.0,
+    "raw_hz": 0.0,
+    "raw_age_ms": None,
+    "raw_updates": 0,
+    "last_raw_monotonic": 0.0,
+    "source": None,
+    "error": None,
+}
+
 # GPS state
 gps_state = {
     "lat": None,

@@ -443,6 +443,13 @@
           <span id="sys-uptime">Uptime: –</span>
           <span id="sys-throttled">Throttled: –</span>
         </div>
+        <div class="sys-row" style="display:flex; gap:0.8rem; flex-wrap:wrap; justify-content:center;">
+          <span id="sys-dash-diag">Dash: -</span>
+          <span id="sys-reader-diag">Reader: -</span>
+        </div>
+        <div class="sys-row" style="display:flex; gap:0.8rem; flex-wrap:wrap; justify-content:center;">
+          <span id="sys-cause-diag">Cause: -</span>
+        </div>
         <div class="sys-row" style="display:flex; gap:0.8rem; flex-wrap:wrap; justify-content:center; margin-top:0.3rem;">
           <button id="restart-service-button" class="dashboard-button" title="Restart app service">Restart App</button>
           <span id="restart-status" style="font-size: var(--font-small); color: var(--text-dark);"></span>
@@ -453,7 +460,7 @@
 
   </div> <!-- /#page-scale-root -->
 
-  <script src="{{ url_for('static', filename='js/script.js') }}?v=dashboard-live-split"></script>
+  <script src="{{ url_for('static', filename='js/script.js') }}?v=dashboard-live-diag"></script>
   <script src="{{ url_for('static', filename='js/gps_status.js') }}?v=dashboard-poll-250"></script>
   <script src="{{ url_for('static', filename='js/sys_metrics.js') }}?v=dashboard-poll-250"></script>
   <!-- Prefer local vendor copies for offline usage; fallback to CDN if not present -->

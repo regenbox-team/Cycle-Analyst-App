@@ -36,6 +36,15 @@ def parse_line(line: str):
         return None
 
 
+def _diag_ema(current, value, alpha: float = 0.2) -> float:
+    try:
+        value = float(value)
+        current = float(current or 0.0)
+    except Exception:
+        return 0.0
+    return value if current <= 0 else (current * (1.0 - alpha)) + (value * alpha)
+
+
 def generate_fake_data():
     if not hasattr(generate_fake_data, "distance"):
         generate_fake_data.distance = state.session_metrics.get("distance_total", 0.0)
@@ -100,6 +109,8 @@ def _update_live_gps_climb() -> None:
 
 
 def read_serial():
+    last_loop_monotonic = 0.0
+    last_raw_monotonic = 0.0
     last_db_write_time = time.time()
     last_live_state_write_time = 0.0
     last_data_time = time.time()
@@ -115,6 +126,19 @@ def read_serial():
     motor_failure_backoff_until = 0.0
 
     while True:
+        loop_start = time.monotonic()
+        loop_period_ms = (
+            (loop_start - last_loop_monotonic) * 1000.0
+            if last_loop_monotonic else 0.0
+        )
+        last_loop_monotonic = loop_start
+        solar_ms = 0.0
+        motor_ms = 0.0
+        source_ms = 0.0
+        metrics_ms = 0.0
+        db_ms = 0.0
+        diag_error = None
+
         time.sleep(0.1)
         data = None
 
@@ -157,10 +181,12 @@ def read_serial():
         solar_roof_enabled = bool(getattr(state, "solar_roof_enabled", True))
         solar_sample = None
         if solar_roof_enabled:
+            diag_t = time.monotonic()
             solar_sample, solar_failure_backoff_until, solar_sensor = read_solar_sample(
                 solar_sensor,
                 solar_failure_backoff_until,
             )
+            solar_ms = (time.monotonic() - diag_t) * 1000.0
         if solar_sample is not None:
             state.solar_sensor.update({
                 "enabled": True,
@@ -193,11 +219,13 @@ def read_serial():
                 "temperature_c": 0.0,
             })
 
+        diag_t = time.monotonic()
         motor_sample, motor_failure_backoff_until, motor_sensor = read_sensor_sample(
             motor_sensor,
             motor_failure_backoff_until,
             "APP_MOTOR",
         )
+        motor_ms = (time.monotonic() - diag_t) * 1000.0
         if (
             motor_sample is not None
             and solar_sensor is not None
@@ -274,6 +302,7 @@ def read_serial():
             serial_port_opened = False
             last_port = SERIAL_PORT
 
+        diag_t = time.monotonic()
         if is_test_mode():
             data = generate_fake_data()
             last_data_time = time.time()
@@ -314,13 +343,21 @@ def read_serial():
                     last_data_time = time.time()
             except Exception:
                 # brief backoff on source error
+                diag_error = "source_error"
                 time.sleep(0.3)
                 serial_port_opened = False
                 proc = None
                 ser = None
                 data = None
+        source_ms = (time.monotonic() - diag_t) * 1000.0
 
         if data is not None:
+            raw_monotonic = time.monotonic()
+            raw_hz = 1.0 / max(1e-6, raw_monotonic - last_raw_monotonic) if last_raw_monotonic else 0.0
+            last_raw_monotonic = raw_monotonic
+            state.reader_diag["raw_updates"] = int(state.reader_diag.get("raw_updates") or 0) + 1
+            state.reader_diag["raw_hz"] = _diag_ema(state.reader_diag.get("raw_hz"), raw_hz)
+            state.reader_diag["last_raw_monotonic"] = last_raw_monotonic
             state.latest_raw_values = data
             if state.motor_sensor.get("valid"):
                 generator_a = float(data[13])
@@ -345,19 +382,44 @@ def read_serial():
             last_live_state_write_time = now_ts
             state.save_session_metrics_to_file()
 
+        diag_now = time.monotonic()
+        state.reader_diag.update({
+            "updated_at": time.time(),
+            "loop_hz": _diag_ema(
+                state.reader_diag.get("loop_hz"),
+                1000.0 / max(1e-6, loop_period_ms) if loop_period_ms > 0 else 0.0,
+            ),
+            "loop_ms": _diag_ema(state.reader_diag.get("loop_ms"), loop_period_ms),
+            "work_ms": _diag_ema(state.reader_diag.get("work_ms"), (diag_now - loop_start) * 1000.0),
+            "source_ms": _diag_ema(state.reader_diag.get("source_ms"), source_ms),
+            "solar_ms": _diag_ema(state.reader_diag.get("solar_ms"), solar_ms),
+            "motor_ms": _diag_ema(state.reader_diag.get("motor_ms"), motor_ms),
+            "raw_age_ms": (
+                (diag_now - last_raw_monotonic) * 1000.0
+                if last_raw_monotonic else None
+            ),
+            "source": "test" if is_test_mode() else str(SERIAL_PORT),
+            "error": diag_error,
+        })
+
         if not state.session_active:
             continue
 
         now = time.time()
         if data is not None:
+            diag_t = time.monotonic()
             update_metrics(data, now, solar_sample=solar_sample)
+            metrics_ms = (time.monotonic() - diag_t) * 1000.0
             _update_live_gps_climb()
             if os.getenv("APP_SCHEDULE_PHOTOS", "1").strip().lower() not in {"0", "false", "no", "off"}:
                 maybe_schedule_photo_capture(state.session_metrics.get("distance_km"))
         elif solar_sample is not None:
+            diag_t = time.monotonic()
             update_solar_only_metrics(solar_sample, now)
+            metrics_ms = (time.monotonic() - diag_t) * 1000.0
 
         if now - last_db_write_time >= 1 and (data is not None or solar_sample is not None or motor_sample is not None):
+            diag_t = time.monotonic()
             last_db_write_time = now
             if bool(state.session_metrics.get("solar_enabled", state.solar_roof_enabled)):
                 try:
@@ -435,5 +497,13 @@ def read_serial():
                     )
             except Exception:
                 pass
+            db_ms = (time.monotonic() - diag_t) * 1000.0
+
+        state.reader_diag.update({
+            "updated_at": time.time(),
+            "metrics_ms": _diag_ema(state.reader_diag.get("metrics_ms"), metrics_ms),
+            "db_ms": _diag_ema(state.reader_diag.get("db_ms"), db_ms),
+            "work_ms": _diag_ema(state.reader_diag.get("work_ms"), (time.monotonic() - loop_start) * 1000.0),
+        })
 
         # stale clear already handled at loop start

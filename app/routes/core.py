@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from datetime import datetime, timedelta
 from flask import render_template, jsonify, redirect, request, send_file
 
@@ -232,6 +233,10 @@ def _get_live_metrics_payload():
         solar_sensor.get("current_a", 0.0) * solar_sensor.get("bus_v", 0.0)
         if solar_enabled else 0.0
     )
+    reader_diag = dict(getattr(state, "reader_diag", {}) or {})
+    last_raw_monotonic = float(reader_diag.get("last_raw_monotonic") or 0.0)
+    if last_raw_monotonic:
+        reader_diag["raw_age_ms"] = (time.monotonic() - last_raw_monotonic) * 1000.0
 
     return {
         "raw_CA_values": raw,
@@ -242,6 +247,13 @@ def _get_live_metrics_payload():
         "ca_reset_prompt": bool(sm.get("ca_reset_prompt", False)) and not solar_enabled,
         "solar_sensor": state.solar_sensor if solar_enabled else {"enabled": False},
         "motor_sensor": state.motor_sensor,
+        "diag": {
+            "reader": {
+                key: (round(value, 1) if isinstance(value, float) else value)
+                for key, value in reader_diag.items()
+                if key != "last_raw_monotonic"
+            }
+        },
         "calculated_CA_values": {
             "speed_avg": sm["speed_sum"] / max(1, sm["speed_count"]),
             "speed_max": sm["speed_max"],
@@ -286,7 +298,10 @@ def metrics():
 
 
 def metrics_live():
-    return jsonify(_get_live_metrics_payload())
+    started = time.perf_counter()
+    payload = _get_live_metrics_payload()
+    payload.setdefault("diag", {})["server_ms"] = round((time.perf_counter() - started) * 1000.0, 1)
+    return jsonify(payload)
 
 
 def _bounded_int_arg(name: str, default: int, min_value: int, max_value: int) -> int:
