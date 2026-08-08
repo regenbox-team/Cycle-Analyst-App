@@ -48,6 +48,21 @@
         </div>
         <div class="bar-detail" id="ah-bar-detail">gross 0.0 Ah / recovered 0.0 Ah</div>
         </div>
+        <div class="battery-curve-panel" id="battery-curve-panel" hidden>
+          <div class="battery-curve-head">
+            <div>
+              <h3 id="battery-curve-title">Battery SOC curve</h3>
+              <div id="battery-curve-status" class="battery-curve-status">Waiting for battery data…</div>
+            </div>
+            <button type="button" class="icon-button" id="battery-curve-close" aria-label="Close">×</button>
+          </div>
+          <div id="battery-curve-chart" class="battery-curve-chart"></div>
+          <div id="battery-curve-readout" class="battery-curve-readout">Click the curve to inspect a value.</div>
+          <div class="battery-curve-actions">
+            <button type="button" class="dashboard-button" id="battery-reset-full" hidden>Battery fully charged — set 100%</button>
+            <span id="battery-reset-status"></span>
+          </div>
+        </div>
     </div>
 
 
@@ -459,24 +474,6 @@
   </div>
 
   </div> <!-- /#page-scale-root -->
-
-  <div class="battery-curve-modal" id="battery-curve-modal" hidden>
-    <div class="battery-curve-dialog" role="dialog" aria-modal="true" aria-labelledby="battery-curve-title">
-      <div class="battery-curve-head">
-        <div>
-          <h2 id="battery-curve-title">Battery SOC curve</h2>
-          <div id="battery-curve-status" class="battery-curve-status">Waiting for battery data…</div>
-        </div>
-        <button type="button" class="icon-button" id="battery-curve-close" aria-label="Close">×</button>
-      </div>
-      <div id="battery-curve-chart" class="battery-curve-chart"></div>
-      <div id="battery-curve-readout" class="battery-curve-readout">Click the curve to inspect a value.</div>
-      <div class="battery-curve-actions">
-        <button type="button" class="dashboard-button" id="battery-reset-full" hidden>Battery fully charged — set 100%</button>
-        <span id="battery-reset-status"></span>
-      </div>
-    </div>
-  </div>
 
   <script src="{{ url_for('static', filename='js/script.js') }}?v=dashboard-live-diag"></script>
   <script src="{{ url_for('static', filename='js/gps_status.js') }}?v=dashboard-poll-250"></script>

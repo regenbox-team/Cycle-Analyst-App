@@ -1658,7 +1658,7 @@ async function fetchMetrics({ full = false } = {}) {
       }
       const resetFullButton = document.getElementById('battery-reset-full');
       if (resetFullButton) resetFullButton.hidden = !solarBattery?.can_reset_full;
-      if (!document.getElementById('battery-curve-modal')?.hidden) renderBatteryCurve();
+      if (!document.getElementById('battery-curve-panel')?.hidden) renderBatteryCurve();
 
       const caVoltage = num(json.calculated_CA_values?.ca_voltage_live ?? json.raw_CA_values?.[1], 0);
       const sensorVoltage = num(json.calculated_CA_values?.motor_sensor_voltage_live, 0);
@@ -1839,12 +1839,12 @@ function renderBatteryCurve(selectedWh = null) {
     if (chart) chart.innerHTML = '<p>No valid battery curve loaded.</p>';
     return;
   }
-  const width = 860, height = 360, pad = {left: 70, right: 25, top: 25, bottom: 52};
+  const width = 860, height = 320, pad = {left: 70, right: 25, top: 25, bottom: 48};
   const capacity = Math.max(1, num(curve.capacity_wh));
   const voltages = points.map(p => num(p.voltage));
   let minV = Math.min(...voltages), maxV = Math.max(...voltages);
   const vp = Math.max(.25, (maxV - minV) * .08); minV -= vp; maxV += vp;
-  const x = wh => pad.left + num(wh) / capacity * (width - pad.left - pad.right);
+  const x = wh => pad.left + (1 - num(wh) / capacity) * (width - pad.left - pad.right);
   const y = v => pad.top + (1 - (num(v) - minV) / Math.max(.01, maxV - minV)) * (height - pad.top - pad.bottom);
   const ordered = points.slice().sort((a,b) => num(a.remaining_wh) - num(b.remaining_wh));
   const path = ordered.map((p,i) => `${i ? 'L' : 'M'} ${x(p.remaining_wh).toFixed(1)} ${y(p.voltage).toFixed(1)}`).join(' ');
@@ -1854,7 +1854,24 @@ function renderBatteryCurve(selectedWh = null) {
   const currentDot = obs ? `<circle class="battery-curve-current ${curve.rest_observation_fresh ? 'fresh' : ''}" cx="${x(obs.remaining_wh)}" cy="${y(obs.voltage)}" r="8"><title>Last rested voltage observation</title></circle>` : '';
   const selected = selectedWh === null ? null : batteryCurveInterpolate(points, selectedWh);
   const selectedDot = selected ? `<circle class="battery-curve-selected" cx="${x(selected.remaining_wh)}" cy="${y(selected.voltage)}" r="7"/>` : '';
-  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" data-left="${pad.left}" data-right="${pad.right}" data-width="${width}">${xGrid}${yGrid}<path class="battery-curve-line" d="${path}"/>${currentDot}${selectedDot}</svg>`;
+  const selectedLabel = selected ? (() => {
+    const px = x(selected.remaining_wh), py = y(selected.voltage);
+    const placeRight = px < width - pad.right - 175;
+    const labelX = px + (placeRight ? 14 : -14);
+    const labelY = Math.max(pad.top + 18, py - 13);
+    return `<text class="battery-curve-point-label" x="${labelX}" y="${labelY}" text-anchor="${placeRight ? 'start' : 'end'}">${selected.voltage.toFixed(2)} V · ${selected.remaining_wh.toFixed(0)} Wh</text>`;
+  })() : '';
+  const remainingWh = Math.max(0, Math.min(capacity, num(battery?.remaining_wh, 0)));
+  const remainingPoint = batteryCurveInterpolate(points, remainingWh);
+  const fillPoints = remainingPoint
+    ? [remainingPoint, ...ordered.filter(point => num(point.remaining_wh) < remainingWh).reverse()]
+    : [];
+  const fillPath = fillPoints.length
+    ? `M ${x(fillPoints[0].remaining_wh).toFixed(1)} ${height-pad.bottom} ` + fillPoints.map(point => `L ${x(point.remaining_wh).toFixed(1)} ${y(point.voltage).toFixed(1)}`).join(' ') + ` L ${x(0).toFixed(1)} ${height-pad.bottom} Z`
+    : '';
+  const guidePoint = selected || (obs ? batteryCurveInterpolate(points, obs.remaining_wh) : remainingPoint);
+  const guide = guidePoint ? `<line class="battery-curve-guide" x1="${x(guidePoint.remaining_wh)}" y1="${y(guidePoint.voltage)}" x2="${x(guidePoint.remaining_wh)}" y2="${height-pad.bottom}"/>` : '';
+  chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" data-left="${pad.left}" data-right="${pad.right}" data-width="${width}">${xGrid}${yGrid}${fillPath ? `<path class="battery-curve-energy-fill" d="${fillPath}"/>` : ''}<path class="battery-curve-line" d="${path}"/>${guide}${currentDot}${selectedDot}${selectedLabel}</svg>`;
   const status = document.getElementById('battery-curve-status');
   status.textContent = obs
     ? `Last rested observation: ${num(obs.voltage).toFixed(2)} V · ${num(obs.soc_percent).toFixed(1)}% · ${num(obs.remaining_wh).toFixed(0)} Wh${curve.rest_observation_fresh ? ' (fresh)' : ` (stored, ${num(curve.wh_since_observation).toFixed(1)} Wh since)`}`
@@ -1863,21 +1880,21 @@ function renderBatteryCurve(selectedWh = null) {
   chart.querySelector('svg').addEventListener('pointerdown', event => {
     const rect = event.currentTarget.getBoundingClientRect();
     const svgX = (event.clientX - rect.left) / rect.width * width;
-    const wh = Math.max(0, Math.min(capacity, (svgX - pad.left) / (width - pad.left - pad.right) * capacity));
+    const wh = Math.max(0, Math.min(capacity, (1 - (svgX - pad.left) / (width - pad.left - pad.right)) * capacity));
     renderBatteryCurve(wh);
   });
 }
 
 function openBatteryCurve() {
-  const modal = document.getElementById('battery-curve-modal');
-  modal.hidden = false;
+  const panel = document.getElementById('battery-curve-panel');
+  panel.hidden = false;
   renderBatteryCurve();
 }
 
 document.getElementById('battery-box')?.addEventListener('click', openBatteryCurve);
 document.getElementById('battery-box')?.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') openBatteryCurve(); });
-document.getElementById('battery-curve-close')?.addEventListener('click', () => { document.getElementById('battery-curve-modal').hidden = true; });
-document.getElementById('battery-curve-modal')?.addEventListener('click', event => { if (event.target.id === 'battery-curve-modal') event.currentTarget.hidden = true; });
+document.getElementById('battery-curve-close')?.addEventListener('click', event => { event.stopPropagation(); document.getElementById('battery-curve-panel').hidden = true; });
+document.getElementById('battery-curve-panel')?.addEventListener('click', event => event.stopPropagation());
 document.getElementById('battery-reset-full')?.addEventListener('click', async () => {
   const status = document.getElementById('battery-reset-status');
   const response = await fetch('/battery/reset_full', {method: 'POST'});

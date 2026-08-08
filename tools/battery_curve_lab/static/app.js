@@ -4,8 +4,8 @@ const state = {
   activeSession: "",
   selected: new Set(),
   lastPoints: [],
-  lastCurve: []
-  ,source: "db", jsonKeys: [], monitorDevice: "", monitorMode: "supercycle_live"
+  lastCurve: [], originalPoints: [], excludedPoints: new Set(), excludedSessions: new Set(),
+  source: "db", jsonKeys: [], monitorDevice: "", monitorMode: "supercycle_live"
 };
 
 const $ = (id) => document.getElementById(id);
@@ -17,8 +17,17 @@ function num(value, fallback = 0) {
 
 async function getJson(url, options = {}) {
   const response = await fetch(url, options);
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || response.statusText);
+  const raw = await response.text();
+  let data;
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch (error) {
+    const hint = response.status === 404
+      ? "Route unavailable. Restart Battery Curve Lab to load the updated server."
+      : `Server returned HTML instead of JSON (HTTP ${response.status}). Check the Battery Curve Lab terminal.`;
+    throw new Error(hint);
+  }
+  if (!response.ok) throw new Error(data.error || `${response.status} ${response.statusText}`);
   return data;
 }
 
@@ -114,7 +123,11 @@ async function previewSession(session) {
     ? await getJson(`/api/session_series?db=${encodeURIComponent(state.db)}&session=${encodeURIComponent(session)}&max_points=${maxPoints}`)
     : await getJson(`/api/session_series?max_points=${maxPoints}`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(requestData)});
   $("preview-title").textContent = session;
-  $("preview-meta").textContent = `${data.returned_samples} displayed points from ${data.total_samples} samples`;
+  const settled = data.initial_stabilized_voltage;
+  const settledText = settled
+    ? ` · initial stabilized voltage ${num(settled.voltage).toFixed(3)} V after ${num(settled.duration_s).toFixed(0)}s (max |I| ${num(settled.current_max_a).toFixed(2)} A)`
+    : " · no stabilized voltage detected at session start";
+  $("preview-meta").textContent = `${data.returned_samples} displayed points from ${data.total_samples} samples${settledText}`;
   drawMultiChart($("session-chart"), data.points);
 }
 
@@ -204,6 +217,45 @@ function payloadFromControls() {
   };
 }
 
+function extractionControls() {
+  return {
+    capacity_ah: num($("capacity-ah").value, 64),
+    max_speed_kph: num($("max-speed-kph").value, 1),
+    max_abs_current_a: num($("max-abs-current-a").value, 1.5),
+    min_rest_seconds: num($("min-rest-seconds").value, 120),
+    tail_seconds: num($("tail-seconds").value, 60),
+    max_voltage_std: num($("max-voltage-std").value, 0.05),
+    min_samples: num($("min-samples").value, 20),
+    bin_percent: num($("bin-percent").value, 5),
+    min_points_per_bin: 1,
+    fallback_hz: 1,
+  };
+}
+
+async function addJsonToResult() {
+  const files = $("result-json-files").files;
+  if (!files.length) throw new Error("Choose at least one JSON export.");
+  const status = $("result-add-json-status");
+  status.textContent = "Importing and extracting stable points…";
+  const body = new FormData();
+  Array.from(files).forEach(file => body.append("files", file));
+  const uploaded = await getJson("/api/json_sources", {method: "POST", body});
+  const keys = uploaded.sources.map(source => source.key);
+  const sessions = uploaded.sources.flatMap(source => source.sessions.map(item => item.session));
+  const data = await getJson("/api/generate", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({source: "json", json_keys: keys, sessions, ...extractionControls()}),
+  });
+  const offset = state.originalPoints.length;
+  const additions = data.points.map((point, index) => ({...point, _id: `${point.session}|${point.timestamp}|json-${offset + index}`}));
+  state.originalPoints.push(...additions);
+  additions.forEach(point => { state.excludedSessions.delete(point.session); state.excludedPoints.delete(point._id); });
+  renderRetainedResult();
+  status.textContent = `${additions.length} stable point${additions.length === 1 ? "" : "s"} added from ${sessions.length} session${sessions.length === 1 ? "" : "s"}.`;
+  $("result-json-files").value = "";
+}
+
 async function generateCurve() {
   $("result-meta").textContent = "Generating...";
   const data = await getJson("/api/generate", {
@@ -211,7 +263,10 @@ async function generateCurve() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payloadFromControls())
   });
-  state.lastPoints = data.points;
+  state.originalPoints = data.points.map((point, index) => ({...point, _id: `${point.session}|${point.timestamp}|${index}`}));
+  state.excludedPoints.clear();
+  state.excludedSessions.clear();
+  state.lastPoints = state.originalPoints.slice();
   state.lastCurve = data.curve;
   $("result-meta").textContent = `${data.points.length} stable points · ${data.curve.length} curve points`;
   $("python-snippet").value = data.python_snippet;
@@ -219,8 +274,57 @@ async function generateCurve() {
   $("json-link").href = data.downloads.json;
   $("csv-link").hidden = false;
   $("json-link").hidden = false;
-  drawCurveChart($("curve-chart"), data.points, data.curve);
-  renderPointsTable(data.points);
+  renderRetainedResult();
+}
+
+function sessionColor(session) {
+  let hash = 0;
+  for (const char of String(session)) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  return `hsl(${Math.abs(hash) % 360} 62% 43%)`;
+}
+
+function median(values) {
+  const sorted = values.slice().sort((a,b) => a-b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function buildCurveFromPoints(points) {
+  const bin = Math.max(.1, num($("bin-percent").value, 5));
+  const bins = new Map();
+  points.forEach(point => {
+    const soc = Math.max(0, Math.min(100, Math.round(num(point.soc) / bin) * bin));
+    if (!bins.has(soc)) bins.set(soc, []);
+    bins.get(soc).push(point);
+  });
+  return Array.from(bins.entries()).sort((a,b) => a[0]-b[0]).map(([soc, items]) => ({soc, voltage: Number(median(items.map(item => num(item.voltage))).toFixed(3)), points: items.length}));
+}
+
+function renderRetainedResult() {
+  state.lastPoints = state.originalPoints.filter(point => !state.excludedSessions.has(point.session) && !state.excludedPoints.has(point._id));
+  state.lastCurve = buildCurveFromPoints(state.lastPoints);
+  const sessions = Array.from(new Set(state.lastPoints.map(point => point.session))).sort();
+  $("result-meta").textContent = `${state.lastPoints.length} retained stable points · ${state.lastCurve.length} curve points · ${sessions.length} sessions`;
+  $("python-snippet").value = state.lastCurve.map(point => `    (${point.voltage.toFixed(3)}, ${point.soc.toFixed(1)}),`).join("\n");
+  const jsonOutput = state.lastCurve.map(point => ({voltage: point.voltage, soc: point.soc}));
+  $("json-link").href = URL.createObjectURL(new Blob([JSON.stringify(jsonOutput, null, 2) + "\n"], {type: "application/json"}));
+  const csvHeader = "session,timestamp,ah_used,soc,voltage,voltage_std,duration_s,samples\n";
+  const csvRows = state.lastPoints.map(point => [point.session, point.timestamp, point.ah_used, point.soc, point.voltage, point.voltage_std, point.duration_s, point.samples].map(value => `"${String(value ?? '').replaceAll('"', '""')}"`).join(",")).join("\n");
+  $("csv-link").href = URL.createObjectURL(new Blob([csvHeader + csvRows + "\n"], {type: "text/csv"}));
+  drawCurveChart($("curve-chart"), state.lastPoints, state.lastCurve);
+  renderPointsTable(state.lastPoints);
+  $("result-session-legend").innerHTML = sessions.map(session => `<span class="session-legend-item"><i style="background:${sessionColor(session)}"></i>${escapeHtml(session)}</span>`).join("");
+  const allSessions = Array.from(new Set(state.originalPoints.map(point => point.session))).sort();
+  $("retained-sessions").innerHTML = allSessions.map(session => {
+    const retained = state.lastPoints.filter(point => point.session === session).length;
+    const excluded = state.excludedSessions.has(session);
+    return `<div class="retained-session ${excluded ? 'excluded' : ''}"><i style="background:${sessionColor(session)}"></i><span>${escapeHtml(session)}</span><small>${retained} point${retained === 1 ? '' : 's'}</small><button type="button" data-session="${escapeHtml(session)}">${excluded ? 'Restore' : 'Remove session'}</button></div>`;
+  }).join("");
+  $("retained-sessions").querySelectorAll("button[data-session]").forEach(button => button.addEventListener("click", () => {
+    const session = button.dataset.session;
+    if (state.excludedSessions.has(session)) state.excludedSessions.delete(session); else state.excludedSessions.add(session);
+    renderRetainedResult();
+  }));
 }
 
 function drawCurveChart(container, points, curve) {
@@ -237,9 +341,9 @@ function drawCurveChart(container, points, curve) {
   const yPad = Math.max(0.2, (yMax - yMin) * 0.1);
   yMin -= yPad;
   yMax += yPad;
-  const xFor = (soc) => pad.left + (num(soc) / 100) * (width - pad.left - pad.right);
+  const xFor = (soc) => pad.left + (1 - num(soc) / 100) * (width - pad.left - pad.right);
   const yFor = (voltage) => pad.top + (1 - ((num(voltage) - yMin) / Math.max(0.001, yMax - yMin))) * (height - pad.top - pad.bottom);
-  const dots = points.map(p => `<circle class="point-dot" cx="${xFor(p.soc).toFixed(2)}" cy="${yFor(p.voltage).toFixed(2)}" r="4"><title>${escapeHtml(p.session)} ${num(p.soc).toFixed(1)}% ${num(p.voltage).toFixed(2)}V</title></circle>`).join("");
+  const dots = points.map(p => `<circle class="point-dot" style="fill:${sessionColor(p.session)};stroke:${sessionColor(p.session)}" cx="${xFor(p.soc).toFixed(2)}" cy="${yFor(p.voltage).toFixed(2)}" r="5"><title>${escapeHtml(p.session)} · ${num(p.soc).toFixed(1)}% · ${num(p.voltage).toFixed(3)} V · ${num(p.ah_used).toFixed(2)} Ah</title></circle>`).join("");
   const line = curve.map((p, i) => `${i === 0 ? "M" : "L"} ${xFor(p.soc).toFixed(2)} ${yFor(p.voltage).toFixed(2)}`).join(" ");
   const grid = [0, 25, 50, 75, 100].map(soc => {
     const x = xFor(soc);
@@ -275,17 +379,27 @@ function renderPointsTable(points) {
       <td>${num(p.ah_used).toFixed(2)}</td>
       <td>${num(p.voltage_std).toFixed(3)}</td>
       <td>${num(p.duration_s).toFixed(0)}</td>
+      <td><button type="button" class="remove-point" data-point-id="${escapeHtml(p._id)}">Remove</button></td>
     </tr>
   `).join("");
   $("points-table").innerHTML = `
     <table>
-      <thead><tr><th>Session</th><th>Timestamp</th><th>SOC %</th><th>V</th><th>Ah</th><th>Std</th><th>Rest s</th></tr></thead>
+      <thead><tr><th>Session</th><th>Timestamp</th><th>SOC %</th><th>V</th><th>Ah</th><th>Std</th><th>Rest s</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   `;
+  $("points-table").querySelectorAll(".remove-point").forEach(button => button.addEventListener("click", () => {
+    state.excludedPoints.add(button.dataset.pointId);
+    renderRetainedResult();
+  }));
 }
 
-$("reload-btn").addEventListener("click", loadSessions);
+$("reload-btn").addEventListener("click", () => {
+  $("sessions-list").innerHTML = "<p>Loading…</p>";
+  loadSessions().catch(error => {
+    $("sessions-list").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+  });
+});
 $("source-select").addEventListener("change", () => {
   const source = $("source-select").value;
   $("db-select").hidden = source !== "db";
@@ -294,6 +408,12 @@ $("source-select").addEventListener("change", () => {
   $("monitor-mode").hidden = source !== "monitor";
 });
 $("json-files").addEventListener("change", loadSessions);
+$("restore-points-btn").addEventListener("click", () => {
+  state.excludedPoints.clear(); state.excludedSessions.clear(); renderRetainedResult();
+});
+$("result-add-json-btn").addEventListener("click", () => {
+  addJsonToResult().catch(error => { $("result-add-json-status").textContent = error.message; });
+});
 $("session-filter").addEventListener("input", renderSessions);
 $("preview-samples").addEventListener("change", () => {
   if (state.activeSession) previewSession(state.activeSession);

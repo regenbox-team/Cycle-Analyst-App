@@ -237,6 +237,54 @@ svg {
   stroke-width: 2.5;
 }
 
+.result-session-legend, .retained-sessions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.result-add-json {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin: 0.7rem 0;
+}
+
+#result-add-json-status { color: var(--muted); font-size: 0.78rem; }
+
+.session-legend-item, .retained-session {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.3rem 0.55rem;
+  background: #fff;
+  font-size: 0.75rem;
+}
+
+.session-legend-item i, .retained-session i {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.retained-session-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.9rem;
+}
+
+.retained-session-head h3 { margin: 0; }
+.retained-session.excluded { opacity: 0.5; text-decoration: line-through; }
+.retained-session small { color: var(--muted); }
+.retained-session button, .remove-point { font-size: 0.7rem; padding: 0.2rem 0.4rem; }
+
 .snippet-grid {
   display: grid;
   grid-template-columns: 24rem 1fr;

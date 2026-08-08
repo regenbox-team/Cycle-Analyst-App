@@ -1,38 +1,58 @@
 [
   {
     "voltage": 43.82,
-    "soc": 10.0
+    "soc": 5.0
   },
   {
-    "voltage": 46.61,
+    "voltage": 46.38,
+    "soc": 30.0
+  },
+  {
+    "voltage": 46.64,
+    "soc": 35.0
+  },
+  {
+    "voltage": 47.12,
     "soc": 40.0
   },
   {
-    "voltage": 47.345,
+    "voltage": 47.42,
     "soc": 45.0
   },
   {
-    "voltage": 47.625,
+    "voltage": 48.26,
     "soc": 50.0
   },
   {
-    "voltage": 48.62,
+    "voltage": 48.96,
     "soc": 55.0
   },
   {
-    "voltage": 50.36,
+    "voltage": 50.11,
+    "soc": 65.0
+  },
+  {
+    "voltage": 50.45,
     "soc": 70.0
   },
   {
-    "voltage": 51.535,
+    "voltage": 51.16,
+    "soc": 75.0
+  },
+  {
+    "voltage": 51.61,
     "soc": 80.0
   },
   {
-    "voltage": 52.43,
+    "voltage": 52.19,
+    "soc": 85.0
+  },
+  {
+    "voltage": 52.35,
     "soc": 90.0
   },
   {
-    "voltage": 53.74,
+    "voltage": 53.565,
     "soc": 100.0
   }
 ]

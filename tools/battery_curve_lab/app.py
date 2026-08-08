@@ -6,6 +6,7 @@ import json
 import os
 import urllib.parse
 import urllib.request
+import urllib.error
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -29,8 +30,33 @@ LAB_DIR = Path(__file__).resolve().parent
 ROOT_DIR = LAB_DIR.parents[1]
 OUTPUT_DIR = LAB_DIR / "outputs"
 
+
+def _load_project_env() -> None:
+    """Load the few project environment values needed by this standalone app."""
+    path = ROOT_DIR / "cycle-analyst.env"
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip('"\'')
+
+
+_load_project_env()
+
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 JSON_SOURCES: dict[str, dict] = {}
+
+
+@app.errorhandler(Exception)
+def api_error(exc):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": str(exc) or type(exc).__name__}), 500
+    return exc
 
 
 def _db_from_request() -> Path:
@@ -73,8 +99,16 @@ def _monitor_request(path: str, params: dict) -> dict:
     if user or password:
         token = base64.b64encode(f"{user}:{password}".encode()).decode()
         headers["Authorization"] = f"Basic {token}"
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=20) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            raise ValueError("Monitor authentication failed: configure MONITOR_USER and MONITOR_PASS in cycle-analyst.env") from exc
+        raise ValueError(f"Monitor returned HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        reason = getattr(exc, "reason", exc)
+        raise ValueError(f"Monitor is unreachable at {base}: {reason}") from exc
 
 
 @app.post("/api/json_sources")
@@ -108,7 +142,10 @@ def api_monitor_sessions():
     mode = request.args.get("mode", "supercycle_live")
     if not device:
         return jsonify({"error": "Enter a monitor device id"}), 400
-    payload = _monitor_request("/api/known_sessions", {"device_id": device, "mode": mode})
+    try:
+        payload = _monitor_request("/api/known_sessions", {"device_id": device, "mode": mode})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 502
     return jsonify({"device": device, "mode": mode, "sessions": [{"session": sid} for sid in payload.get("sessions", [])]})
 
 

@@ -776,20 +776,31 @@ body.edit-mode .drop-after::after { bottom: -3px; }
 }
 
 .bar-box { cursor: pointer; }
-.battery-curve-modal[hidden] { display: none; }
-.battery-curve-modal { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; padding: 1rem; background: rgba(10, 18, 28, 0.68); }
-.battery-curve-dialog { width: min(920px, 96vw); max-height: 94vh; overflow: auto; border-radius: 1rem; padding: 1rem; background: var(--background, #fff); box-shadow: 0 1rem 4rem rgba(0,0,0,.35); }
+.battery-curve-panel[hidden] { display: none; }
+.battery-curve-panel { width: min(920px, calc(100% - 1rem)); margin: .35rem auto .5rem; padding: .65rem; border: 1px solid #c8ced6; border-radius: .75rem; background: rgba(255,255,255,.72); cursor: default; }
 .battery-curve-head, .battery-curve-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-.battery-curve-head h2 { margin: 0; }
-.battery-curve-status, .battery-curve-readout, .battery-curve-actions { margin-top: .65rem; font-size: var(--font-small); }
-.battery-curve-chart { min-height: 300px; width: 100%; touch-action: none; }
-.battery-curve-chart svg { display: block; width: 100%; min-height: 300px; }
+.battery-curve-head h3 { margin: 0; }
+.battery-curve-status, .battery-curve-readout, .battery-curve-actions { margin-top: .35rem; font-size: var(--font-small); }
+.battery-curve-chart { width: 100%; height: auto; min-height: 0; margin-top: .3rem; touch-action: none; }
+.battery-curve-chart svg { display: block; width: 100%; height: auto; min-height: 0; aspect-ratio: 860 / 320; }
 .battery-curve-grid { stroke: #c8ced6; stroke-width: 1; }
 .battery-curve-line { fill: none; stroke: var(--highlight, #f28c28); stroke-width: 4; }
+.battery-curve-energy-fill { fill: rgba(242, 140, 40, .28); stroke: none; }
+.battery-curve-guide { stroke: #4c5964; stroke-width: 2; stroke-dasharray: 6 4; }
 .battery-curve-axis { fill: var(--text-dark, #333); font-size: 13px; }
 .battery-curve-current { stroke: #73808c; fill: #73808c; }
 .battery-curve-current.fresh { stroke: #1677d2; fill: #1677d2; }
 .battery-curve-selected { stroke: #111; fill: #fff; stroke-width: 3; }
+.battery-curve-point-label { fill: #222; font-size: 17px; font-weight: 700; paint-order: stroke; stroke: rgba(255,255,255,.95); stroke-width: 7px; stroke-linejoin: round; }
+
+@media (max-width: 680px) {
+  .battery-curve-panel { width: calc(100% - .35rem); padding: .5rem; }
+  .battery-curve-head { align-items: flex-start; }
+  .battery-curve-head h3 { font-size: 1.15rem; }
+  .battery-curve-status { line-height: 1.2; }
+  .battery-curve-chart svg { aspect-ratio: 860 / 340; }
+  .battery-curve-actions { justify-content: center; }
+}
 
 .bar-value {
   font-size: var(--font-medium);

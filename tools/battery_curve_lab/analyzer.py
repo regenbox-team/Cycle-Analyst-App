@@ -255,7 +255,31 @@ def session_series(samples: list[Sample], max_points: int = 1600) -> dict:
             "current": round(sample.current_a, 3),
             "timestamp": sample.raw_timestamp,
         })
-    return {"points": points, "total_samples": len(samples), "returned_samples": len(points)}
+    stabilized = initial_stabilized_voltage(samples)
+    return {"points": points, "total_samples": len(samples), "returned_samples": len(points), "initial_stabilized_voltage": stabilized}
+
+
+def initial_stabilized_voltage(
+    samples: list[Sample], *, max_abs_current_a: float = 1.5, max_speed_kph: float = 1.0, min_seconds: float = 3.0
+) -> dict | None:
+    """Return the first short settled-voltage window at the beginning of a session."""
+    candidate: list[Sample] = []
+    for sample in samples:
+        if abs(sample.current_a) <= max_abs_current_a and sample.speed_kph <= max_speed_kph:
+            candidate.append(sample)
+            duration = seconds_between(candidate[0].timestamp, candidate[-1].timestamp, len(candidate), 1.0)
+            if duration >= min_seconds and len(candidate) >= 3:
+                voltages = [point.voltage for point in candidate]
+                return {
+                    "voltage": round(statistics.median(voltages), 3),
+                    "duration_s": round(duration, 1),
+                    "current_max_a": round(max(abs(point.current_a) for point in candidate), 3),
+                    "samples": len(candidate),
+                    "timestamp": candidate[-1].raw_timestamp,
+                }
+        elif candidate:
+            break
+    return None
 
 
 def stable_rest_points(

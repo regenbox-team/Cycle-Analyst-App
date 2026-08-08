@@ -252,6 +252,27 @@ def save_session_metrics_to_file() -> None:
         path = metrics_json_path()
         if path:
             payload = dict(session_metrics)
+            # In split-service installs the web process may set a manual full-charge
+            # origin while the recorder owns the in-memory metrics. Preserve that
+            # command when the recorder performs its next atomic snapshot write.
+            try:
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as existing_file:
+                        existing_payload = json.load(existing_file)
+                    if existing_payload.get("solar_battery_estimate_source") == "manual_full_charge":
+                        for key in (
+                            "solar_battery_start_wh",
+                            "solar_battery_capacity_wh",
+                            "solar_battery_start_soc",
+                            "solar_battery_estimate_source",
+                            "solar_battery_confidence",
+                            "solar_battery_use_baseline_wh",
+                        ):
+                            if key in existing_payload:
+                                payload[key] = existing_payload[key]
+                                session_metrics[key] = existing_payload[key]
+            except Exception:
+                pass
             if os.getenv("APP_PRESERVE_PHOTO_STATE_FROM_FILE", "0").strip().lower() in {"1", "true", "yes", "on"}:
                 try:
                     if os.path.exists(path):

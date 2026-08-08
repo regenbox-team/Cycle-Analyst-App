@@ -79,7 +79,18 @@
             <a id="json-link" href="#" hidden>JSON</a>
           </div>
         </div>
+        <div class="result-add-json">
+          <input id="result-json-files" type="file" accept="application/json,.json" multiple>
+          <button id="result-add-json-btn" type="button">Add JSON session(s) to result</button>
+          <span id="result-add-json-status"></span>
+        </div>
         <div id="curve-chart" class="curve-chart"></div>
+        <div id="result-session-legend" class="result-session-legend"></div>
+        <div class="retained-session-head">
+          <h3>Sessions retained in calculation</h3>
+          <button id="restore-points-btn" type="button">Restore all generated points</button>
+        </div>
+        <div id="retained-sessions" class="retained-sessions"></div>
         <div class="snippet-grid">
           <div>
             <h3>Python segment</h3>
