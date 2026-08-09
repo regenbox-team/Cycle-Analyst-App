@@ -35,6 +35,11 @@
   const FONT_STACK = 'Inter Regular'; // change to your font name
   const PROFILE_MIN_WINDOW_KM = 0.2;
   const PROFILE_ELEVATION_DEADBAND_M = 5.0;
+  const PROFILE_REGEN_START_PCT = -2;
+  const PROFILE_REGEN_FULL_PCT = -12;
+  const PROFILE_SLOPE_THRESHOLD_PCT = 2;
+  const PROFILE_SLOPE_MIN_KM = 0.5;
+  const PROFILE_SLOPE_ZOOM_PADDING_KM = 0.15;
   const ROUTE_SNAP_MAX_METERS = 120;
 
   async function glyphsAvailable() {
@@ -110,6 +115,7 @@
     const row = document.getElementById('gpx-route-progress');
     const value = document.getElementById('gpx-route-remaining');
     setCurrentRouteGradient(progress);
+    updateCurrentSlopeZoomUi();
     if (!row || !value) return;
     if (!progress) {
       row.hidden = false;
@@ -1186,7 +1192,15 @@
   }
 
   function gradeColor(grade) {
-    const g = Math.max(0, Math.min(14, Number(grade) || 0));
+    const raw = Number(grade) || 0;
+    if (raw <= PROFILE_REGEN_START_PCT) {
+      const t = Math.max(0, Math.min(1, (PROFILE_REGEN_START_PCT - raw) / (PROFILE_REGEN_START_PCT - PROFILE_REGEN_FULL_PCT)));
+      const r = Math.round(125 + (7 - 125) * t);
+      const ge = Math.round(211 + (89 - 211) * t);
+      const b = Math.round(252 + (133 - 252) * t);
+      return `rgb(${r},${ge},${b})`;
+    }
+    const g = Math.max(0, Math.min(14, raw));
     if (g <= 6) {
       const t = g / 6;
       const r = Math.round(47 + (245 - 47) * t);
@@ -1199,6 +1213,18 @@
     const ge = Math.round(159 + (72 - 159) * t);
     const b = Math.round(0 + (15 - 0) * t);
     return `rgb(${r},${ge},${b})`;
+  }
+
+  function gradeFillColor(grade) {
+    return gradeColor(grade).replace('rgb(', 'rgba(').replace(')', ',0.24)');
+  }
+
+  function gradeZoneKey(grade) {
+    const g = Number(grade) || 0;
+    if (g <= PROFILE_REGEN_START_PCT) {
+      return `regen-${Math.min(5, Math.floor((Math.abs(g) - Math.abs(PROFILE_REGEN_START_PCT)) / 2))}`;
+    }
+    return `climb-${Math.min(7, Math.floor(Math.max(0, g) / 2))}`;
   }
 
   function nearestProfileIndexForDistance(distanceKm) {
@@ -1214,6 +1240,142 @@
       return lo - 1;
     }
     return lo;
+  }
+
+  function interpolateProfileAt(distanceKm) {
+    const points = routeProfile.points;
+    if (!points.length) return null;
+    const km = Math.max(points[0].distanceKm, Math.min(points[points.length - 1].distanceKm, Number(distanceKm) || 0));
+    if (km <= points[0].distanceKm) return { ...points[0], distanceKm: km };
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1];
+      const b = points[i];
+      if (km <= b.distanceKm) {
+        const span = Math.max(0.000001, b.distanceKm - a.distanceKm);
+        const t = (km - a.distanceKm) / span;
+        return {
+          ...b,
+          distanceKm: km,
+          ele: a.ele + (b.ele - a.ele) * t,
+          gradePct: a.gradePct + ((b.gradePct || 0) - (a.gradePct || 0)) * t
+        };
+      }
+    }
+    return { ...points[points.length - 1], distanceKm: km };
+  }
+
+  function profileSliceBetween(startKm, endKm) {
+    const points = routeProfile.points;
+    if (!points.length || endKm <= startKm) return [];
+    const slice = [];
+    const start = interpolateProfileAt(startKm);
+    if (start) slice.push(start);
+    points.forEach((point) => {
+      if (point.distanceKm > startKm && point.distanceKm < endKm) slice.push(point);
+    });
+    const end = interpolateProfileAt(endKm);
+    if (end && (!slice.length || Math.abs(slice[slice.length - 1].distanceKm - end.distanceKm) > 0.00001)) {
+      slice.push(end);
+    }
+    return slice;
+  }
+
+  function elevationStatsBetween(startKm, endKm) {
+    const slice = profileSliceBetween(startKm, endKm);
+    let uphill = 0;
+    let downhill = 0;
+    for (let i = 1; i < slice.length; i++) {
+      const diff = slice[i].ele - slice[i - 1].ele;
+      if (diff > 0) uphill += diff;
+      else downhill += Math.abs(diff);
+    }
+    return { uphill, downhill };
+  }
+
+  function getCurrentRouteSlopeSegment() {
+    const points = routeProfile.points;
+    if (!points.length || !routeProgress) return null;
+    const currentKm = Math.max(points[0].distanceKm, Math.min(points[points.length - 1].distanceKm, Number(routeProgress.alongKm) || 0));
+    const currentIndex = nearestProfileIndexForDistance(currentKm);
+    const currentPoint = currentIndex == null ? null : points[currentIndex];
+    const currentGrade = Number(currentPoint && currentPoint.gradePct) || 0;
+    if (Math.abs(currentGrade) < PROFILE_SLOPE_THRESHOLD_PCT) return null;
+
+    const direction = currentGrade >= 0 ? 1 : -1;
+    const qualifies = (point) => direction * (Number(point && point.gradePct) || 0) >= PROFILE_SLOPE_THRESHOLD_PCT;
+    let startIndex = currentIndex;
+    let endIndex = currentIndex;
+    while (startIndex > 0 && qualifies(points[startIndex - 1])) startIndex -= 1;
+    while (endIndex < points.length - 1 && qualifies(points[endIndex + 1])) endIndex += 1;
+
+    const startKm = points[startIndex].distanceKm;
+    const endKm = points[endIndex].distanceKm;
+    const totalKm = Math.max(0, endKm - startKm);
+    if (totalKm < PROFILE_SLOPE_MIN_KM) return null;
+
+    const remainingStartKm = Math.max(startKm, Math.min(endKm, currentKm));
+    const remainingKm = Math.max(0, endKm - remainingStartKm);
+    const stats = elevationStatsBetween(remainingStartKm, endKm);
+    return {
+      startKm,
+      endKm,
+      currentKm,
+      totalKm,
+      remainingKm,
+      uphill: stats.uphill,
+      downhill: stats.downhill,
+      direction,
+      gradePct: currentGrade
+    };
+  }
+
+  function updateCurrentSlopeZoomUi() {
+    const button = document.getElementById('gpx-profile-current-slope');
+    const info = document.getElementById('gpx-profile-slope-info');
+    const segment = getCurrentRouteSlopeSegment();
+    if (button) {
+      button.disabled = !segment;
+      button.title = segment ? 'Zoom to current climb/descent' : 'No current slope over 500 m and +/-2%';
+    }
+    if (!info) return;
+    if (!routeProfile.points.length) {
+      info.textContent = 'No profile';
+      return;
+    }
+    if (!routeProgress) {
+      info.textContent = 'Waiting for route position';
+      return;
+    }
+    if (!segment) {
+      info.textContent = 'No slope >500 m';
+      return;
+    }
+    const elevationText = segment.direction > 0
+      ? `D+ ${Math.round(segment.uphill)} m`
+      : `D- ${Math.round(segment.downhill)} m`;
+    info.textContent = `${formatDistanceKm(segment.remainingKm)} left · ${elevationText}`;
+  }
+
+  function focusCurrentRouteSlope() {
+    const segment = getCurrentRouteSlopeSegment();
+    const points = routeProfile.points;
+    if (!segment || !points.length) return;
+    const totalEnd = points[points.length - 1].distanceKm;
+    const pad = Math.max(PROFILE_SLOPE_ZOOM_PADDING_KM, segment.totalKm * 0.12);
+    let start = Math.max(0, segment.startKm - pad);
+    let end = Math.min(totalEnd, segment.endKm + pad);
+    if (end - start < PROFILE_MIN_WINDOW_KM) {
+      const center = (start + end) / 2;
+      start = Math.max(0, center - PROFILE_MIN_WINDOW_KM / 2);
+      end = Math.min(totalEnd, start + PROFILE_MIN_WINDOW_KM);
+      start = Math.max(0, end - PROFILE_MIN_WINDOW_KM);
+    }
+    routeProfile.zoomStartKm = start;
+    routeProfile.zoomEndKm = end;
+    routeProfile.cursorIndex = nearestProfileIndexForDistance(segment.currentKm);
+    updateProfileCursorLabel();
+    updateRouteProfileCursorOnMap();
+    renderRouteProfileChart();
   }
 
   function updateRouteProfileSummary() {
@@ -1251,6 +1413,7 @@
     resetRouteProfileZoom();
     updateRouteProfileSummary();
     updateProfileCursorLabel();
+    updateCurrentSlopeZoomUi();
     updateRouteProfileCursorOnMap();
 
     if (toggle) {
@@ -1318,6 +1481,44 @@
     }
   }
 
+  function drawProfileFillAreas(ctx, height, margin, scales, series) {
+    if (!series || series.length < 2) return;
+    const baselineY = height - margin.bottom;
+    let groupStartIndex = 0;
+    let groupKey = null;
+    let groupColor = null;
+
+    const flushGroup = (endIndex) => {
+      if (endIndex <= groupStartIndex || !groupColor) return;
+      const start = series[groupStartIndex];
+      const end = series[endIndex];
+      ctx.fillStyle = groupColor;
+      ctx.beginPath();
+      ctx.moveTo(scales.xForKm(start.distanceKm), baselineY);
+      for (let i = groupStartIndex; i <= endIndex; i++) {
+        ctx.lineTo(scales.xForKm(series[i].distanceKm), scales.yForEle(series[i].ele));
+      }
+      ctx.lineTo(scales.xForKm(end.distanceKm), baselineY);
+      ctx.closePath();
+      ctx.fill();
+    };
+
+    for (let i = 1; i < series.length; i++) {
+      const grade = ((Number(series[i - 1].gradePct) || 0) + (Number(series[i].gradePct) || 0)) / 2;
+      const key = gradeZoneKey(grade);
+      if (groupKey === null) {
+        groupKey = key;
+        groupColor = gradeFillColor(grade);
+      } else if (key !== groupKey) {
+        flushGroup(i - 1);
+        groupStartIndex = i - 1;
+        groupKey = key;
+        groupColor = gradeFillColor(grade);
+      }
+    }
+    flushGroup(series.length - 1);
+  }
+
   function renderRouteProfileChart() {
     const canvas = document.getElementById('gpx-elevation-profile');
     if (!canvas) return;
@@ -1346,10 +1547,12 @@
 
     const margin = { top: 12, right: 14, bottom: 26, left: 48 };
     const scales = routeProfileScales(width, height, margin);
-    drawProfileFrame(ctx, width, height, margin, scales);
 
     const visible = points.filter(p => p.distanceKm >= routeProfile.zoomStartKm && p.distanceKm <= routeProfile.zoomEndKm);
     const series = visible.length >= 2 ? visible : points;
+    drawProfileFillAreas(ctx, height, margin, scales, series);
+    drawProfileFrame(ctx, width, height, margin, scales);
+
     ctx.lineWidth = 2.25;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -1694,6 +1897,7 @@
     const profileReset = document.getElementById('gpx-profile-reset');
     const profileZoomIn = document.getElementById('gpx-profile-zoom-in');
     const profileZoomOut = document.getElementById('gpx-profile-zoom-out');
+    const profileCurrentSlope = document.getElementById('gpx-profile-current-slope');
     const profileCanvas = document.getElementById('gpx-elevation-profile');
     if (profileToggle && profilePanel) {
       profileToggle.addEventListener('click', () => {
@@ -1712,6 +1916,7 @@
     }
     if (profileZoomIn) profileZoomIn.addEventListener('click', () => zoomRouteProfileByFactor(0.72, 0.5));
     if (profileZoomOut) profileZoomOut.addEventListener('click', () => zoomRouteProfileByFactor(1.32, 0.5));
+    if (profileCurrentSlope) profileCurrentSlope.addEventListener('click', focusCurrentRouteSlope);
     if (profileCanvas) {
       profileCanvas.addEventListener('pointerdown', (event) => {
         routeProfileDragging = true;
