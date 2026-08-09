@@ -396,6 +396,15 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   flex-shrink: 0;
 }
 
+.gpx-profile-slope-button {
+  min-width: 3.6rem;
+}
+
+.gpx-profile-slope-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .gpx-profile-canvas-wrap {
   position: relative;
   width: 100%;
@@ -411,12 +420,38 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   touch-action: none;
 }
 
-.gpx-profile-cursor {
-  min-height: 1.2em;
+.gpx-profile-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 1.35em;
   margin-top: 0.25rem;
+}
+
+.gpx-profile-cursor {
+  min-width: 0;
   color: #444;
   font-size: var(--font-small);
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gpx-profile-slope-info {
+  flex-shrink: 0;
+  padding: 0.14rem 0.4rem;
+  border: 1px solid rgba(0, 0, 0, 0.22);
+  border-radius: 0.35rem;
+  background: rgba(255, 253, 245, 0.9);
+  color: #1f1d18;
+  font-size: var(--font-small);
+  font-weight: bold;
+  line-height: 1.1;
+  text-align: right;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+  white-space: nowrap;
 }
 
 .map-controls-top label {

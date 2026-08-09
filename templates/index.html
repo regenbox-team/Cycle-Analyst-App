@@ -341,6 +341,7 @@
         <div class="gpx-profile-toolbar">
           <span id="gpx-profile-summary">No GPX elevation profile</span>
           <div class="gpx-profile-actions">
+            <button id="gpx-profile-current-slope" class="dashboard-button gpx-profile-slope-button" type="button" title="Zoom to current slope" disabled>Slope</button>
             <button id="gpx-profile-zoom-out" class="dashboard-button" type="button" title="Zoom out profile">-</button>
             <button id="gpx-profile-zoom-in" class="dashboard-button" type="button" title="Zoom in profile">+</button>
             <button id="gpx-profile-reset" class="dashboard-button" type="button" title="Reset profile zoom">Reset</button>
@@ -349,7 +350,10 @@
         <div class="gpx-profile-canvas-wrap">
           <canvas id="gpx-elevation-profile"></canvas>
         </div>
-        <div id="gpx-profile-cursor" class="gpx-profile-cursor">Move over the profile for gradient</div>
+        <div class="gpx-profile-footer">
+          <div id="gpx-profile-cursor" class="gpx-profile-cursor">Move over the profile for gradient</div>
+          <div id="gpx-profile-slope-info" class="gpx-profile-slope-info">Waiting for route position</div>
+        </div>
       </div>
 
       <!-- Bottom controls: GPX actions -->
