@@ -7,7 +7,7 @@ import time
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from flask import render_template, jsonify, request, redirect
+from flask import render_template, jsonify, request, redirect, Response
 
 from app.config import BASE_DIR, get_db_file, SESSION_METRICS_DIR
 from app import state
@@ -53,7 +53,14 @@ def _read_upload_job(job_id: str) -> dict | None:
 
 def _upload_request_payload() -> tuple[str, str | None]:
     data = request.get_json(silent=True) or {}
-    session_id = (data.get("session") or data.get("session_id") or request.form.get("session") or "").strip()
+    session_id = (
+        data.get("session")
+        or data.get("session_id")
+        or request.form.get("session")
+        or request.args.get("session")
+        or request.args.get("session_id")
+        or ""
+    ).strip()
     mode = data.get("mode") or request.args.get("mode")
     return session_id, mode
 
@@ -269,6 +276,35 @@ def session_rows():
     return jsonify([{"id": r[0], "timestamp": r[1], "raw": r[2]} for r in rows])
 
 
+def download_session():
+    """Download the exact payload used by a direct Pi-to-monitor upload."""
+    session_id, mode = _upload_request_payload()
+    if not session_id:
+        return jsonify({"status": "error", "error": "missing session"}), 400
+    if state.session_active and session_id == state.session_id:
+        return jsonify({
+            "status": "active_session",
+            "error": "active session cannot be downloaded until it is ended",
+            "session": session_id,
+        }), 409
+
+    from app.monitor_client import _build_session_payload, _device_id, _mode_from_db_path
+
+    db_path = get_db_file(mode)
+    payload = _build_session_payload(db_path, session_id, _device_id())
+    if payload is None:
+        return jsonify({"status": "not_found", "error": "session has no rows", "session": session_id}), 404
+
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    safe_session = "".join(ch for ch in session_id if ch.isalnum() or ch in {"-", "_"}) or "session"
+    safe_mode = "".join(ch for ch in _mode_from_db_path(db_path) if ch.isalnum() or ch in {"-", "_"}) or "default"
+    response = Response(body, mimetype="application/json")
+    response.headers["Content-Disposition"] = f'attachment; filename="cycle_session_{safe_session}_{safe_mode}.json"'
+    response.headers["Content-Length"] = str(len(body))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 def delete_row():
     row_id = request.json.get("id")
     if row_id is None:
@@ -421,6 +457,7 @@ def create_blueprint():
     bp.add_url_rule("/select_session", view_func=select_session)
     bp.add_url_rule("/edit_session", view_func=edit_session_page)
     bp.add_url_rule("/api/session_rows", view_func=session_rows)
+    bp.add_url_rule("/api/download_session", view_func=download_session)
     bp.add_url_rule("/api/delete_row", methods=["POST"], view_func=delete_row)
     bp.add_url_rule("/api/upload_session_now", methods=["POST"], view_func=upload_session_now)
     bp.add_url_rule("/api/upload_session_start", methods=["POST"], view_func=upload_session_start)
@@ -438,6 +475,7 @@ def register(app):
     app.add_url_rule("/select_session", view_func=select_session)
     app.add_url_rule("/edit_session", view_func=edit_session_page)
     app.add_url_rule("/api/session_rows", view_func=session_rows)
+    app.add_url_rule("/api/download_session", view_func=download_session)
     app.add_url_rule("/api/delete_row", methods=["POST"], view_func=delete_row)
     app.add_url_rule("/api/upload_session_now", methods=["POST"], view_func=upload_session_now)
     app.add_url_rule("/api/upload_session_start", methods=["POST"], view_func=upload_session_start)

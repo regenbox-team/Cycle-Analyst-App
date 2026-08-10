@@ -140,6 +140,13 @@ function sessionSummaryUrl(session) {
   return `/summary?${params.toString()}`;
 }
 
+function sessionDownloadUrl(session) {
+  const params = new URLSearchParams({ session });
+  const mode = currentMode();
+  if (mode) params.set("mode", mode);
+  return `/api/download_session?${params.toString()}`;
+}
+
 function monitorBadge(uploaded) {
   if (uploaded === true) return '<span class="session-badge uploaded">Envoyee</span>';
   if (uploaded === false) return '<span class="session-badge pending">Locale</span>';
@@ -191,6 +198,7 @@ function renderSessions(sessions) {
       <div class="session-row-actions">
         <a class="session-action" href="${summaryUrl}">Voir</a>
         <button class="session-action primary upload-session-row" type="button">Envoyer</button>
+        <a class="session-action download-session-row" href="${escapeHtml(sessionDownloadUrl(session.session || ""))}" download>Telecharger</a>
         <button class="session-action danger delete-session-row" type="button">Supprimer</button>
       </div>
     `;

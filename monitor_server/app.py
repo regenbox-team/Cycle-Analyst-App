@@ -3117,6 +3117,33 @@ def _clear_deleted_session_marker(conn: sqlite3.Connection, device_id: str, sess
     )
 
 
+def _ingest_complete_session(data: dict[str, Any], remote_addr: str | None) -> tuple[dict[str, Any], int]:
+    """Store a complete canonical session payload, regardless of its transport."""
+    device_id = data.get("device_id")
+    session_id = data.get("session_id")
+    mode = data.get("mode", "default")
+    if not device_id or not session_id:
+        return {"error": "missing device_id or session_id"}, 400
+
+    with _get_db() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM sessions WHERE device_id = ? AND session_id = ? AND mode = ?",
+            (device_id, session_id, mode),
+        ).fetchone()
+        if existing:
+            return {"status": "exists"}, 200
+        _clear_deleted_session_marker(conn, device_id, session_id, mode)
+
+        samples = _sanitize_upload_samples(data)
+        _enrich_samples_with_terrain_altitude(conn, samples, allow_fallback=False)
+        solar_enabled = _payload_solar_enabled(data)
+        summary = _insert_uploaded_session_summary(conn, data, samples)
+        _insert_telemetry_samples(conn, device_id, session_id, mode, samples, solar_enabled)
+        _upsert_upload_device(conn, data, solar_enabled, remote_addr)
+        conn.commit()
+    return {"status": "ok", **summary}, 200
+
+
 def _compact_monitor_db() -> dict[str, Any]:
     path = _db_path()
     before_bytes = os.path.getsize(path) if os.path.exists(path) else 0
@@ -3831,30 +3858,32 @@ def create_app() -> Flask:
         data, json_error = _read_json_request()
         if json_error:
             return json_error
-        device_id = data.get("device_id")
-        session_id = data.get("session_id")
-        mode = data.get("mode", "default")
-        if not device_id or not session_id:
-            return jsonify({"error": "missing device_id or session_id"}), 400
+        result, status = _ingest_complete_session(data, request.remote_addr)
+        return jsonify(result), status
 
-        with _get_db() as conn:
-            existing = conn.execute(
-                "SELECT 1 FROM sessions WHERE device_id = ? AND session_id = ? AND mode = ?",
-                (device_id, session_id, mode),
-            ).fetchone()
-            if existing:
-                return jsonify({"status": "exists"})
-            _clear_deleted_session_marker(conn, device_id, session_id, mode)
-
-            samples = _sanitize_upload_samples(data)
-            _enrich_samples_with_terrain_altitude(conn, samples, allow_fallback=False)
-            solar_enabled = _payload_solar_enabled(data)
-            summary = _insert_uploaded_session_summary(conn, data, samples)
-            _insert_telemetry_samples(conn, device_id, session_id, mode, samples, solar_enabled)
-            _upsert_upload_device(conn, data, solar_enabled, request.remote_addr)
-            conn.commit()
-
-        return jsonify({"status": "ok", **summary})
+    @app.route("/api/import_session_file", methods=["POST"])
+    @_require_auth
+    def import_session_file():
+        uploaded = request.files.get("session_file")
+        if uploaded is None or not uploaded.filename:
+            return jsonify({"error": "missing session_file"}), 400
+        try:
+            max_bytes = max(1024, int(os.getenv("MONITOR_IMPORT_MAX_BYTES", str(256 * 1024 * 1024))))
+        except (TypeError, ValueError):
+            max_bytes = 256 * 1024 * 1024
+        raw = uploaded.stream.read(max_bytes + 1)
+        if len(raw) > max_bytes:
+            return jsonify({"error": "session file too large", "max_bytes": max_bytes}), 413
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return jsonify({"error": "invalid session JSON file"}), 400
+        if not isinstance(data, dict):
+            return jsonify({"error": "invalid session JSON file"}), 400
+        if not isinstance(data.get("telemetry_samples"), list) or not data["telemetry_samples"]:
+            return jsonify({"error": "session file has no telemetry samples"}), 400
+        result, status = _ingest_complete_session(data, request.remote_addr)
+        return jsonify(result), status
 
     @app.route("/api/upload_session_chunk", methods=["POST"])
     @_require_auth

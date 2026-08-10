@@ -1,4 +1,5 @@
 import gzip
+import io
 import json
 import os
 import shutil
@@ -165,6 +166,45 @@ class MonitorUploadSessionTest(unittest.TestCase):
         self.assertEqual(session[0], 3)
         self.assertAlmostEqual(session[1], 2.0)
         self.assertEqual(sample_count, 3)
+
+    def test_phone_json_file_import_uses_complete_session_payload(self):
+        payload = {
+            "device_id": "bike-phone",
+            "session_id": "2026-05-07_11-00-00",
+            "mode": "supercycle_live",
+            "test_mode": 0,
+            "metrics": {"distance_km": 2.0, "solar_enabled": True},
+            "solar_enabled": 1,
+            "telemetry_samples": [self.sample(0), self.sample(1)],
+        }
+        token = "Basic YWRtaW46c2VjcmV0"
+        response = self.monitor_app.app.test_client().post(
+            "/api/import_session_file",
+            data={
+                "session_file": (
+                    io.BytesIO(json.dumps(payload, separators=(",", ":")).encode("utf-8")),
+                    "cycle_session.json",
+                )
+            },
+            headers={"Authorization": token},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "ok")
+        self.assertEqual(response.get_json()["rows_count"], 2)
+        with sqlite3.connect(self.db_path) as conn:
+            session = conn.execute(
+                "SELECT rows_count, distance_km, solar_enabled FROM sessions WHERE device_id = ? AND session_id = ? AND mode = ?",
+                (payload["device_id"], payload["session_id"], payload["mode"]),
+            ).fetchone()
+            samples = conn.execute(
+                "SELECT COUNT(*) FROM telemetry_samples WHERE device_id = ? AND session_id = ? AND mode = ?",
+                (payload["device_id"], payload["session_id"], payload["mode"]),
+            ).fetchone()[0]
+
+        self.assertEqual(session, (2, 1.0, 1))
+        self.assertEqual(samples, 2)
 
     def test_export_session_downloads_full_json_payload(self):
         payload = {

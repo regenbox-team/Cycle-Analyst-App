@@ -322,6 +322,17 @@
         justify-content: flex-end;
         gap: 8px;
       }
+      .session-import {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin: 14px 0 4px;
+      }
+      .session-import input[type="file"] { max-width: min(100%, 340px); }
+      .session-import-status { width: 100%; min-height: 18px; font-size: 13px; color: var(--muted); }
+      .session-import-status.ok { color: #15803d; }
+      .session-import-status.error { color: #b91c1c; }
       .bulk-count {
         color: var(--muted);
         font-size: 12px;
@@ -536,6 +547,13 @@
           <a class="action-link primary" href="/travel_analysis">Travel analysis</a>
         </div>
       </div>
+
+      <form id="session-import-form" class="card session-import">
+        <label for="session-import-file"><strong>Import a session from a phone</strong></label>
+        <input id="session-import-file" name="session_file" type="file" accept="application/json,.json" required>
+        <button id="session-import-btn" class="action-link primary" type="submit">Upload JSON</button>
+        <div id="session-import-status" class="session-import-status" role="status" aria-live="polite"></div>
+      </form>
 
       <h2>Vehicles</h2>
       <div class="card table-card">
@@ -1141,6 +1159,10 @@
       const bulkSolarProfileBtn = document.getElementById("bulk-solar-profile-btn");
       const bulkVideoBtn = document.getElementById("bulk-video-btn");
       const compactDbBtn = document.getElementById("compact-db-btn");
+      const sessionImportForm = document.getElementById("session-import-form");
+      const sessionImportFile = document.getElementById("session-import-file");
+      const sessionImportBtn = document.getElementById("session-import-btn");
+      const sessionImportStatus = document.getElementById("session-import-status");
       const selectedCount = document.getElementById("selected-count");
       const solarProfileCard = document.getElementById("solar-profile-card");
       const solarProfileChart = document.getElementById("solar-profile-chart");
@@ -1150,6 +1172,32 @@
       const solarPanelWcValue = document.getElementById("solar-profile-panel-wc-value");
       const solarSmoothingInput = document.getElementById("solar-profile-smoothing");
       const solarSmoothingValue = document.getElementById("solar-profile-smoothing-value");
+
+      sessionImportForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const file = sessionImportFile?.files?.[0];
+        if (!file) return;
+        sessionImportBtn.disabled = true;
+        sessionImportStatus.className = "session-import-status";
+        sessionImportStatus.textContent = `Uploading ${file.name}...`;
+        try {
+          const formData = new FormData();
+          formData.append("session_file", file, file.name);
+          const response = await fetch("/api/import_session_file", { method: "POST", body: formData });
+          const payload = await response.json().catch(() => ({ error: response.statusText }));
+          if (!response.ok) throw new Error(payload.error || "Session import failed.");
+          sessionImportStatus.classList.add("ok");
+          sessionImportStatus.textContent = payload.status === "exists"
+            ? "This session is already on the monitor."
+            : `Session imported (${payload.rows_count ?? "?"} rows). Reloading...`;
+          if (payload.status !== "exists") window.setTimeout(() => window.location.reload(), 700);
+        } catch (error) {
+          sessionImportStatus.classList.add("error");
+          sessionImportStatus.textContent = error.message || "Session import failed.";
+        } finally {
+          sessionImportBtn.disabled = false;
+        }
+      });
       const solarUtcOffsetInput = document.getElementById("solar-profile-utc-offset");
       const solarUtcOffsetValue = document.getElementById("solar-profile-utc-offset-value");
       const solarResetManualBtn = document.getElementById("solar-profile-reset-manual");
