@@ -13,6 +13,9 @@ GPS_DISTANCE_JUMP_FLOOR_KM = 0.05
 GPS_DISTANCE_JUMP_MARGIN_KM = 0.05
 GPS_UNTIMED_SEGMENT_LIMIT_KM = 1.0
 ELEVATION_DEADBAND_M = 5.0
+CA_RAW_AH_SPIKE_MIN_AH = 0.1
+CA_RAW_AH_SPIKE_RETURN_TOLERANCE_AH = 0.02
+CA_RAW_AH_SPIKE_RETURN_RATIO = 0.05
 _ELEVATION_ANCHOR_KEY = "_elevation_anchor_m"
 _RAW_GPS_ELEVATION_ANCHOR_KEY = "_raw_gps_elevation_anchor_m"
 
@@ -242,14 +245,46 @@ def _add_ca_raw_ah_delta(
     m: dict[str, Any],
     values: list[float] | None,
     previous_values: list[float] | None,
+    previous_previous_values: list[float] | None = None,
+    next_values: list[float] | None = None,
 ) -> None:
     raw_ah = _raw_ah_value(values)
     previous_raw_ah = _raw_ah_value(previous_values)
     if raw_ah is None or previous_raw_ah is None:
         return
+    if _isolated_ca_raw_ah_spike(previous_values, values, next_values):
+        return
+    if _isolated_ca_raw_ah_spike(previous_previous_values, previous_values, values):
+        previous_raw_ah = _raw_ah_value(previous_previous_values)
+        if previous_raw_ah is None:
+            return
     delta = raw_ah - previous_raw_ah
     if delta >= 0:
         m["ca_Ah_raw"] += delta
+
+
+def _isolated_ca_raw_ah_spike(
+    left_values: list[float] | None,
+    middle_values: list[float] | None,
+    right_values: list[float] | None,
+) -> bool:
+    """Return true when one CA Ah reading jumps away and immediately returns."""
+    left = _raw_ah_value(left_values)
+    middle = _raw_ah_value(middle_values)
+    right = _raw_ah_value(right_values)
+    if left is None or middle is None or right is None:
+        return False
+    left_jump = middle - left
+    right_jump = middle - right
+    if left_jump * right_jump <= 0:
+        return False
+    spike_size = min(abs(left_jump), abs(right_jump))
+    if spike_size < CA_RAW_AH_SPIKE_MIN_AH:
+        return False
+    return abs(right - left) <= max(
+        CA_RAW_AH_SPIKE_RETURN_TOLERANCE_AH,
+        spike_size * CA_RAW_AH_SPIKE_RETURN_RATIO,
+    )
 
 
 def _add_elevation_sample(
@@ -434,11 +469,13 @@ def _add_interval_metrics(
     values: list[float] | None,
     previous_sample: dict[str, Any] | None,
     previous_values: list[float] | None,
+    previous_previous_values: list[float] | None,
+    next_values: list[float] | None,
     dt: float,
     solar_power: float,
 ) -> None:
     m["duration"] += dt
-    _add_ca_raw_ah_delta(m, values, previous_values)
+    _add_ca_raw_ah_delta(m, values, previous_values, previous_previous_values, next_values)
     if dt <= 0:
         return
 
@@ -482,9 +519,13 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
     last_gps = None
     last_gps_sample = None
     previous_values = None
+    previous_previous_values = None
+    ordered = chronological_samples(samples)
+    parsed_values = [parse_raw_values(sample.get("raw")) for sample in ordered]
 
-    for sample in chronological_samples(samples):
-        values = parse_raw_values(sample.get("raw"))
+    for index, sample in enumerate(ordered):
+        values = parsed_values[index]
+        next_values = parsed_values[index + 1] if index + 1 < len(parsed_values) else None
         m["sample_count"] += 1
         current_ts = parse_timestamp(sample.get("timestamp"))
         if current_ts is not None:
@@ -522,7 +563,13 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
                 distance_key="distance",
                 reset_count_key="ca_reset_count",
             )
-            _add_ca_raw_ah_delta(m, values, previous_values)
+            _add_ca_raw_ah_delta(
+                m,
+                values,
+                previous_values,
+                previous_previous_values,
+                next_values,
+            )
 
             if speed >= 1:
                 m["speed_sum"] += speed
@@ -585,7 +632,9 @@ def compute_session_metrics(samples: Iterable[dict[str, Any]]) -> dict[str, Any]
                 m["gps_hdop_sum"] += hdop
                 m["gps_hdop_count"] += 1
 
-        previous_values = values or previous_values
+        if values:
+            previous_previous_values = previous_values
+            previous_values = values
 
     if first_ts is not None and final_ts is not None:
         m["duration"] = max(0.0, (final_ts - first_ts).total_seconds())
@@ -597,11 +646,14 @@ def compute_timeline_metrics_by_user(samples: Iterable[dict[str, Any]]) -> dict[
     metrics_by_user: dict[str, dict[str, Any]] = {}
     previous_sample = None
     previous_values = None
+    previous_previous_values = None
     previous_ts = None
+    parsed_values = [parse_raw_values(sample.get("raw")) for sample in ordered]
 
-    for sample in ordered:
+    for index, sample in enumerate(ordered):
         user = _sample_user(sample)
-        values = parse_raw_values(sample.get("raw"))
+        values = parsed_values[index]
+        next_values = parsed_values[index + 1] if index + 1 < len(parsed_values) else None
         current_ts = parse_timestamp(sample.get("timestamp"))
         dt = _bounded_dt(previous_ts, current_ts)
         solar_enabled = _sample_solar_enabled(sample)
@@ -612,10 +664,22 @@ def compute_timeline_metrics_by_user(samples: Iterable[dict[str, Any]]) -> dict[
             if not solar_enabled:
                 m["solar_enabled"] = False
             _add_instant_metrics(m, sample, values, solar_power, has_solar)
-            _add_interval_metrics(m, sample, values, previous_sample, previous_values, dt, solar_power)
+            _add_interval_metrics(
+                m,
+                sample,
+                values,
+                previous_sample,
+                previous_values,
+                previous_previous_values,
+                next_values,
+                dt,
+                solar_power,
+            )
 
         previous_sample = sample
-        previous_values = values
+        if values:
+            previous_previous_values = previous_values
+            previous_values = values
         previous_ts = current_ts or previous_ts
 
     return {user: _finalize_metrics(metrics) for user, metrics in metrics_by_user.items()}

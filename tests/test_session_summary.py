@@ -149,6 +149,42 @@ class SessionSummaryTest(unittest.TestCase):
         self.assertEqual(metrics["Ah"], 0)
         self.assertAlmostEqual(metrics["ca_Ah_raw"], 4.25)
 
+    def test_rejects_isolated_high_cycle_analyst_ah_spike(self):
+        samples = [
+            {"timestamp": "2026-04-30T10:00:00", "raw": raw_line(ah=9.45)},
+            {"timestamp": "2026-04-30T10:00:01", "raw": raw_line(ah=95122.0)},
+            {"timestamp": "2026-04-30T10:00:02", "raw": raw_line(ah=9.51)},
+            {"timestamp": "2026-04-30T10:00:03", "raw": raw_line(ah=9.61)},
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertAlmostEqual(metrics["ca_Ah_raw"], 0.16)
+
+    def test_rejects_recovery_from_isolated_low_cycle_analyst_ah_spike(self):
+        samples = [
+            {"timestamp": "2026-04-30T10:00:00", "raw": raw_line(ah=34.8)},
+            {"timestamp": "2026-04-30T10:00:01", "raw": raw_line(ah=3.48)},
+            {"timestamp": "2026-04-30T10:00:02", "raw": raw_line(ah=34.9)},
+            {"timestamp": "2026-04-30T10:00:03", "raw": raw_line(ah=35.0)},
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertAlmostEqual(metrics["ca_Ah_raw"], 0.2)
+
+    def test_keeps_regen_out_of_gross_cycle_analyst_ah(self):
+        samples = [
+            {"timestamp": "2026-04-30T10:00:00", "raw": raw_line(ah=10.0)},
+            {"timestamp": "2026-04-30T10:00:01", "raw": raw_line(ah=11.0)},
+            {"timestamp": "2026-04-30T10:00:02", "raw": raw_line(ah=10.5)},
+            {"timestamp": "2026-04-30T10:00:03", "raw": raw_line(ah=11.5)},
+        ]
+
+        metrics = compute_session_metrics(samples)
+
+        self.assertAlmostEqual(metrics["ca_Ah_raw"], 2.0)
+
     def test_keeps_solar_only_samples_without_cycle_analyst_raw(self):
         samples = [
             {"timestamp": "2026-04-30T10:00:00", "solar_power_w": 30},
