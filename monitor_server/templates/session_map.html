@@ -66,6 +66,32 @@
         color: #0f766e;
         border-color: var(--accent);
       }
+      button.btn { cursor: pointer; font-family: inherit; }
+      .btn:disabled { cursor: wait; opacity: 0.55; }
+      .editor-card { display: none; margin-top: 16px; }
+      .editor-card.is-open { display: block; }
+      .editor-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+      .editor-head h2 { margin: 0 0 4px; }
+      .editor-help { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+      .timeline-wrap { margin-top: 22px; padding: 24px 8px 8px; }
+      .timeline { position: relative; height: 52px; border-radius: 12px; background: #eee7dc; user-select: none; touch-action: none; }
+      .timeline-segment { position: absolute; inset-block: 0; min-width: 2px; opacity: 0.9; }
+      .timeline-segment:first-child { border-radius: 12px 0 0 12px; }
+      .timeline-segment:last-of-type { border-radius: 0 12px 12px 0; }
+      .timeline-handle {
+        position: absolute; top: -11px; width: 22px; height: 74px; transform: translateX(-50%);
+        border: 0; background: transparent; cursor: ew-resize; z-index: 3; padding: 0;
+      }
+      .timeline-handle::before { content: ""; position: absolute; left: 9px; top: 0; width: 4px; height: 74px; border-radius: 4px; background: #171717; box-shadow: 0 0 0 3px #fff; }
+      .timeline-handle:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+      .timeline-handle-label { position: absolute; bottom: calc(100% + 7px); left: 50%; transform: translateX(-50%); white-space: nowrap; border-radius: 7px; padding: 4px 6px; background: #171717; color: #fff; font-size: 10px; font-weight: 700; }
+      .timeline-axis { display: flex; justify-content: space-between; margin-top: 8px; color: var(--muted); font-size: 11px; }
+      .segment-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+      .segment-control { display: flex; align-items: center; gap: 7px; border: 1px solid var(--border); border-radius: 10px; padding: 7px 9px; background: #faf6ef; font-size: 12px; }
+      .user-swatch { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+      .segment-control select { max-width: 190px; border: 0; background: transparent; color: var(--ink); font: inherit; font-weight: 700; }
+      .editor-actions { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
+      .editor-status { min-height: 1.2em; color: var(--muted); font-size: 12px; }
       .map {
         width: 100%;
         height: 420px;
@@ -169,6 +195,8 @@
         }
         .summary-metric-title { font-size: 11px; }
         .summary-value-number { font-size: 12px; }
+        .editor-head { display: block; }
+        .timeline-handle-label { display: none; }
       }
     </style>
   </head>
@@ -179,7 +207,28 @@
       <div class="row">
         <a class="btn" href="/">← Back to monitor</a>
         <a class="btn btn-primary" href="{{ gpx_url }}">Download GPX</a>
+        <button class="btn" id="open-user-editor" type="button">Ajuster les changements d'utilisateur</button>
       </div>
+      <section class="card editor-card" id="user-editor" aria-labelledby="user-editor-title">
+        <div class="editor-head">
+          <div>
+            <h2 id="user-editor-title">Correction des utilisateurs</h2>
+            <p class="editor-help">Faites glisser les curseurs au moment réel du changement. Les couleurs du tracé se mettent à jour immédiatement.</p>
+          </div>
+          <button class="btn" id="close-user-editor" type="button">Fermer</button>
+        </div>
+        <div class="timeline-wrap">
+          <div class="timeline" id="user-timeline" aria-label="Timeline des utilisateurs"></div>
+          <div class="timeline-axis"><span id="timeline-start">Début</span><span id="timeline-end">Fin</span></div>
+        </div>
+        <div class="segment-controls" id="segment-controls"></div>
+        <div class="editor-actions">
+          <button class="btn btn-primary" id="save-user-timeline" type="button">Enregistrer</button>
+          <button class="btn" id="reset-user-timeline" type="button">Remettre à zéro</button>
+          <button class="btn" id="add-user-change" type="button">Ajouter un changement</button>
+          <span class="editor-status" id="editor-status" role="status"></span>
+        </div>
+      </section>
       <div class="card" style="margin-top: 16px;">
         <div id="session-map" class="map" role="img" aria-label="Session track"></div>
         <div class="stats">
@@ -212,7 +261,14 @@
     <script>
       const mapEl = document.getElementById("session-map");
       const fallbackPoints = {{ points | tojson }};
-      const gpxUrl = {{ gpx_url | tojson }};
+      const editorSamples = {{ editor_samples | tojson }};
+      const userOptions = {{ user_options | tojson }};
+      const saveTimelineUrl = {{ user_timeline_url | tojson }};
+      const sessionIdentity = {{ {"device_id": device_id, "session_id": session_id, "mode": mode} | tojson }};
+      const palette = ["#0d9488", "#e76f51", "#3a86ff", "#8338ec", "#f59e0b", "#16a34a", "#db2777", "#0891b2"];
+      const colorByIdentity = new Map(userOptions.map((option, index) => [option.key, palette[index % palette.length]]));
+      let map;
+      let trackLayer;
 
       const parseGpx = (text) => {
         const doc = new DOMParser().parseFromString(text, "application/xml");
@@ -237,7 +293,7 @@
 
       const renderTrack = (segments) => {
         if (!mapEl || typeof L === "undefined") return;
-        const map = L.map(mapEl, { zoomControl: true }).setView([20, 0], 2);
+        map = L.map(mapEl, { zoomControl: true }).setView([20, 0], 2);
         L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 19,
           attribution: "© OpenStreetMap contributors"
@@ -266,10 +322,209 @@
         map.fitBounds(line.getBounds(), { padding: [20, 20] });
       };
 
-      fetch(gpxUrl)
-        .then((res) => res.text())
-        .then((text) => renderTrack(parseGpx(text)))
-        .catch(() => renderTrack([fallbackPoints]));
+      const validPoint = (sample) => {
+        const lat = Number(sample.lat);
+        const lon = Number(sample.lon);
+        return sample.gps_valid !== false && Number.isFinite(lat) && Number.isFinite(lon) && lat !== 0 && lon !== 0;
+      };
+      renderTrack([editorSamples.filter(validPoint).map((sample) => ({ lat: Number(sample.lat), lon: Number(sample.lon) }))]);
+
+      const initialSegments = [];
+      editorSamples.forEach((sample, index) => {
+        const previous = initialSegments[initialSegments.length - 1];
+        if (!previous || previous.identityKey !== sample.identity_key) {
+          initialSegments.push({ start: index, identityKey: sample.identity_key });
+        }
+      });
+      let timelineSegments = initialSegments.map((segment) => ({ ...segment }));
+      const cumulativeKm = [];
+      let traveledKm = 0;
+      let previousGps = null;
+      editorSamples.forEach((sample, index) => {
+        if (validPoint(sample)) {
+          const currentGps = [Number(sample.lat), Number(sample.lon)];
+          if (previousGps) {
+            const toRad = (value) => value * Math.PI / 180;
+            const dLat = toRad(currentGps[0] - previousGps[0]);
+            const dLon = toRad(currentGps[1] - previousGps[1]);
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(previousGps[0])) * Math.cos(toRad(currentGps[0])) * Math.sin(dLon / 2) ** 2;
+            traveledKm += 6371.0088 * 2 * Math.asin(Math.min(1, Math.sqrt(a)));
+          }
+          previousGps = currentGps;
+        }
+        cumulativeKm[index] = traveledKm;
+      });
+
+      const formatMoment = (index) => {
+        const raw = editorSamples[index] && editorSamples[index].timestamp;
+        if (!raw) return `point ${index + 1} · ${(cumulativeKm[index] || 0).toFixed(1)} km`;
+        const date = new Date(String(raw).replace(" ", "T"));
+        const time = Number.isNaN(date.getTime()) ? String(raw) : date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        return `${time} · ${(cumulativeKm[index] || 0).toFixed(1)} km`;
+      };
+
+      const currentIdentityAt = (index) => {
+        let identity = timelineSegments[0] ? timelineSegments[0].identityKey : "none";
+        timelineSegments.forEach((segment) => { if (segment.start <= index) identity = segment.identityKey; });
+        return identity;
+      };
+
+      const updateColoredTrack = () => {
+        if (!map) return;
+        if (trackLayer) map.removeLayer(trackLayer);
+        trackLayer = L.layerGroup().addTo(map);
+        let run = [];
+        let runIdentity = null;
+        const flush = () => {
+          if (run.length > 1) L.polyline(run, { color: colorByIdentity.get(runIdentity) || "#777", weight: 5, opacity: 0.92 }).addTo(trackLayer);
+          run = [];
+        };
+        editorSamples.forEach((sample, index) => {
+          if (!validPoint(sample)) return;
+          const identity = currentIdentityAt(index);
+          const point = [Number(sample.lat), Number(sample.lon)];
+          if (runIdentity !== identity) {
+            const join = run.length ? run[run.length - 1] : null;
+            flush();
+            if (join) run.push(join);
+            runIdentity = identity;
+          }
+          run.push(point);
+        });
+        flush();
+      };
+
+      const timeline = document.getElementById("user-timeline");
+      const controls = document.getElementById("segment-controls");
+      const maxIndex = Math.max(1, editorSamples.length - 1);
+      const renderTimeline = () => {
+        timeline.replaceChildren();
+        controls.replaceChildren();
+        timelineSegments.forEach((segment, index) => {
+          const nextStart = timelineSegments[index + 1] ? timelineSegments[index + 1].start : editorSamples.length;
+          const block = document.createElement("div");
+          block.className = "timeline-segment";
+          block.style.left = `${segment.start / maxIndex * 100}%`;
+          block.style.right = `${Math.max(0, (editorSamples.length - nextStart - 1) / maxIndex * 100)}%`;
+          block.style.background = colorByIdentity.get(segment.identityKey) || "#777";
+          timeline.appendChild(block);
+
+          if (index > 0) {
+            const handle = document.createElement("button");
+            handle.type = "button";
+            handle.className = "timeline-handle";
+            handle.style.left = `${segment.start / maxIndex * 100}%`;
+            handle.setAttribute("aria-label", `Changement à ${formatMoment(segment.start)}`);
+            handle.innerHTML = `<span class="timeline-handle-label">${formatMoment(segment.start)}</span>`;
+            const move = (clientX) => {
+              const rect = timeline.getBoundingClientRect();
+              const wanted = Math.round((clientX - rect.left) / rect.width * maxIndex);
+              const minimum = timelineSegments[index - 1].start + 1;
+              const maximum = (timelineSegments[index + 1] ? timelineSegments[index + 1].start : editorSamples.length) - 1;
+              segment.start = Math.max(minimum, Math.min(maximum, wanted));
+              renderTimeline();
+            };
+            handle.addEventListener("pointerdown", (event) => {
+              event.preventDefault();
+              const onMove = (moveEvent) => move(moveEvent.clientX);
+              const onUp = () => { document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); };
+              document.addEventListener("pointermove", onMove);
+              document.addEventListener("pointerup", onUp);
+            });
+            handle.addEventListener("keydown", (event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              const direction = event.key === "ArrowLeft" ? -1 : 1;
+              const rect = timeline.getBoundingClientRect();
+              move(rect.left + ((segment.start + direction) / maxIndex) * rect.width);
+            });
+            timeline.appendChild(handle);
+          }
+
+          const control = document.createElement("label");
+          control.className = "segment-control";
+          const swatch = document.createElement("span");
+          swatch.className = "user-swatch";
+          swatch.style.background = colorByIdentity.get(segment.identityKey) || "#777";
+          const select = document.createElement("select");
+          select.setAttribute("aria-label", `Utilisateur du segment ${index + 1}`);
+          userOptions.forEach((option) => {
+            const item = document.createElement("option");
+            item.value = option.key;
+            item.textContent = option.active ? option.label : `${option.label} (inactif)`;
+            item.selected = option.key === segment.identityKey;
+            select.appendChild(item);
+          });
+          select.addEventListener("change", () => { segment.identityKey = select.value; renderTimeline(); });
+          control.append(swatch, select);
+          if (index > 0) {
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "btn";
+            remove.textContent = "Retirer";
+            remove.setAttribute("aria-label", `Retirer le changement ${index}`);
+            remove.addEventListener("click", () => { timelineSegments.splice(index, 1); renderTimeline(); });
+            control.appendChild(remove);
+          }
+          controls.appendChild(control);
+        });
+        updateColoredTrack();
+      };
+
+      const startLabel = document.getElementById("timeline-start");
+      const endLabel = document.getElementById("timeline-end");
+      if (editorSamples.length) {
+        startLabel.textContent = `Début · ${formatMoment(0)}`;
+        endLabel.textContent = `${formatMoment(editorSamples.length - 1)} · Fin`;
+      }
+      renderTimeline();
+
+      const editor = document.getElementById("user-editor");
+      document.getElementById("open-user-editor").addEventListener("click", () => {
+        editor.classList.add("is-open");
+        editor.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      document.getElementById("close-user-editor").addEventListener("click", () => editor.classList.remove("is-open"));
+      document.getElementById("reset-user-timeline").addEventListener("click", () => {
+        timelineSegments = initialSegments.map((segment) => ({ ...segment }));
+        document.getElementById("editor-status").textContent = "Modifications annulées.";
+        renderTimeline();
+      });
+      document.getElementById("add-user-change").addEventListener("click", () => {
+        if (editorSamples.length < 2) return;
+        let bestIndex = 0;
+        let bestLength = 0;
+        timelineSegments.forEach((segment, index) => {
+          const end = timelineSegments[index + 1] ? timelineSegments[index + 1].start : editorSamples.length;
+          if (end - segment.start > bestLength) { bestIndex = index; bestLength = end - segment.start; }
+        });
+        if (bestLength < 2) return;
+        const start = timelineSegments[bestIndex].start + Math.floor(bestLength / 2);
+        const currentKey = timelineSegments[bestIndex].identityKey;
+        const alternative = userOptions.find((option) => option.key !== currentKey);
+        timelineSegments.splice(bestIndex + 1, 0, { start, identityKey: alternative ? alternative.key : currentKey });
+        renderTimeline();
+      });
+      document.getElementById("save-user-timeline").addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        const status = document.getElementById("editor-status");
+        button.disabled = true;
+        status.textContent = "Enregistrement et recalcul du résumé…";
+        try {
+          const response = await fetch(saveTimelineUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...sessionIdentity, segments: timelineSegments.map((segment) => ({ start_sample_id: editorSamples[segment.start].id, identity_key: segment.identityKey })) })
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Impossible d'enregistrer la correction.");
+          status.textContent = "Correction enregistrée. Actualisation du résumé…";
+          window.location.reload();
+        } catch (error) {
+          status.textContent = error.message;
+          button.disabled = false;
+        }
+      });
     </script>
   </body>
 </html>

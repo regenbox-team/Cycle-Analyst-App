@@ -1532,6 +1532,60 @@ def _insert_uploaded_session_summary(
     return {"rows_count": rows_count, "distance_km": distance_km}
 
 
+def _refresh_session_summary(
+    conn: sqlite3.Connection,
+    device_id: str,
+    session_id: str,
+    mode: str,
+) -> dict[str, Any]:
+    """Recompute the persisted session aggregates after telemetry was edited."""
+    samples = _telemetry_samples_for_session(conn, device_id, session_id, mode)
+    if not samples:
+        raise LookupError("session has no telemetry samples")
+
+    metrics = compute_session_metrics(samples)
+    start_ts = samples[0].get("timestamp")
+    end_ts = samples[-1].get("timestamp")
+    start_dt = _parse_upload_ts(start_ts)
+    end_dt = _parse_upload_ts(end_ts)
+    duration_sec = max(0.0, (end_dt - start_dt).total_seconds()) if start_dt and end_dt else None
+    distance_km = _compute_session_distance_km(samples)
+    if distance_km is None:
+        distance_km = metrics.get("distance")
+    avg_speed_kph = (
+        float(distance_km) / (duration_sec / 3600)
+        if duration_sec and distance_km is not None
+        else None
+    )
+    user_ids = sorted({str(row.get("user_id")) for row in samples if row.get("user_id")})
+    conn.execute(
+        """
+        UPDATE sessions
+        SET start_ts = ?, end_ts = ?, rows_count = ?, distance_km = ?, duration_sec = ?,
+            avg_speed_kph = ?, uphill_m = ?, raw_gps_uphill_m = ?, user_ids_json = ?,
+            metrics_json = ?
+        WHERE device_id = ? AND session_id = ? AND mode = ?
+        """,
+        (
+            start_ts,
+            end_ts,
+            len(samples),
+            distance_km,
+            duration_sec,
+            avg_speed_kph,
+            metrics.get("gps_uphill_m", 0.0),
+            metrics.get("raw_gps_uphill_m", 0.0),
+            json.dumps(user_ids) if user_ids else None,
+            json.dumps(metrics),
+            device_id,
+            session_id,
+            mode,
+        ),
+    )
+    _store_session_trace(conn, device_id, session_id, mode, samples)
+    return {"rows_count": len(samples), "distance_km": distance_km, "user_ids": user_ids}
+
+
 def _upsert_upload_device(conn: sqlite3.Connection, data: dict[str, Any], solar_enabled: int, remote_addr: str | None) -> None:
     conn.execute(
         """
@@ -5012,6 +5066,86 @@ def create_app() -> Flask:
             return Response("No photo found", 404)
         return send_from_directory(_media_dir(), row["relative_path"])
 
+    @app.route("/api/session/user_timeline", methods=["POST"])
+    @_require_auth
+    def update_session_user_timeline():
+        data = request.get_json(silent=True) or {}
+        device_id = str(data.get("device_id") or "").strip()
+        session_id = str(data.get("session_id") or "").strip()
+        mode = str(data.get("mode") or "default").strip()
+        segments = data.get("segments")
+        if not device_id or not session_id or not isinstance(segments, list) or not segments:
+            return jsonify({"error": "missing session or timeline segments"}), 400
+
+        with _get_db() as conn:
+            sample_rows = conn.execute(
+                f"""
+                SELECT id FROM {TELEMETRY_TABLE}
+                WHERE device_id = ? AND session_id = ? AND mode = ?
+                ORDER BY timestamp IS NULL, timestamp, id
+                """,
+                (device_id, session_id, mode),
+            ).fetchall()
+            if not sample_rows:
+                return jsonify({"error": "session not found"}), 404
+            sample_ids = [int(row["id"]) for row in sample_rows]
+            index_by_id = {sample_id: index for index, sample_id in enumerate(sample_ids)}
+
+            users = {
+                str(row["user_id"]): dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT user_id, initials, first_name, last_name, date_of_birth, gender,
+                           active, source_device_id, created_at, updated_at, synced_at
+                    FROM users
+                    """
+                ).fetchall()
+            }
+            normalized = []
+            for segment in segments:
+                if not isinstance(segment, dict):
+                    return jsonify({"error": "invalid timeline segment"}), 400
+                try:
+                    start_id = int(segment.get("start_sample_id"))
+                except (TypeError, ValueError):
+                    return jsonify({"error": "invalid timeline marker"}), 400
+                if start_id not in index_by_id:
+                    return jsonify({"error": "timeline marker is outside this session"}), 400
+                identity_key = str(segment.get("identity_key") or "").strip()
+                if identity_key.startswith("user:"):
+                    user_id = identity_key[5:]
+                    profile = users.get(user_id)
+                    if profile is None:
+                        return jsonify({"error": f"unknown user: {user_id}"}), 400
+                    initials = str(profile.get("initials") or "").strip() or user_id
+                    assignment = (initials, user_id, initials, json.dumps(profile))
+                elif identity_key.startswith("legacy:"):
+                    legacy = identity_key[7:].strip()
+                    if not legacy:
+                        return jsonify({"error": "invalid legacy user"}), 400
+                    assignment = (legacy, None, legacy, None)
+                elif identity_key == "none":
+                    assignment = (None, None, None, None)
+                else:
+                    return jsonify({"error": "invalid user identity"}), 400
+                normalized.append((index_by_id[start_id], assignment))
+
+            normalized.sort(key=lambda item: item[0])
+            if normalized[0][0] != 0 or len({item[0] for item in normalized}) != len(normalized):
+                return jsonify({"error": "timeline must start at the first sample and markers must be unique"}), 400
+
+            updates = []
+            for segment_index, (start_index, assignment) in enumerate(normalized):
+                end_index = normalized[segment_index + 1][0] if segment_index + 1 < len(normalized) else len(sample_ids)
+                updates.extend((*assignment, sample_id) for sample_id in sample_ids[start_index:end_index])
+            conn.executemany(
+                f"UPDATE {TELEMETRY_TABLE} SET user = ?, user_id = ?, user_initials = ?, user_snapshot_json = ? WHERE id = ?",
+                updates,
+            )
+            summary = _refresh_session_summary(conn, device_id, session_id, mode)
+            conn.commit()
+        return jsonify({"status": "ok", **summary})
+
     @app.route("/session_map")
     @_require_auth
     def session_map():
@@ -5032,7 +5166,7 @@ def create_app() -> Flask:
             ).fetchone()
             rows = conn.execute(
                 f"""
-                SELECT timestamp, raw, user,
+                SELECT id, timestamp, raw, user,
                        user_id, user_initials, user_snapshot_json,
                        gps_lat, gps_lon, gps_alt, terrain_alt_m, terrain_alt_source, terrain_alt_updated_at,
                        gps_speed_kph, gps_track_deg, gps_fix, gps_sats, gps_hdop,
@@ -5044,11 +5178,19 @@ def create_app() -> Flask:
                 """,
                 (device_id, session_id, mode),
             ).fetchall()
+            known_users = conn.execute(
+                """
+                SELECT user_id, initials, first_name, last_name, active
+                FROM users
+                ORDER BY active DESC, initials, last_name, first_name
+                """
+            ).fetchall()
 
         points = []
         samples = []
         for row in rows:
             sample = {
+                "id": row["id"],
                 "timestamp": row["timestamp"],
                 "raw": row["raw"],
                 "user": row["user"],
@@ -5107,6 +5249,46 @@ def create_app() -> Flask:
             if time_str:
                 point["time"] = time_str
             points.append(point)
+
+        user_options = []
+        for row in known_users:
+            user_id = str(row["user_id"])
+            initials = str(row["initials"] or "").strip()
+            full_name = " ".join(part for part in (row["first_name"], row["last_name"]) if part).strip()
+            label = initials or full_name or user_id
+            if full_name and full_name != label:
+                label = f"{label} · {full_name}"
+            user_options.append({"key": f"user:{user_id}", "label": label, "active": bool(row["active"])})
+        legacy_labels = sorted({
+            str(sample.get("user") or sample.get("user_initials")).strip()
+            for sample in samples
+            if not sample.get("user_id") and str(sample.get("user") or sample.get("user_initials") or "").strip()
+        })
+        user_options.extend({"key": f"legacy:{label}", "label": label, "active": True} for label in legacy_labels)
+        if any(not (sample.get("user_id") or sample.get("user") or sample.get("user_initials")) for sample in samples):
+            user_options.append({"key": "none", "label": "Non attribué", "active": True})
+
+        ordered_editor_samples = chronological_samples(samples)
+        plausible_gps_ids = {sample["id"] for sample in filter_plausible_gps_samples(samples)}
+        editor_samples = []
+        for sample in ordered_editor_samples:
+            identity_key = (
+                f"user:{sample['user_id']}"
+                if sample.get("user_id")
+                else (
+                    f"legacy:{str(sample.get('user') or sample.get('user_initials')).strip()}"
+                    if sample.get("user") or sample.get("user_initials")
+                    else "none"
+                )
+            )
+            editor_samples.append({
+                "id": sample["id"],
+                "timestamp": sample.get("timestamp"),
+                "lat": sample.get("gps_lat"),
+                "lon": sample.get("gps_lon"),
+                "gps_valid": sample["id"] in plausible_gps_ids,
+                "identity_key": identity_key,
+            })
         metrics_by_user = compute_timeline_metrics_by_user(samples)
         metrics_by_user["Total"] = compute_session_metrics(samples)
         display_distance_km = session_row["distance_km"] if session_row else None
@@ -5133,6 +5315,9 @@ def create_app() -> Flask:
             rows_count=session_row["rows_count"] if session_row else None,
             sections=build_summary_sections(metrics_by_user, all_users),
             users=all_users,
+            editor_samples=editor_samples,
+            user_options=user_options,
+            user_timeline_url=url_for("update_session_user_timeline"),
         )
 
     return app
