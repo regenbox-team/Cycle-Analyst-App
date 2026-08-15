@@ -42,6 +42,11 @@ from app.session_summary import (
     _haversine_km,
 )
 from app.distance import update_ca_distance
+from monitor_server.weather_analysis import (
+    build_efficiency_profile,
+    enrich_project_weather,
+    ensure_weather_schema,
+)
 
 
 TELEMETRY_TABLE = "telemetry_samples"
@@ -285,6 +290,7 @@ def _init_db() -> None:
             )
             """
         )
+        ensure_weather_schema(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
@@ -528,6 +534,7 @@ def _migrate_db() -> None:
             )
             """
         )
+        ensure_weather_schema(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sessions_travel_project ON sessions(travel_project_id)"
         )
@@ -4015,6 +4022,97 @@ def create_app() -> Flask:
             stats = _backfill_terrain_altitudes(conn, limit_sessions, limit_points)
             conn.commit()
         return jsonify({"status": "ok", **stats})
+
+    @app.route("/api/travel_analysis/weather", methods=["POST"])
+    @_require_auth
+    def enrich_travel_weather():
+        data = request.get_json(silent=True) or {}
+        try:
+            project_id = int(data.get("project_id"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid project_id"}), 400
+        device_id = str(data.get("device_id") or "").strip() or None
+        with _get_db() as conn:
+            project = conn.execute("SELECT id FROM travel_projects WHERE id = ?", (project_id,)).fetchone()
+            if not project:
+                return jsonify({"error": "travel project not found"}), 404
+            stats = enrich_project_weather(conn, project_id, device_id)
+            conn.execute("DELETE FROM travel_efficiency_profiles WHERE project_id = ?", (project_id,))
+            conn.commit()
+        return jsonify({"status": "ok", **stats})
+
+    @app.route("/api/travel_analysis/efficiency_profiles")
+    @_require_auth
+    def travel_efficiency_profiles():
+        try:
+            project_id = int(request.args.get("project_id"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid project_id"}), 400
+        requested_device = str(request.args.get("device_id") or "").strip() or None
+        refresh = request.args.get("refresh") in {"1", "true", "yes"}
+        cached_only = request.args.get("cached_only") in {"1", "true", "yes"}
+        with _get_db() as conn:
+            project = conn.execute("SELECT id, name FROM travel_projects WHERE id = ?", (project_id,)).fetchone()
+            if not project:
+                return jsonify({"error": "travel project not found"}), 404
+            if requested_device:
+                devices = [requested_device]
+            else:
+                devices = [
+                    str(row["device_id"])
+                    for row in conn.execute(
+                        "SELECT DISTINCT device_id FROM sessions WHERE travel_project_id = ? ORDER BY device_id",
+                        (project_id,),
+                    ).fetchall()
+                    if row["device_id"]
+                ]
+            weather_state = conn.execute(
+                "SELECT COUNT(*) AS count, MAX(fetched_at) AS latest FROM weather_samples"
+            ).fetchone()
+            signature_source = "|".join(
+                [
+                    _travel_project_dataset_signature(conn, project_id),
+                    str(weather_state["count"] or 0),
+                    str(weather_state["latest"] or ""),
+                ]
+            )
+            signature = hashlib.sha256(signature_source.encode("utf-8")).hexdigest()
+            parameters_json = json.dumps({"version": 1}, separators=(",", ":"), sort_keys=True)
+            profiles = []
+            for device_id in devices:
+                cached = None if refresh else conn.execute(
+                    """
+                    SELECT payload_json FROM travel_efficiency_profiles
+                    WHERE project_id = ? AND device_id = ?
+                      AND dataset_signature = ? AND parameters_json = ?
+                    """,
+                    (project_id, device_id, signature, parameters_json),
+                ).fetchone()
+                if cached:
+                    profile = json.loads(cached["payload_json"])
+                elif cached_only:
+                    continue
+                else:
+                    profile = build_efficiency_profile(conn, project_id, device_id)
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO travel_efficiency_profiles (
+                            project_id, device_id, dataset_signature, parameters_json,
+                            payload_json, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            project_id,
+                            device_id,
+                            signature,
+                            parameters_json,
+                            json.dumps(profile, ensure_ascii=False, separators=(",", ":")),
+                            datetime.utcnow().isoformat(timespec="seconds"),
+                        ),
+                    )
+                profiles.append(profile)
+            conn.commit()
+        return jsonify({"project": dict(project), "profiles": profiles})
 
     @app.route("/api/upload_photo", methods=["POST"])
     @_require_auth
