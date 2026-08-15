@@ -122,6 +122,18 @@
         box-shadow: 1px 0 0 var(--border);
         text-align: left;
       }
+      .efficiency-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+      .efficiency-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+      .efficiency-panel { min-width: 0; }
+      .efficiency-panel h3 { margin: 0 0 8px; font-size: 14px; }
+      .efficiency-svg { width: 100%; min-height: 300px; display: block; }
+      .efficiency-status { color: var(--muted); font-size: 12px; min-height: 18px; }
+      .efficiency-tooltip {
+        position: fixed; display: none; pointer-events: none; z-index: 1000;
+        padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px;
+        background: #fffdf9; box-shadow: var(--shadow); font-size: 12px;
+      }
+      @media (max-width: 850px) { .efficiency-grid { grid-template-columns: 1fr; } }
       .analysis-table thead .sticky-col { background: #f4efe5; }
       .metric-category td {
         background: #efe6d8;
@@ -680,6 +692,29 @@
         <div id="chart-empty" class="empty">Select metrics from the table to display graph lines.</div>
         <div id="chart-panels" class="chart-panels"></div>
       </div>
+
+      {% if project %}
+      <h2>Efficiency Profiles</h2>
+      <div class="card">
+        <div class="efficiency-controls">
+          <label for="efficiency-device">Vehicle</label>
+          <select id="efficiency-device"></select>
+          <button class="btn btn-primary" id="efficiency-generate" type="button">Generate / refresh</button>
+          <span class="efficiency-status" id="efficiency-status"></span>
+        </div>
+        <div class="efficiency-grid">
+          <div class="efficiency-panel">
+            <h3>Speed · calm, near-flat segments</h3>
+            <div id="efficiency-speed"></div>
+          </div>
+          <div class="efficiency-panel">
+            <h3>Gradient · calm segments at 25–35 km/h</h3>
+            <div id="efficiency-slope"></div>
+          </div>
+        </div>
+        <div class="efficiency-tooltip" id="efficiency-tooltip"></div>
+      </div>
+      {% endif %}
 
       <div class="comparison-head">
         <h2>Comparison Table</h2>
@@ -2146,8 +2181,136 @@
           });
         });
       });
+
+      const efficiencyProjectId = {{ project.id if project else "null" }};
+      const efficiencyDevice = document.getElementById("efficiency-device");
+      const efficiencyGenerate = document.getElementById("efficiency-generate");
+      const efficiencyStatus = document.getElementById("efficiency-status");
+      const efficiencyTooltip = document.getElementById("efficiency-tooltip");
+      let efficiencyProfiles = [];
+      const efficiencySvgNode = (name, attrs = {}) => {
+        const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+        Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, String(value)));
+        return node;
+      };
+      const drawEfficiencyProfile = (hostId, entries, xLabel) => {
+        const host = document.getElementById(hostId);
+        if (!host) return;
+        host.replaceChildren();
+        const values = (entries || []).filter((entry) => entry.stats);
+        if (!values.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = "Not enough calm, stable data.";
+          host.appendChild(empty);
+          return;
+        }
+        const width = 620, height = 310, margin = { top: 30, right: 22, bottom: 50, left: 62 };
+        const svg = efficiencySvgNode("svg", { class: "efficiency-svg", viewBox: `0 0 ${width} ${height}`, role: "img" });
+        const xValues = values.map((entry) => Number(entry.target));
+        const xMin = Math.min(...xValues), xMax = Math.max(...xValues);
+        const yValues = values.flatMap((entry) => {
+          const mean = Number(entry.stats.mean_wh_km), deviation = Number(entry.stats.stddev_wh_km || 0);
+          return [mean - deviation, mean + deviation];
+        });
+        let yMin = Math.min(...yValues), yMax = Math.max(...yValues);
+        const yPad = Math.max(2, (yMax - yMin) * 0.15);
+        yMin -= yPad; yMax += yPad;
+        const x = (value) => margin.left + ((value - xMin) / Math.max(1, xMax - xMin)) * (width - margin.left - margin.right);
+        const y = (value) => height - margin.bottom - ((value - yMin) / Math.max(1, yMax - yMin)) * (height - margin.top - margin.bottom);
+        for (let index = 0; index <= 5; index += 1) {
+          const value = yMin + ((yMax - yMin) * index) / 5;
+          const yy = y(value);
+          svg.appendChild(efficiencySvgNode("line", { x1: margin.left, x2: width - margin.right, y1: yy, y2: yy, stroke: "#e6dfd3" }));
+          const label = efficiencySvgNode("text", { x: margin.left - 8, y: yy + 4, "text-anchor": "end", fill: "#5f5f5f", "font-size": 11 });
+          label.textContent = value.toFixed(0);
+          svg.appendChild(label);
+        }
+        svg.appendChild(efficiencySvgNode("line", { x1: margin.left, x2: margin.left, y1: margin.top, y2: height - margin.bottom, stroke: "#5f5f5f" }));
+        svg.appendChild(efficiencySvgNode("line", { x1: margin.left, x2: width - margin.right, y1: height - margin.bottom, y2: height - margin.bottom, stroke: "#5f5f5f" }));
+        const path = values.map((entry, index) => `${index ? "L" : "M"}${x(entry.target)},${y(entry.stats.mean_wh_km)}`).join(" ");
+        svg.appendChild(efficiencySvgNode("path", { d: path, fill: "none", stroke: "#0d9488", "stroke-width": 2.5 }));
+        values.forEach((entry) => {
+          const stats = entry.stats, xx = x(entry.target), meanY = y(stats.mean_wh_km);
+          const lowY = y(stats.mean_wh_km - stats.stddev_wh_km), highY = y(stats.mean_wh_km + stats.stddev_wh_km);
+          svg.appendChild(efficiencySvgNode("line", { x1: xx, x2: xx, y1: lowY, y2: highY, stroke: "#0d9488", "stroke-width": 1.5 }));
+          svg.appendChild(efficiencySvgNode("line", { x1: xx - 5, x2: xx + 5, y1: lowY, y2: lowY, stroke: "#0d9488" }));
+          svg.appendChild(efficiencySvgNode("line", { x1: xx - 5, x2: xx + 5, y1: highY, y2: highY, stroke: "#0d9488" }));
+          const point = efficiencySvgNode("circle", { cx: xx, cy: meanY, r: 6, fill: "#fff", stroke: "#0d9488", "stroke-width": 2, tabindex: 0 });
+          const show = (event) => {
+            efficiencyTooltip.style.display = "block";
+            efficiencyTooltip.style.left = `${event.clientX + 12}px`;
+            efficiencyTooltip.style.top = `${event.clientY - 16}px`;
+            efficiencyTooltip.innerHTML = `<strong>${entry.target > 0 && xLabel.includes("Gradient") ? "+" : ""}${entry.target} ${xLabel.includes("Gradient") ? "%" : "km/h"}</strong><br>${stats.mean_wh_km.toFixed(2)} ± ${stats.stddev_wh_km.toFixed(2)} Wh/km<br>Average speed: ${stats.avg_speed_kph.toFixed(1)} km/h<br>${stats.duration_min} min · ${stats.distance_km} km · ${stats.sequence_count} sequences`;
+          };
+          point.addEventListener("pointerenter", show);
+          point.addEventListener("pointermove", show);
+          point.addEventListener("pointerleave", () => { efficiencyTooltip.style.display = "none"; });
+          svg.appendChild(point);
+          const xTick = efficiencySvgNode("text", { x: xx, y: height - margin.bottom + 20, "text-anchor": "middle", fill: "#5f5f5f", "font-size": 11 });
+          xTick.textContent = entry.target;
+          svg.appendChild(xTick);
+        });
+        const xTitle = efficiencySvgNode("text", { x: (margin.left + width - margin.right) / 2, y: height - 8, "text-anchor": "middle", fill: "#1a1a1a", "font-size": 12 });
+        xTitle.textContent = xLabel;
+        svg.appendChild(xTitle);
+        const yTitle = efficiencySvgNode("text", { x: 16, y: height / 2, transform: `rotate(-90 16 ${height / 2})`, "text-anchor": "middle", fill: "#1a1a1a", "font-size": 12 });
+        yTitle.textContent = "Consumption (Wh/km)";
+        svg.appendChild(yTitle);
+        host.appendChild(svg);
+      };
+      const renderEfficiencyProfile = () => {
+        const profile = efficiencyProfiles.find((item) => item.device_id === efficiencyDevice?.value) || efficiencyProfiles[0];
+        if (!profile) return;
+        drawEfficiencyProfile("efficiency-speed", profile.speed, "Speed (km/h)");
+        drawEfficiencyProfile("efficiency-slope", profile.slope, "Gradient (%)");
+        if (efficiencyStatus) efficiencyStatus.textContent = `${profile.coverage.weather_percent}% weather coverage · ${profile.coverage.calm_window_count} calm windows`;
+      };
+      const loadEfficiencyProfiles = async (refresh = false, cachedOnly = false) => {
+        if (!efficiencyProjectId) return;
+        const response = await fetch(`/api/travel_analysis/efficiency_profiles?project_id=${efficiencyProjectId}${refresh ? "&refresh=1" : ""}${cachedOnly ? "&cached_only=1" : ""}`);
+        if (!response.ok) throw new Error((await response.json()).error || "Profile generation failed");
+        const payload = await response.json();
+        efficiencyProfiles = payload.profiles || [];
+        if (!efficiencyProfiles.length) {
+          if (efficiencyStatus) efficiencyStatus.textContent = "Generate profiles to download weather and analyse this travel.";
+          return;
+        }
+        if (efficiencyDevice) {
+          const selected = efficiencyDevice.value;
+          efficiencyDevice.replaceChildren(...efficiencyProfiles.map((profile) => {
+            const option = document.createElement("option");
+            option.value = profile.device_id;
+            option.textContent = profile.device_id;
+            option.selected = profile.device_id === selected;
+            return option;
+          }));
+        }
+        renderEfficiencyProfile();
+      };
+      efficiencyDevice?.addEventListener("change", renderEfficiencyProfile);
+      efficiencyGenerate?.addEventListener("click", async () => {
+        efficiencyGenerate.disabled = true;
+        if (efficiencyStatus) efficiencyStatus.textContent = "Downloading weather for travelled zones…";
+        try {
+          const response = await fetch("/api/travel_analysis/weather", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ project_id: efficiencyProjectId })
+          });
+          if (!response.ok) throw new Error((await response.json()).error || "Weather enrichment failed");
+          if (efficiencyStatus) efficiencyStatus.textContent = "Computing profiles…";
+          await loadEfficiencyProfiles(true);
+        } catch (error) {
+          if (efficiencyStatus) efficiencyStatus.textContent = error.message;
+        } finally {
+          efficiencyGenerate.disabled = false;
+        }
+      });
       renderCharts();
       initializeTraceControls();
+      loadEfficiencyProfiles(false, true).catch((error) => {
+        if (efficiencyStatus) efficiencyStatus.textContent = error.message;
+      });
 
     </script>
   </body>
