@@ -4077,7 +4077,7 @@ def create_app() -> Flask:
                 ]
             )
             signature = hashlib.sha256(signature_source.encode("utf-8")).hexdigest()
-            parameters_json = json.dumps({"version": 1}, separators=(",", ":"), sort_keys=True)
+            parameters_json = json.dumps({"version": 2}, separators=(",", ":"), sort_keys=True)
             profiles = []
             for device_id in devices:
                 cached = None if refresh else conn.execute(

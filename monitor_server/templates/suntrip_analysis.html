@@ -128,6 +128,12 @@
       .efficiency-panel h3 { margin: 0 0 8px; font-size: 14px; }
       .efficiency-svg { width: 100%; min-height: 300px; display: block; }
       .efficiency-status { color: var(--muted); font-size: 12px; min-height: 18px; }
+      .efficiency-map-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 18px; }
+      .efficiency-map-head h3 { margin: 0; font-size: 14px; }
+      .efficiency-map-legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12px; }
+      .efficiency-map-legend span::before { content: ""; display: inline-block; width: 20px; margin-right: 5px; border-top: 3px solid #171717; vertical-align: 3px; }
+      .efficiency-map-legend .used::before { border-color: #dc2626; }
+      .efficiency-map { height: 520px; margin-top: 9px; border: 1px solid var(--border); border-radius: 10px; }
       .efficiency-tooltip {
         position: fixed; display: none; pointer-events: none; z-index: 1000;
         padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px;
@@ -712,6 +718,14 @@
             <div id="efficiency-slope"></div>
           </div>
         </div>
+        <div class="efficiency-map-head">
+          <h3>Segments used by the efficiency profiles</h3>
+          <div class="efficiency-map-legend">
+            <span>Not used</span>
+            <span class="used">Used</span>
+          </div>
+        </div>
+        <div id="efficiency-map" class="efficiency-map" role="img" aria-label="Map of segments used by the efficiency profiles"></div>
         <div class="efficiency-tooltip" id="efficiency-tooltip"></div>
       </div>
       {% endif %}
@@ -2188,6 +2202,8 @@
       const efficiencyStatus = document.getElementById("efficiency-status");
       const efficiencyTooltip = document.getElementById("efficiency-tooltip");
       let efficiencyProfiles = [];
+      let efficiencyMap = null;
+      let efficiencyMapLayer = null;
       const efficiencySvgNode = (name, attrs = {}) => {
         const node = document.createElementNS("http://www.w3.org/2000/svg", name);
         Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, String(value)));
@@ -2259,11 +2275,48 @@
         svg.appendChild(yTitle);
         host.appendChild(svg);
       };
+      const renderEfficiencyMap = (profile) => {
+        const host = document.getElementById("efficiency-map");
+        if (!host || typeof L === "undefined") return;
+        if (!efficiencyMap) {
+          efficiencyMap = L.map(host, { preferCanvas: true }).setView([30, 0], 4);
+          L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: "© OpenStreetMap contributors"
+          }).addTo(efficiencyMap);
+        }
+        if (efficiencyMapLayer) efficiencyMapLayer.remove();
+        efficiencyMapLayer = L.layerGroup().addTo(efficiencyMap);
+        const segments = profile.map_segments || [];
+        const bounds = [];
+        [...segments].sort((left, right) => Number(left.used) - Number(right.used)).forEach((segment) => {
+          if (!Array.isArray(segment.start) || !Array.isArray(segment.end)) return;
+          bounds.push(segment.start, segment.end);
+          const line = L.polyline([segment.start, segment.end], {
+            color: segment.used ? "#dc2626" : "#171717",
+            weight: segment.used ? 4 : 2,
+            opacity: segment.used ? 0.9 : 0.32,
+            interactive: true
+          }).addTo(efficiencyMapLayer);
+          const uses = [segment.speed_used ? "speed profile" : "", segment.slope_used ? "gradient profile" : ""].filter(Boolean).join(" + ");
+          line.bindTooltip(
+            `<strong>${segment.session_id}</strong><br>` +
+            `${segment.used ? `Used: ${uses}` : `Not used: ${segment.reason || "excluded"}`}<br>` +
+            `Speed: ${segment.speed_kph} km/h · Gradient: ${segment.gradient_percent}%<br>` +
+            `Wind: ${segment.wind_kph == null ? "-" : `${segment.wind_kph} km/h`} · Headwind: ${segment.headwind_kph == null ? "-" : `${segment.headwind_kph} km/h`}<br>` +
+            `Consumption: ${segment.efficiency_wh_km} Wh/km`,
+            { sticky: true }
+          );
+        });
+        if (bounds.length) efficiencyMap.fitBounds(bounds, { padding: [18, 18] });
+        window.setTimeout(() => efficiencyMap.invalidateSize(), 0);
+      };
       const renderEfficiencyProfile = () => {
         const profile = efficiencyProfiles.find((item) => item.device_id === efficiencyDevice?.value) || efficiencyProfiles[0];
         if (!profile) return;
         drawEfficiencyProfile("efficiency-speed", profile.speed, "Speed (km/h)");
         drawEfficiencyProfile("efficiency-slope", profile.slope, "Gradient (%)");
+        renderEfficiencyMap(profile);
         if (efficiencyStatus) efficiencyStatus.textContent = `${profile.coverage.weather_percent}% weather coverage · ${profile.coverage.calm_window_count} calm windows`;
       };
       const loadEfficiencyProfiles = async (refresh = false, cachedOnly = false) => {

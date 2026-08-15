@@ -356,6 +356,10 @@ def _window_profile(bucket: list[dict[str, Any]]) -> dict[str, Any] | None:
         "timestamp": _parse_ts(bucket[len(bucket) // 2].get("timestamp")),
         "lat": statistics.median(point[0] for point in positions),
         "lon": statistics.median(point[1] for point in positions),
+        "start_lat": positions[0][0],
+        "start_lon": positions[0][1],
+        "end_lat": positions[-1][0],
+        "end_lon": positions[-1][1],
         "heading": _circular_mean(headings),
         "speed": statistics.mean(speeds),
         "speed_sd": statistics.pstdev(speeds),
@@ -442,6 +446,31 @@ def build_efficiency_profile(conn, project_id: int, device_id: str) -> dict[str,
         and -40 < window["efficiency"] < 130
     ]
     calm = [window for window in stable if window.get("calm")]
+    stable_ids = {id(window) for window in stable}
+    calm_ids = {id(window) for window in calm}
+    for window in windows:
+        is_stable = id(window) in stable_ids
+        is_calm = id(window) in calm_ids
+        window["speed_used"] = bool(
+            is_calm
+            and abs(window["gradient"]) <= 0.5
+            and any(target - 1.25 <= window["speed"] < target + 1.25 for target in SPEED_TARGETS)
+        )
+        window["slope_used"] = bool(
+            is_calm
+            and 25 <= window["speed"] <= 35
+            and any(target - 1 <= window["gradient"] < target + 1 for target in SLOPE_TARGETS)
+        )
+        if "wind_speed" not in window:
+            window["exclusion_reason"] = "weather unavailable"
+        elif not is_stable:
+            window["exclusion_reason"] = "speed, altitude or efficiency not stable"
+        elif not window.get("calm"):
+            window["exclusion_reason"] = "wind above calm thresholds"
+        elif not (window["speed_used"] or window["slope_used"]):
+            window["exclusion_reason"] = "outside speed or gradient bins"
+        else:
+            window["exclusion_reason"] = None
     speed_profile = []
     for target in SPEED_TARGETS:
         selected = [
@@ -459,6 +488,23 @@ def build_efficiency_profile(conn, project_id: int, device_id: str) -> dict[str,
         if stats:
             slope_profile.append({"target": target, "stats": stats})
     weather_windows = sum(1 for window in windows if "wind_speed" in window)
+    map_segments = [
+        {
+            "session_id": window["session_id"],
+            "start": [round(window["start_lat"], 6), round(window["start_lon"], 6)],
+            "end": [round(window["end_lat"], 6), round(window["end_lon"], 6)],
+            "used": bool(window["speed_used"] or window["slope_used"]),
+            "speed_used": window["speed_used"],
+            "slope_used": window["slope_used"],
+            "speed_kph": round(window["speed"], 2),
+            "gradient_percent": round(window["gradient"], 2),
+            "wind_kph": round(window.get("wind_speed", 0.0), 2) if "wind_speed" in window else None,
+            "headwind_kph": round(window.get("headwind", 0.0), 2) if "headwind" in window else None,
+            "efficiency_wh_km": round(window["efficiency"], 2),
+            "reason": window["exclusion_reason"],
+        }
+        for window in windows
+    ]
     return {
         "project_id": project_id,
         "device_id": device_id,
@@ -477,4 +523,5 @@ def build_efficiency_profile(conn, project_id: int, device_id: str) -> dict[str,
         },
         "speed": speed_profile,
         "slope": slope_profile,
+        "map_segments": map_segments,
     }
