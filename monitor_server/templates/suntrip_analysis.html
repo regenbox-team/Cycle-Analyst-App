@@ -130,6 +130,8 @@
       .efficiency-status { color: var(--muted); font-size: 12px; min-height: 18px; }
       .efficiency-map-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 18px; }
       .efficiency-map-head h3 { margin: 0; font-size: 14px; }
+      .efficiency-map-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+      .efficiency-map-selection { color: var(--muted); font-size: 12px; }
       .efficiency-map-legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12px; }
       .efficiency-map-legend span::before { content: ""; display: inline-block; width: 20px; margin-right: 5px; border-top: 3px solid #171717; vertical-align: 3px; }
       .efficiency-map-legend .used::before { border-color: #dc2626; }
@@ -719,7 +721,11 @@
           </div>
         </div>
         <div class="efficiency-map-head">
-          <h3>Segments used by the efficiency profiles</h3>
+          <div class="efficiency-map-title">
+            <h3>Segments used by the efficiency profiles</h3>
+            <span class="efficiency-map-selection" id="efficiency-map-selection">All retained segments</span>
+            <button class="btn" id="efficiency-map-reset" type="button" hidden>Show all</button>
+          </div>
           <div class="efficiency-map-legend">
             <span>Not used</span>
             <span class="used">Used</span>
@@ -2201,15 +2207,18 @@
       const efficiencyGenerate = document.getElementById("efficiency-generate");
       const efficiencyStatus = document.getElementById("efficiency-status");
       const efficiencyTooltip = document.getElementById("efficiency-tooltip");
+      const efficiencyMapSelectionLabel = document.getElementById("efficiency-map-selection");
+      const efficiencyMapReset = document.getElementById("efficiency-map-reset");
       let efficiencyProfiles = [];
       let efficiencyMap = null;
       let efficiencyMapLayer = null;
+      let efficiencyMapSelection = null;
       const efficiencySvgNode = (name, attrs = {}) => {
         const node = document.createElementNS("http://www.w3.org/2000/svg", name);
         Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, String(value)));
         return node;
       };
-      const drawEfficiencyProfile = (hostId, entries, xLabel) => {
+      const drawEfficiencyProfile = (hostId, entries, xLabel, profileKind) => {
         const host = document.getElementById(hostId);
         if (!host) return;
         host.replaceChildren();
@@ -2252,7 +2261,8 @@
           svg.appendChild(efficiencySvgNode("line", { x1: xx, x2: xx, y1: lowY, y2: highY, stroke: "#0d9488", "stroke-width": 1.5 }));
           svg.appendChild(efficiencySvgNode("line", { x1: xx - 5, x2: xx + 5, y1: lowY, y2: lowY, stroke: "#0d9488" }));
           svg.appendChild(efficiencySvgNode("line", { x1: xx - 5, x2: xx + 5, y1: highY, y2: highY, stroke: "#0d9488" }));
-          const point = efficiencySvgNode("circle", { cx: xx, cy: meanY, r: 6, fill: "#fff", stroke: "#0d9488", "stroke-width": 2, tabindex: 0 });
+          const selected = efficiencyMapSelection?.kind === profileKind && Number(efficiencyMapSelection.target) === Number(entry.target);
+          const point = efficiencySvgNode("circle", { cx: xx, cy: meanY, r: selected ? 8 : 6, fill: selected ? "#dc2626" : "#fff", stroke: selected ? "#dc2626" : "#0d9488", "stroke-width": 2, tabindex: 0, role: "button", style: "cursor:pointer" });
           const show = (event) => {
             efficiencyTooltip.style.display = "block";
             efficiencyTooltip.style.left = `${event.clientX + 12}px`;
@@ -2262,6 +2272,18 @@
           point.addEventListener("pointerenter", show);
           point.addEventListener("pointermove", show);
           point.addEventListener("pointerleave", () => { efficiencyTooltip.style.display = "none"; });
+          const selectPoint = () => {
+            efficiencyMapSelection = selected ? null : { kind: profileKind, target: Number(entry.target) };
+            efficiencyTooltip.style.display = "none";
+            renderEfficiencyProfile();
+          };
+          point.addEventListener("click", selectPoint);
+          point.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              selectPoint();
+            }
+          });
           svg.appendChild(point);
           const xTick = efficiencySvgNode("text", { x: xx, y: height - margin.bottom + 20, "text-anchor": "middle", fill: "#5f5f5f", "font-size": 11 });
           xTick.textContent = entry.target;
@@ -2288,14 +2310,29 @@
         if (efficiencyMapLayer) efficiencyMapLayer.remove();
         efficiencyMapLayer = L.layerGroup().addTo(efficiencyMap);
         const segments = profile.map_segments || [];
+        const speedHalfWidth = Number(profile.parameters?.speed_bin_half_width_kph ?? 1.25);
+        const slopeHalfWidth = Number(profile.parameters?.slope_bin_half_width_percent ?? 1);
+        const selectionText = efficiencyMapSelection
+          ? efficiencyMapSelection.kind === "speed"
+            ? `Speed ${efficiencyMapSelection.target} km/h (${efficiencyMapSelection.target - speedHalfWidth}–${efficiencyMapSelection.target + speedHalfWidth} km/h)`
+            : `Gradient ${efficiencyMapSelection.target}% (${efficiencyMapSelection.target - slopeHalfWidth}–${efficiencyMapSelection.target + slopeHalfWidth}%)`
+          : "All retained segments";
+        if (efficiencyMapSelectionLabel) efficiencyMapSelectionLabel.textContent = selectionText;
+        if (efficiencyMapReset) efficiencyMapReset.hidden = !efficiencyMapSelection;
         const bounds = [];
-        [...segments].sort((left, right) => Number(left.used) - Number(right.used)).forEach((segment) => {
+        const matchesSelection = (segment) => {
+          if (!efficiencyMapSelection) return Boolean(segment.used);
+          const bins = efficiencyMapSelection.kind === "speed" ? segment.speed_bins : segment.slope_bins;
+          return Array.isArray(bins) && bins.some((value) => Number(value) === efficiencyMapSelection.target);
+        };
+        [...segments].sort((left, right) => Number(matchesSelection(left)) - Number(matchesSelection(right))).forEach((segment) => {
           if (!Array.isArray(segment.start) || !Array.isArray(segment.end)) return;
           bounds.push(segment.start, segment.end);
+          const highlighted = matchesSelection(segment);
           const line = L.polyline([segment.start, segment.end], {
-            color: segment.used ? "#dc2626" : "#171717",
-            weight: segment.used ? 4 : 2,
-            opacity: segment.used ? 0.9 : 0.32,
+            color: highlighted ? "#dc2626" : "#171717",
+            weight: highlighted ? 4 : 2,
+            opacity: highlighted ? 0.9 : (efficiencyMapSelection ? 0.2 : 0.32),
             interactive: true
           }).addTo(efficiencyMapLayer);
           const uses = [segment.speed_used ? "speed profile" : "", segment.slope_used ? "gradient profile" : ""].filter(Boolean).join(" + ");
@@ -2314,11 +2351,15 @@
       const renderEfficiencyProfile = () => {
         const profile = efficiencyProfiles.find((item) => item.device_id === efficiencyDevice?.value) || efficiencyProfiles[0];
         if (!profile) return;
-        drawEfficiencyProfile("efficiency-speed", profile.speed, "Speed (km/h)");
-        drawEfficiencyProfile("efficiency-slope", profile.slope, "Gradient (%)");
+        drawEfficiencyProfile("efficiency-speed", profile.speed, "Speed (km/h)", "speed");
+        drawEfficiencyProfile("efficiency-slope", profile.slope, "Gradient (%)", "slope");
         renderEfficiencyMap(profile);
         if (efficiencyStatus) efficiencyStatus.textContent = `${profile.coverage.weather_percent}% weather coverage · ${profile.coverage.calm_window_count} calm windows`;
       };
+      efficiencyMapReset?.addEventListener("click", () => {
+        efficiencyMapSelection = null;
+        renderEfficiencyProfile();
+      });
       const loadEfficiencyProfiles = async (refresh = false, cachedOnly = false) => {
         if (!efficiencyProjectId) return;
         const response = await fetch(`/api/travel_analysis/efficiency_profiles?project_id=${efficiencyProjectId}${refresh ? "&refresh=1" : ""}${cachedOnly ? "&cached_only=1" : ""}`);
@@ -2341,7 +2382,10 @@
         }
         renderEfficiencyProfile();
       };
-      efficiencyDevice?.addEventListener("change", renderEfficiencyProfile);
+      efficiencyDevice?.addEventListener("change", () => {
+        efficiencyMapSelection = null;
+        renderEfficiencyProfile();
+      });
       efficiencyGenerate?.addEventListener("click", async () => {
         efficiencyGenerate.disabled = true;
         if (efficiencyStatus) efficiencyStatus.textContent = "Downloading weather for travelled zones…";

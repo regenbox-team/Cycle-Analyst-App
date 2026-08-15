@@ -30,7 +30,9 @@ CALM_MAX_WIND_KPH = 10.0
 CALM_MAX_HEADWIND_KPH = 5.0
 CALM_MAX_GUST_KPH = 20.0
 SPEED_TARGETS = (25.0, 27.5, 30.0, 32.5, 35.0)
+SPEED_BIN_HALF_WIDTH_KPH = 1.25
 SLOPE_TARGETS = tuple(float(value) for value in range(-10, 12, 2))
+SLOPE_BIN_HALF_WIDTH_PERCENT = 1.0
 
 
 def ensure_weather_schema(conn) -> None:
@@ -451,16 +453,18 @@ def build_efficiency_profile(conn, project_id: int, device_id: str) -> dict[str,
     for window in windows:
         is_stable = id(window) in stable_ids
         is_calm = id(window) in calm_ids
-        window["speed_used"] = bool(
-            is_calm
-            and abs(window["gradient"]) <= 0.5
-            and any(target - 1.25 <= window["speed"] < target + 1.25 for target in SPEED_TARGETS)
-        )
-        window["slope_used"] = bool(
-            is_calm
-            and 25 <= window["speed"] <= 35
-            and any(target - 1 <= window["gradient"] < target + 1 for target in SLOPE_TARGETS)
-        )
+        window["speed_bins"] = [
+            target for target in SPEED_TARGETS
+            if is_calm and abs(window["gradient"]) <= 0.5
+            and target - SPEED_BIN_HALF_WIDTH_KPH <= window["speed"] < target + SPEED_BIN_HALF_WIDTH_KPH
+        ]
+        window["slope_bins"] = [
+            target for target in SLOPE_TARGETS
+            if is_calm and 25 <= window["speed"] <= 35
+            and target - SLOPE_BIN_HALF_WIDTH_PERCENT <= window["gradient"] < target + SLOPE_BIN_HALF_WIDTH_PERCENT
+        ]
+        window["speed_used"] = bool(window["speed_bins"])
+        window["slope_used"] = bool(window["slope_bins"])
         if "wind_speed" not in window:
             window["exclusion_reason"] = "weather unavailable"
         elif not is_stable:
@@ -475,14 +479,16 @@ def build_efficiency_profile(conn, project_id: int, device_id: str) -> dict[str,
     for target in SPEED_TARGETS:
         selected = [
             window for window in calm
-            if target - 1.25 <= window["speed"] < target + 1.25 and abs(window["gradient"]) <= 0.5
+            if target - SPEED_BIN_HALF_WIDTH_KPH <= window["speed"] < target + SPEED_BIN_HALF_WIDTH_KPH
+            and abs(window["gradient"]) <= 0.5
         ]
         speed_profile.append({"target": target, "stats": _weighted_stats(selected)})
     slope_profile = []
     for target in SLOPE_TARGETS:
         selected = [
             window for window in calm
-            if target - 1 <= window["gradient"] < target + 1 and 25 <= window["speed"] <= 35
+            if target - SLOPE_BIN_HALF_WIDTH_PERCENT <= window["gradient"] < target + SLOPE_BIN_HALF_WIDTH_PERCENT
+            and 25 <= window["speed"] <= 35
         ]
         stats = _weighted_stats(selected)
         if stats:
@@ -496,6 +502,8 @@ def build_efficiency_profile(conn, project_id: int, device_id: str) -> dict[str,
             "used": bool(window["speed_used"] or window["slope_used"]),
             "speed_used": window["speed_used"],
             "slope_used": window["slope_used"],
+            "speed_bins": window["speed_bins"],
+            "slope_bins": window["slope_bins"],
             "speed_kph": round(window["speed"], 2),
             "gradient_percent": round(window["gradient"], 2),
             "wind_kph": round(window.get("wind_speed", 0.0), 2) if "wind_speed" in window else None,
@@ -511,6 +519,8 @@ def build_efficiency_profile(conn, project_id: int, device_id: str) -> dict[str,
         "parameters": {
             "window_seconds": WINDOW_SECONDS,
             "max_speed_sd_kph": MAX_SPEED_SD_KPH,
+            "speed_bin_half_width_kph": SPEED_BIN_HALF_WIDTH_KPH,
+            "slope_bin_half_width_percent": SLOPE_BIN_HALF_WIDTH_PERCENT,
             "calm_max_wind_kph": CALM_MAX_WIND_KPH,
             "calm_max_headwind_kph": CALM_MAX_HEADWIND_KPH,
             "calm_max_gust_kph": CALM_MAX_GUST_KPH,
