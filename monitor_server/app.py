@@ -578,6 +578,10 @@ def _migrate_db() -> None:
             "user_id": "TEXT",
             "user_initials": "TEXT",
             "user_snapshot_json": "TEXT",
+            "motor_sensor_current_a": "REAL",
+            "motor_sensor_bus_v": "REAL",
+            "motor_corrected_current_a": "REAL",
+            "motor_sensor_valid": "INTEGER DEFAULT 0",
         }
         for name, col_type in telemetry_missing.items():
             if name not in telemetry_columns:
@@ -3196,7 +3200,11 @@ def _ingest_complete_session(data: dict[str, Any], remote_addr: str | None) -> t
         _clear_deleted_session_marker(conn, device_id, session_id, mode)
 
         samples = _sanitize_upload_samples(data)
-        _enrich_samples_with_terrain_altitude(conn, samples, allow_fallback=False)
+        # Terrain lookup is intentionally not part of the upload transaction.
+        # A long session can contain tens of thousands of distinct GPS points;
+        # waiting for the external elevation API here makes otherwise-local DB
+        # ingestion exceed Gunicorn/reverse-proxy timeouts. The existing terrain
+        # backfill job enriches these rows independently after upload.
         solar_enabled = _payload_solar_enabled(data)
         summary = _insert_uploaded_session_summary(conn, data, samples)
         _insert_telemetry_samples(conn, device_id, session_id, mode, samples, solar_enabled)
@@ -3984,7 +3992,6 @@ def create_app() -> Flask:
                     (device_id, session_id, mode),
                 )
 
-            _enrich_samples_with_terrain_altitude(conn, samples, allow_fallback=False)
             _insert_telemetry_samples(conn, device_id, session_id, mode, samples, solar_enabled)
             rows_received = conn.execute(
                 f"""

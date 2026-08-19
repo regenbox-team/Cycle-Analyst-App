@@ -5,6 +5,7 @@ import os
 import shutil
 import sqlite3
 import unittest
+from unittest.mock import patch
 
 
 class MonitorUploadSessionTest(unittest.TestCase):
@@ -47,6 +48,24 @@ class MonitorUploadSessionTest(unittest.TestCase):
             "gps_alt": 100 + index,
             "solar_enabled": 1,
         }
+
+    def test_migration_adds_motor_columns_to_existing_telemetry_table(self):
+        motor_columns = (
+            "motor_sensor_current_a",
+            "motor_sensor_bus_v",
+            "motor_corrected_current_a",
+            "motor_sensor_valid",
+        )
+        with sqlite3.connect(self.db_path) as conn:
+            for column in motor_columns:
+                conn.execute(f"ALTER TABLE telemetry_samples DROP COLUMN {column}")
+            conn.commit()
+
+        self.monitor_app._migrate_db()
+
+        with sqlite3.connect(self.db_path) as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(telemetry_samples)")}
+        self.assertTrue(set(motor_columns).issubset(columns))
 
     def test_heartbeat_updates_device_last_seen_with_server_time(self):
         with sqlite3.connect(self.db_path) as conn:
@@ -178,17 +197,23 @@ class MonitorUploadSessionTest(unittest.TestCase):
             "telemetry_samples": [self.sample(0), self.sample(1)],
         }
         token = "Basic YWRtaW46c2VjcmV0"
-        response = self.monitor_app.app.test_client().post(
-            "/api/import_session_file",
-            data={
-                "session_file": (
-                    io.BytesIO(json.dumps(payload, separators=(",", ":")).encode("utf-8")),
-                    "cycle_session.json",
-                )
-            },
-            headers={"Authorization": token},
-            content_type="multipart/form-data",
-        )
+        os.environ["MONITOR_TERRAIN_ELEVATION_ENABLED"] = "1"
+        with patch.object(
+            self.monitor_app,
+            "_fetch_terrain_altitudes",
+            side_effect=AssertionError("terrain API must not run in the upload request"),
+        ):
+            response = self.monitor_app.app.test_client().post(
+                "/api/import_session_file",
+                data={
+                    "session_file": (
+                        io.BytesIO(json.dumps(payload, separators=(",", ":")).encode("utf-8")),
+                        "cycle_session.json",
+                    )
+                },
+                headers={"Authorization": token},
+                content_type="multipart/form-data",
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["status"], "ok")
