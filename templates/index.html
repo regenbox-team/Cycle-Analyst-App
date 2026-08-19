@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cycle Analyst</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=desktop-balanced-charts">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=navigation-recenter-controls">
 </head>
 <body>
   <div id="page-scale-root">
@@ -323,6 +323,16 @@
           <option value="terrain_3d">3D Terrain (demo)</option>
         </select>
         <button id="map-follow-toggle" class="dashboard-button" title="Toggle follow">Follow: Off</button>
+        <button id="map-recenter-btn" class="dashboard-button icon-button map-recenter-button" type="button" title="Recenter on GPS" aria-label="Recenter on GPS">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="7"></circle>
+            <path d="M12 3v3"></path>
+            <path d="M12 18v3"></path>
+            <path d="M3 12h3"></path>
+            <path d="M18 12h3"></path>
+            <circle cx="12" cy="12" r="1.5"></circle>
+          </svg>
+        </button>
         <button id="map-navigation-btn" class="dashboard-button map-navigation-button" type="button" title="Navigation view: follow on, trajectory heading, close zoom and 55 degree tilt" aria-label="Navigation view">NAV</button>
         <button id="map-heading-toggle" class="dashboard-button" title="Heading: North locked">N</button>
         <button id="map-reduce-btn" class="dashboard-button icon-button" title="Reduce map" aria-label="Reduce map">⇲</button>
@@ -521,6 +531,6 @@
       } catch (e) { /* ignore */ }
     }
   </script>
-  <script src="{{ url_for('static', filename='js/map.js') }}?v=trip-summary"></script>
+  <script src="{{ url_for('static', filename='js/map.js') }}?v=navigation-recenter-controls"></script>
 </body>
 </html>

@@ -927,8 +927,8 @@
     if (hb) hb.addEventListener('click', cycleHeadingMode);
     setHeadingButton();
 
-    const nb = document.getElementById('map-navigation-btn');
-    if (nb) nb.addEventListener('click', focusNavigationFromGps);
+    const rb = document.getElementById('map-recenter-btn');
+    if (rb) rb.addEventListener('click', recenterMapFromGps);
 
     // Basemap selector
     const sel = document.getElementById('basemap-select');
@@ -1034,6 +1034,29 @@
         duration: 500,
         pitch: NAVIGATION_BUTTON_PITCH,
         bearing: motion.moving ? motion.bearing : null
+      });
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  async function recenterMapFromGps() {
+    try {
+      const res = await fetch('/gps_status', { cache: 'no-store' });
+      const s = await res.json();
+      setPiAltitudeFromStatus(s);
+      if (!s || !s.has_fix || s.stale) return;
+      const lon = Number(s.lon), lat = Number(s.lat);
+      if (!isFinite(lon) || !isFinite(lat) || !map) return;
+
+      lastLon = lon;
+      lastLat = lat;
+      const motion = gpsMotionFromStatus(s);
+      updatePositionSource(lon, lat, motion.moving, motion.bearing);
+      updateRouteProgressFromGps(lon, lat);
+      map.easeTo({
+        center: [lon, lat],
+        duration: 500
       });
     } catch (e) {
       // ignore

@@ -468,6 +468,11 @@ body.edit-mode .drop-after::after { bottom: -3px; }
   letter-spacing: 0;
 }
 
+.map-recenter-button svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
 /* Responsive tweaks for smaller screens */
 @media (max-width: 680px) {
   #live-map { aspect-ratio: 3 / 3; }
@@ -741,6 +746,28 @@ body.navigation-mode .navigation-metrics-grid {
 
 body.navigation-mode.navigation-controls-open .navigation-metrics-grid {
   display: none;
+}
+
+@media (min-width: 681px) {
+  body.navigation-mode .navigation-metrics-grid {
+    width: min(78vw, 44rem);
+    gap: 0.4rem;
+  }
+
+  .navigation-metric-pill {
+    min-height: 3.1rem;
+    gap: 0.1rem;
+    padding: 0.34rem 0.48rem;
+    border-radius: 0.75rem;
+  }
+
+  .navigation-metric-label {
+    font-size: clamp(0.46rem, 1.5vw, 0.68rem);
+  }
+
+  .navigation-metric-value {
+    font-size: clamp(0.9rem, 3.9vw, 2.15rem);
+  }
 }
 
 @media (max-width: 680px) {
