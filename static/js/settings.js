@@ -1,10 +1,89 @@
 (function () {
+  const NAVIGATION_METRIC_STORAGE_KEY = 'navigationMetricIds';
+  const NAVIGATION_METRIC_LIMIT = 9;
+  const NAVIGATION_DEFAULT_METRICS = ['speed', 'motor_power', 'net_wh_per_km', 'route_progress', 'ca_voltage'];
+  const NAVIGATION_METRIC_OPTIONS = [
+    { id: 'speed', label: 'Speed' },
+    { id: 'motor_power', label: 'Motor power' },
+    { id: 'motor_current', label: 'Motor current' },
+    { id: 'ca_voltage', label: 'CA voltage' },
+    { id: 'battery_percent', label: 'Battery percent' },
+    { id: 'battery_wh', label: 'Battery Wh' },
+    { id: 'distance', label: 'Distance done' },
+    { id: 'route_remaining', label: 'Distance left' },
+    { id: 'route_progress', label: 'Done / left' },
+    { id: 'net_wh_per_km', label: 'Net Wh/km' },
+    { id: 'live_net_wh_per_km', label: 'Live net Wh/km' },
+    { id: 'human_power', label: 'Human power' },
+    { id: 'solar_power', label: 'Solar power' },
+    { id: 'motor_temp', label: 'Motor temp' },
+    { id: 'range_session', label: 'Range session' }
+  ];
+
   function numberInput(id) {
     return document.getElementById(id);
   }
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
+  }
+
+  function readNavigationMetricIds() {
+    const stored = localStorage.getItem(NAVIGATION_METRIC_STORAGE_KEY);
+    if (stored === null) return NAVIGATION_DEFAULT_METRICS.slice(0, NAVIGATION_METRIC_LIMIT);
+    let ids = [];
+    try {
+      ids = JSON.parse(stored || '[]');
+    } catch (error) {
+      ids = [];
+    }
+    const allowed = new Set(NAVIGATION_METRIC_OPTIONS.map(option => option.id));
+    const clean = Array.isArray(ids) ? ids.filter(id => allowed.has(id)) : [];
+    return clean.slice(0, NAVIGATION_METRIC_LIMIT);
+  }
+
+  function saveNavigationMetricIds(ids) {
+    const allowed = new Set(NAVIGATION_METRIC_OPTIONS.map(option => option.id));
+    const clean = Array.from(new Set(ids.filter(id => allowed.has(id)))).slice(0, NAVIGATION_METRIC_LIMIT);
+    localStorage.setItem(NAVIGATION_METRIC_STORAGE_KEY, JSON.stringify(clean));
+    return clean;
+  }
+
+  function wireNavigationMetricSettings() {
+    const list = document.getElementById('navigation-metrics-settings-list');
+    const count = document.getElementById('navigation-metrics-count');
+    if (!list) return;
+
+    function render() {
+      const selected = readNavigationMetricIds();
+      const selectedSet = new Set(selected);
+      const atLimit = selected.length >= NAVIGATION_METRIC_LIMIT;
+      if (count) {
+        count.textContent = `${selected.length} / ${NAVIGATION_METRIC_LIMIT}`;
+        count.classList.toggle('limit', atLimit);
+      }
+      list.innerHTML = NAVIGATION_METRIC_OPTIONS.map(option => {
+        const checked = selectedSet.has(option.id);
+        const disabled = !checked && atLimit;
+        return `<label class="settings-navigation-option ${checked ? 'is-selected' : ''} ${disabled ? 'is-disabled' : ''}">
+          <span>${option.label}</span>
+          <input type="checkbox" value="${option.id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+        </label>`;
+      }).join('');
+
+      list.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+        input.addEventListener('change', () => {
+          const current = readNavigationMetricIds();
+          const next = input.checked
+            ? [...current, input.value]
+            : current.filter(id => id !== input.value);
+          saveNavigationMetricIds(next);
+          render();
+        });
+      });
+    }
+
+    render();
   }
 
   function currentSolarPoint() {
@@ -290,6 +369,7 @@
 
   window.addEventListener('DOMContentLoaded', () => {
     wireSolarMap();
+    wireNavigationMetricSettings();
     wireDiagnostics();
     wireSolarProfileImport();
     refreshSolarProfileStatus();

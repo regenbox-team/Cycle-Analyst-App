@@ -112,6 +112,14 @@
 
   function setRouteProgress(progress) {
     routeProgress = progress;
+    window.dispatchEvent(new CustomEvent('cycle-route-progress', {
+      detail: progress ? {
+        alongKm: progress.alongKm,
+        remainingKm: progress.remainingKm,
+        distanceToRouteM: progress.distanceToRouteM,
+        remainingLabel: formatDistanceKm(progress.remainingKm)
+      } : null
+    }));
     const row = document.getElementById('gpx-route-progress');
     const value = document.getElementById('gpx-route-remaining');
     setCurrentRouteGradient(progress);
@@ -1053,6 +1061,14 @@
       // ignore
     }
   }
+
+  window.focusMapNavigation = focusNavigationFromGps;
+  window.resizeLiveMap = () => {
+    if (map) {
+      map.resize();
+      renderRouteProfileChart();
+    }
+  };
 
   window.addEventListener('DOMContentLoaded', initMap);
 

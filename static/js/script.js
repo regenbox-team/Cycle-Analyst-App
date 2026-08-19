@@ -26,9 +26,31 @@ const FULL_METRICS_POLL_MS = 1000;
 const FULL_METRICS_POLL_HIDDEN_MS = 5000;
 const POWER_HISTORY_POLL_MS = 3000;
 const POWER_HISTORY_POLL_HIDDEN_MS = 10000;
+const NAVIGATION_METRIC_STORAGE_KEY = 'navigationMetricIds';
+const NAVIGATION_METRIC_LIMIT = 9;
+const NAVIGATION_DEFAULT_METRICS = ['speed', 'motor_power', 'net_wh_per_km', 'route_progress', 'ca_voltage'];
+const NAVIGATION_METRIC_OPTIONS = [
+  { id: 'speed', label: 'Speed' },
+  { id: 'motor_power', label: 'Motor' },
+  { id: 'motor_current', label: 'Current' },
+  { id: 'ca_voltage', label: 'CA volts' },
+  { id: 'battery_percent', label: 'Battery' },
+  { id: 'battery_wh', label: 'Battery Wh' },
+  { id: 'distance', label: 'Distance' },
+  { id: 'route_remaining', label: 'Left' },
+  { id: 'route_progress', label: 'Route' },
+  { id: 'net_wh_per_km', label: 'Net Wh/km' },
+  { id: 'live_net_wh_per_km', label: 'Live net' },
+  { id: 'human_power', label: 'Human' },
+  { id: 'solar_power', label: 'Solar' },
+  { id: 'motor_temp', label: 'Temp' },
+  { id: 'range_session', label: 'Range' }
+];
 let metricsRequestInFlight = false;
 let fullMetricsRequestInFlight = false;
 let powerHistoryRequestInFlight = false;
+let latestRouteProgress = null;
+const latestNavigationValues = {};
 const dashboardDiag = {
   liveHz: 0,
   fetchMs: 0,
@@ -90,6 +112,191 @@ function fmtHz(value) {
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
+}
+
+function readNavigationMetricIds() {
+  const stored = localStorage.getItem(NAVIGATION_METRIC_STORAGE_KEY);
+  if (stored === null) return NAVIGATION_DEFAULT_METRICS.slice(0, NAVIGATION_METRIC_LIMIT);
+  let ids = [];
+  try {
+    ids = JSON.parse(stored || '[]');
+  } catch (e) {
+    ids = [];
+  }
+  const allowed = new Set(NAVIGATION_METRIC_OPTIONS.map(option => option.id));
+  const clean = Array.isArray(ids) ? ids.filter(id => allowed.has(id)) : [];
+  return clean.slice(0, NAVIGATION_METRIC_LIMIT);
+}
+
+function formatNavigationValue(value, unit = '', decimals = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '-';
+  const text = n.toFixed(decimals);
+  return unit ? `${text} ${unit}` : text;
+}
+
+function formatNavigationDistance(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '-';
+  if (n < 1) return `${Math.round(n * 1000)} m`;
+  return `${n.toFixed(n < 10 ? 1 : 0)} km`;
+}
+
+function navigationMetricText(id) {
+  const v = latestNavigationValues;
+  if (id === 'speed') return formatNavigationValue(v.speed, 'km/h', 0);
+  if (id === 'motor_power') return formatNavigationValue(v.motor_power, 'W', 0);
+  if (id === 'motor_current') return formatNavigationValue(v.motor_current, 'A', 1);
+  if (id === 'ca_voltage') return formatNavigationValue(v.ca_voltage, 'V', 1);
+  if (id === 'battery_percent') return formatNavigationValue(v.battery_percent, '%', 0);
+  if (id === 'battery_wh') return formatNavigationValue(v.battery_wh, 'Wh', 0);
+  if (id === 'distance') return formatNavigationDistance(v.distance);
+  if (id === 'route_remaining') return v.route_remaining_label || '-';
+  if (id === 'route_progress') {
+    const distance = formatNavigationDistance(v.distance);
+    const remaining = v.route_remaining_label || '-';
+    return distance === '-' && remaining === '-' ? '-' : `${distance} / ${remaining}`;
+  }
+  if (id === 'net_wh_per_km') return formatNavigationValue(v.net_wh_per_km, 'Wh/km', 1);
+  if (id === 'live_net_wh_per_km') return formatNavigationValue(v.live_net_wh_per_km, 'Wh/km', 1);
+  if (id === 'human_power') return formatNavigationValue(v.human_power, 'W', 0);
+  if (id === 'solar_power') return formatNavigationValue(v.solar_power, 'W', 0);
+  if (id === 'motor_temp') return formatNavigationValue(v.motor_temp, 'C', 0);
+  if (id === 'range_session') return formatNavigationDistance(v.range_session);
+  return '-';
+}
+
+function fitNavigationMetricText() {
+  document.querySelectorAll('.navigation-metric-value').forEach((el) => {
+    el.style.fontSize = '';
+    const minPx = 12;
+    let size = parseFloat(getComputedStyle(el).fontSize) || 24;
+    while (size > minPx && el.scrollWidth > el.clientWidth) {
+      size -= 1;
+      el.style.fontSize = `${size}px`;
+    }
+  });
+}
+
+function renderNavigationMetrics() {
+  const grid = document.getElementById('navigation-metrics-grid');
+  if (!grid) return;
+  const selected = readNavigationMetricIds();
+  grid.innerHTML = selected.map((id) => {
+    const option = NAVIGATION_METRIC_OPTIONS.find(item => item.id === id);
+    if (!option) return '';
+    return `<div class="navigation-metric-pill" data-metric="${id}">
+      <span class="navigation-metric-label">${option.label}</span>
+      <span class="navigation-metric-value">${navigationMetricText(id)}</span>
+    </div>`;
+  }).join('');
+  requestAnimationFrame(fitNavigationMetricText);
+}
+
+function updateNavigationMetricsFromPayload(json) {
+  const c = json.calculated_CA_values || {};
+  const raw = json.raw_CA_values || [];
+  const sensorValid = c.motor_sensor_valid === true;
+  const caAmps = num(c.ca_current_live ?? raw?.[2], 0);
+  const sensorAmps = num(c.motor_sensor_current_live, 0);
+  const displayedPower = selectedPowerSource === 'sensor' && sensorValid
+    ? num(c.motor_sensor_power_live, 0)
+    : num(c.power_live, 0);
+  const battery = c.solar_battery ?? json.solar_battery ?? latestBatteryCurve;
+  const autonomy = c.autonomy || {};
+
+  latestNavigationValues.speed = num(raw?.[3], latestNavigationValues.speed);
+  latestNavigationValues.motor_power = displayedPower;
+  latestNavigationValues.motor_current = selectedPowerSource === 'sensor' && sensorValid ? sensorAmps : caAmps;
+  latestNavigationValues.ca_voltage = num(c.ca_voltage_live ?? raw?.[1], latestNavigationValues.ca_voltage);
+  latestNavigationValues.distance = num(c.distance_km, latestNavigationValues.distance);
+  latestNavigationValues.live_net_wh_per_km = num(c.live_net_Wh_per_km, latestNavigationValues.live_net_wh_per_km);
+  latestNavigationValues.human_power = Math.max(0, num(c.human_power_live ?? c.solar_power_live, latestNavigationValues.human_power));
+  latestNavigationValues.solar_power = Math.max(0, num(c.solar_power_live, latestNavigationValues.solar_power));
+  latestNavigationValues.motor_temp = num(raw?.[5], latestNavigationValues.motor_temp);
+
+  if (c.net_Wh_per_km !== undefined) latestNavigationValues.net_wh_per_km = num(c.net_Wh_per_km, latestNavigationValues.net_wh_per_km);
+  if (battery?.enabled) {
+    latestNavigationValues.battery_percent = num(battery.percent, latestNavigationValues.battery_percent);
+    latestNavigationValues.battery_wh = num(battery.remaining_wh, latestNavigationValues.battery_wh);
+  } else {
+    latestNavigationValues.battery_percent = num(c.battery_percent_remaining, latestNavigationValues.battery_percent);
+    latestNavigationValues.battery_wh = num(c.battery_Wh_remaining, latestNavigationValues.battery_wh);
+  }
+  if (autonomy.range_session_avg !== undefined) {
+    latestNavigationValues.range_session = num(autonomy.range_session_avg, latestNavigationValues.range_session);
+  }
+  if (latestRouteProgress) {
+    latestNavigationValues.route_remaining = latestRouteProgress.remainingKm;
+    latestNavigationValues.route_remaining_label = latestRouteProgress.remainingLabel;
+  }
+  renderNavigationMetrics();
+}
+
+function setNavigationProfileClass() {
+  const panel = document.getElementById('gpx-profile-panel');
+  document.body.classList.toggle('navigation-profile-visible', Boolean(panel && !panel.hidden));
+}
+
+function setNavigationControlsOpen(open) {
+  const isOpen = Boolean(open);
+  document.body.classList.toggle('navigation-controls-open', isOpen);
+  const button = document.getElementById('map-navigation-settings');
+  if (button) button.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+}
+
+function setNavigationMode(active) {
+  const isActive = Boolean(active);
+  document.body.classList.toggle('navigation-mode', isActive);
+  setNavigationControlsOpen(false);
+  setNavigationProfileClass();
+  renderNavigationMetrics();
+  if (isActive && typeof window.focusMapNavigation === 'function') {
+    window.focusMapNavigation();
+  }
+  requestAnimationFrame(() => {
+    if (typeof window.resizeLiveMap === 'function') window.resizeLiveMap();
+    window.dispatchEvent(new Event('resize'));
+    fitNavigationMetricText();
+  });
+}
+
+function initNavigationModeUi() {
+  const navButton = document.getElementById('map-navigation-btn');
+  const exitButton = document.getElementById('map-navigation-exit');
+  const settingsButton = document.getElementById('map-navigation-settings');
+  const profilePanel = document.getElementById('gpx-profile-panel');
+
+  if (navButton) navButton.addEventListener('click', () => setNavigationMode(true));
+  if (exitButton) exitButton.addEventListener('click', () => setNavigationMode(false));
+  if (settingsButton) {
+    settingsButton.addEventListener('click', () => {
+      setNavigationControlsOpen(!document.body.classList.contains('navigation-controls-open'));
+    });
+  }
+  if (profilePanel) {
+    new MutationObserver(setNavigationProfileClass).observe(profilePanel, { attributes: true, attributeFilter: ['hidden'] });
+  }
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && document.body.classList.contains('navigation-mode')) {
+      setNavigationMode(false);
+    }
+  });
+  window.addEventListener('cycle-route-progress', (event) => {
+    latestRouteProgress = event.detail || null;
+    if (latestRouteProgress) {
+      latestNavigationValues.route_remaining = latestRouteProgress.remainingKm;
+      latestNavigationValues.route_remaining_label = latestRouteProgress.remainingLabel;
+    } else {
+      latestNavigationValues.route_remaining = null;
+      latestNavigationValues.route_remaining_label = '-';
+    }
+    renderNavigationMetrics();
+  });
+  window.addEventListener('storage', (event) => {
+    if (event.key === NAVIGATION_METRIC_STORAGE_KEY) renderNavigationMetrics();
+  });
+  renderNavigationMetrics();
 }
 
 function diagnoseDashboardCause(reader) {
@@ -1762,6 +1969,8 @@ async function fetchMetrics({ full = false } = {}) {
       );
     }
 
+    updateNavigationMetricsFromPayload(json);
+
     // Flags, user, session
     const flags = json.raw_CA_values?.[14] ?? "";
     updateFlagsDisplay(flags);
@@ -2223,6 +2432,7 @@ window.addEventListener("DOMContentLoaded", () => {
   ensureBoxIds();
   restoreLayoutOrder();
   initDragAndDrop();
+  initNavigationModeUi();
 
   const powerSourceToggle = document.getElementById('power-source-toggle');
   if (powerSourceToggle) powerSourceToggle.addEventListener('click', () => {
