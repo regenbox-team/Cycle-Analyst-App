@@ -78,6 +78,11 @@
       .timeline-segment { position: absolute; inset-block: 0; min-width: 2px; opacity: 0.9; }
       .timeline-segment:first-child { border-radius: 12px 0 0 12px; }
       .timeline-segment:last-of-type { border-radius: 0 12px 12px 0; }
+      .timeline-stop {
+        position: absolute; inset-block: 0; min-width: 3px; z-index: 2;
+        background: repeating-linear-gradient(135deg, rgba(10, 10, 10, 0.92) 0 4px, rgba(10, 10, 10, 0.72) 4px 7px);
+        border-inline: 1px solid rgba(255, 255, 255, 0.75); pointer-events: none;
+      }
       .timeline-handle {
         position: absolute; top: -11px; width: 22px; height: 74px; transform: translateX(-50%);
         border: 0; background: transparent; cursor: ew-resize; z-index: 3; padding: 0;
@@ -213,7 +218,7 @@
         <div class="editor-head">
           <div>
             <h2 id="user-editor-title">Correction des utilisateurs</h2>
-            <p class="editor-help">Faites glisser les curseurs au moment réel du changement. Les couleurs du tracé se mettent à jour immédiatement.</p>
+            <p class="editor-help">Faites glisser les curseurs au moment réel du changement. Les couleurs du tracé se mettent à jour immédiatement. Les bandes noires indiquent les arrêts de plus de 30 secondes.</p>
           </div>
           <button class="btn" id="close-user-editor" type="button">Fermer</button>
         </div>
@@ -262,6 +267,7 @@
       const mapEl = document.getElementById("session-map");
       const fallbackPoints = {{ points | tojson }};
       const editorSamples = {{ editor_samples | tojson }};
+      const stopRanges = {{ stop_ranges | tojson }};
       const userOptions = {{ user_options | tojson }};
       const saveTimelineUrl = {{ user_timeline_url | tojson }};
       const sessionIdentity = {{ {"device_id": device_id, "session_id": session_id, "mode": mode} | tojson }};
@@ -467,6 +473,15 @@
             control.appendChild(remove);
           }
           controls.appendChild(control);
+        });
+        stopRanges.forEach((stop) => {
+          const marker = document.createElement("div");
+          marker.className = "timeline-stop";
+          marker.style.left = `${stop.start_index / maxIndex * 100}%`;
+          marker.style.right = `${Math.max(0, (editorSamples.length - stop.end_index - 1) / maxIndex * 100)}%`;
+          marker.title = `Arrêt · ${Math.round(stop.duration_sec)} s`;
+          marker.setAttribute("aria-label", `Arrêt de ${Math.round(stop.duration_sec)} secondes`);
+          timeline.appendChild(marker);
         });
         updateColoredTrack();
       };

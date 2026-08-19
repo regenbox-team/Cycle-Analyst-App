@@ -90,6 +90,7 @@ SESSION_TRACE_CACHE_VERSION = 3
 SESSION_TRACE_MAX_POINTS = 2500
 SESSION_TRACE_BREAK_MIN_GAP_SEC = 120
 SESSION_TRACE_BREAK_MIN_DISTANCE_KM = 1.0
+SESSION_STOP_MAX_SAMPLE_GAP_SEC = 5.0
 SUNTRIP_ANALYSIS_TRACE_MAX_POINTS = 1400
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_POINTS = 12000
 SUNTRIP_ANALYSIS_TRACE_DETAILED_MAX_KM = 15.0
@@ -1595,6 +1596,59 @@ def _refresh_session_summary(
     )
     _store_session_trace(conn, device_id, session_id, mode, samples)
     return {"rows_count": len(samples), "distance_km": distance_km, "user_ids": user_ids}
+
+
+def _session_stop_ranges(
+    samples: list[dict[str, Any]],
+    minimum_duration_sec: float = 30.0,
+) -> list[dict[str, Any]]:
+    """Locate continuous recorded periods where the CA speed is exactly zero."""
+    ordered = chronological_samples(samples)
+    stops: list[dict[str, Any]] = []
+    run_start = None
+    previous_ts = None
+
+    def finish(end_index: int, end_ts: datetime | None) -> None:
+        nonlocal run_start
+        if run_start is None or end_ts is None:
+            run_start = None
+            return
+        start_index, start_ts = run_start
+        duration_sec = (end_ts - start_ts).total_seconds()
+        if duration_sec > minimum_duration_sec:
+            stops.append(
+                {
+                    "start_index": start_index,
+                    "end_index": end_index,
+                    "duration_sec": round(duration_sec, 1),
+                }
+            )
+        run_start = None
+
+    for index, sample in enumerate(ordered):
+        current_ts = parse_timestamp(sample.get("timestamp"))
+        values = parse_raw_values(sample.get("raw"))
+        speed = _safe_float(values[3]) if values else None
+        if speed is None:
+            speed = _safe_float(sample.get("gps_speed_kph"))
+        recording_continuous = (
+            previous_ts is None
+            or current_ts is None
+            or 0 <= (current_ts - previous_ts).total_seconds() <= SESSION_STOP_MAX_SAMPLE_GAP_SEC
+        )
+        stopped = speed is not None and speed == 0
+
+        if not recording_continuous:
+            finish(index - 1, previous_ts)
+        if stopped and current_ts is not None:
+            if run_start is None:
+                run_start = (index, current_ts)
+        else:
+            finish(index - 1, previous_ts)
+        previous_ts = current_ts or previous_ts
+
+    finish(len(ordered) - 1, previous_ts)
+    return stops
 
 
 def _upsert_upload_device(conn: sqlite3.Connection, data: dict[str, Any], solar_enabled: int, remote_addr: str | None) -> None:
@@ -5375,6 +5429,7 @@ def create_app() -> Flask:
 
         ordered_editor_samples = chronological_samples(samples)
         plausible_gps_ids = {sample["id"] for sample in filter_plausible_gps_samples(samples)}
+        stop_ranges = _session_stop_ranges(ordered_editor_samples)
         editor_samples = []
         for sample in ordered_editor_samples:
             identity_key = (
@@ -5421,6 +5476,7 @@ def create_app() -> Flask:
             sections=build_summary_sections(metrics_by_user, all_users),
             users=all_users,
             editor_samples=editor_samples,
+            stop_ranges=stop_ranges,
             user_options=user_options,
             user_timeline_url=url_for("update_session_user_timeline"),
         )

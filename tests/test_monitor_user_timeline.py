@@ -103,6 +103,39 @@ class MonitorUserTimelineTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_stop_ranges_only_include_continuous_zero_speed_over_thirty_seconds(self):
+        def sample(second, speed, *, timestamp=None):
+            values = [0.0] * 14
+            values[3] = speed
+            return {
+                "timestamp": timestamp or f"2026-08-12 10:00:{second:02d}",
+                "raw": " ".join(str(value) for value in values),
+            }
+
+        samples = [sample(second, 0) for second in range(32)]
+        samples.append(sample(32, 12))
+        samples.extend(sample(33 + second, 0) for second in range(12))
+
+        stops = self.monitor_app._session_stop_ranges(samples)
+
+        self.assertEqual(
+            stops,
+            [{"start_index": 0, "end_index": 31, "duration_sec": 31.0}],
+        )
+
+    def test_stop_ranges_do_not_bridge_a_logging_gap(self):
+        samples = []
+        for timestamp in (
+            "2026-08-12 10:00:00",
+            "2026-08-12 10:00:01",
+            "2026-08-12 10:01:00",
+            "2026-08-12 10:01:01",
+        ):
+            values = [0.0] * 14
+            samples.append({"timestamp": timestamp, "raw": " ".join(str(value) for value in values)})
+
+        self.assertEqual(self.monitor_app._session_stop_ranges(samples), [])
+
 
 if __name__ == "__main__":
     unittest.main()
